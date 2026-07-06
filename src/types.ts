@@ -118,6 +118,18 @@ export interface ScanEvidence {
   detectedLibraries: Array<{ name: string; version: string; vulnerable: boolean }>;
   crawl?: { pagesVisited: number; endpointsDiscovered: number; paramsTested: number; sampleEndpoints: string[] };
   activeProbesRun: boolean; // false when gated off for an unverified domain
+  screenshot?: TargetScreenshot; // headless-browser capture of the target, when enabled
+}
+
+// A visual capture of the scanned target's landing page, taken by a headless
+// browser (see server/render.ts captureScreenshot). Stored inline as a data:
+// URI so the report is self-contained. Only present when target screenshotting
+// is enabled (ENABLE_TARGET_SCREENSHOT) and the capture succeeded.
+export interface TargetScreenshot {
+  dataUri: string;   // e.g. "data:image/jpeg;base64,…"
+  capturedAt: string;
+  width: number;
+  height: number;
 }
 
 export interface ExecutiveRiskArea {

@@ -4,7 +4,8 @@ import path from 'path';
 import cookieParser from 'cookie-parser';
 import { createServer as createViteServer } from 'vite';
 import { db, recalculateScore } from './server/db.js';
-import { runDiagnostics, compileStaticFindings, compileScanEvidence, assertScanTargetSafe } from './server/scanner.js';
+import { runDiagnostics, compileStaticFindings, compileScanEvidence, assertScanTargetSafe, parseAuthHeader } from './server/scanner.js';
+import { captureScreenshot } from './server/render.js';
 import { generateAiReport } from './server/deepseek.js';
 import { narrateScanning, narrateAnalysis } from './server/narrate.js';
 import { sendEmail, buildMagicLinkEmail, isEmailConfigured } from './server/email.js';
@@ -549,6 +550,17 @@ async function startServer() {
       const { score: displayScore, severity: displaySeverity } = recalculateScore(outputReport.findings);
       narration = narration.concat(await narrateAnalysis({ score: displayScore, severity: displaySeverity, findings: outputReport.findings }, scan.url));
 
+      // Best-effort visual capture of the target's landing page (opt-in via
+      // ENABLE_TARGET_SCREENSHOT). Returns null — never throws — when disabled,
+      // unavailable, or blocked, so it can never fail the scan. Reuses the same
+      // auth headers the diagnostics used.
+      const evidence = compileScanEvidence(diagnostics);
+      const shot = await captureScreenshot(scan.url, {
+        'User-Agent': 'Seclayer-Security-Scanner/2.0 (+https://seclayer.io)',
+        ...parseAuthHeader(scan.authHeader),
+      });
+      if (shot) evidence.screenshot = shot;
+
       const completed = db.updateScan(scanId, {
         status: 'complete',
         score: outputReport.score,
@@ -558,7 +570,7 @@ async function startServer() {
         aiReasoning: outputReport.aiReasoning,
         narrationLog: narration,
         executiveBreakdown: outputReport.executiveBreakdown,
-        evidence: compileScanEvidence(diagnostics),
+        evidence,
         completedAt: new Date().toISOString()
       });
       console.log(`[Job Worker] Completed scan ${scanId}`);

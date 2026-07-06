@@ -637,6 +637,33 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
                   </div>
                 )}
 
+                {/* Visual recon — a headless-browser screenshot of the target's
+                    landing page, captured during the scan (opt-in feature). */}
+                {scan.evidence?.screenshot && (
+                  <div className="bg-[#0c0c0e] border border-[#27272a] rounded p-5 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h5 className="text-[10px] font-mono text-white uppercase tracking-wider font-bold flex items-center space-x-1.5">
+                        <Eye className="w-3.5 h-3.5 text-[#22c55e]" />
+                        <span>Visual Recon — Target Landing Page</span>
+                      </h5>
+                      <span className="text-[9px] font-mono text-[#52525b]">
+                        Captured {new Date(scan.evidence.screenshot.capturedAt).toLocaleString()} · {scan.evidence.screenshot.width}×{scan.evidence.screenshot.height}
+                      </span>
+                    </div>
+                    <a href={scan.evidence.screenshot.dataUri} target="_blank" rel="noreferrer" className="block border border-[#27272a] rounded overflow-hidden hover:border-[#3f3f46] transition-colors">
+                      <img
+                        src={scan.evidence.screenshot.dataUri}
+                        alt={`Screenshot of ${scan.url}`}
+                        className="w-full h-auto block"
+                        loading="lazy"
+                      />
+                    </a>
+                    <p className="text-[10px] font-mono text-[#52525b] leading-relaxed">
+                      Rendered by a headless browser as an anonymous visitor would see it. Click to open full size.
+                    </p>
+                  </div>
+                )}
+
                 {/* Severity-proportionate summary banner. Language and colour are
                     DERIVED from the actual highest-severity finding (bannerForPosture)
                     — never a hard-coded "arbitrary code execution / fix immediately"
