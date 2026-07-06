@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { assertScanTargetSafe, isBlockedIp, looksLikeHtml, compileStaticFindings } from './scanner.js';
+import { assertScanTargetSafe, isBlockedIp, looksLikeHtml, compileStaticFindings, compileScanEvidence } from './scanner.js';
+import { SEVERITY_WEIGHTS } from './scoring.js';
 
 function baseDiag(overrides: any = {}): any {
   return {
@@ -80,12 +81,55 @@ test('an unverified target surfaces an info finding noting active probes were sk
   assert.equal(skipped.category, 'DAST');
   assert.equal(r.findings.filter((f) => f.category === 'RED_TEAM').length, 0);
   assert.equal(r.findings.filter((f) => f.category === 'API_SEC').length, 0);
-  // Informational only — must not affect the posture score.
-  assert.equal(r.score, 100);
+  // Informational: it only nudges the score by the small info weight (2) rather
+  // than a perfect 100, so the score never contradicts a non-empty findings list
+  // — but it stays comfortably in the top grade band.
+  assert.equal(r.score, 100 - SEVERITY_WEIGHTS.info);
+  assert.ok(r.score >= 90);
 });
 
 test('a verified target (default) does not surface the skipped-probes notice', () => {
   const diag = baseDiag(); // activeProbesSkipped defaults to falsy/undefined
   const r = compileStaticFindings(diag);
   assert.ok(!r.findings.some((f) => /Active Exploit Probing Skipped/i.test(f.title)));
+});
+
+test('compileScanEvidence distils the real diagnostics into display evidence', () => {
+  const diag = baseDiag({
+    responseStatus: 200,
+    missingHeaders: ['content-security-policy'],
+    headers: { server: 'gws' },
+    probedPaths: [
+      { path: '/.env', status: 404, exposed: false },
+      { path: '/config.json', status: 200, exposed: true },
+    ],
+    scaLibraries: [{ name: 'jQuery', version: '1.12.4', status: 'vuln', advisories: [], severity: 'medium', description: '', fix: '' }],
+    easmPerimeter: {
+      ip: '93.184.216.34', nameserver: 'ns1.example.com', protocol: 'HTTPS',
+      subdomains: [
+        { domain: 'api.x.test', status: 'live', port: '443' },
+        { domain: 'dev.x.test', status: 'inactive', port: '0' },
+      ],
+    },
+    crawl: { pagesVisited: 3, endpointsDiscovered: 5, paramsTested: 4, sampleEndpoints: ['/a?id'] },
+    activeProbesSkipped: false,
+  });
+  const ev = compileScanEvidence(diag);
+  assert.equal(ev.resolvedIp, '93.184.216.34');
+  assert.equal(ev.nameserver, 'ns1.example.com');
+  assert.equal(ev.serverHeader, 'gws');
+  assert.deepEqual(ev.liveSubdomains, ['api.x.test']); // only the live one
+  assert.equal(ev.subdomainsChecked, 2);
+  assert.ok(ev.presentSecurityHeaders.includes('strict-transport-security'));
+  assert.ok(ev.missingSecurityHeaders.includes('content-security-policy'));
+  assert.equal(ev.probedPaths.length, 2);
+  assert.equal(ev.detectedLibraries[0].name, 'jQuery');
+  assert.equal(ev.detectedLibraries[0].vulnerable, true);
+  assert.equal(ev.crawl!.paramsTested, 4);
+  assert.equal(ev.activeProbesRun, true);
+});
+
+test('compileScanEvidence marks active probes as not run when they were skipped', () => {
+  const ev = compileScanEvidence(baseDiag({ activeProbesSkipped: true }));
+  assert.equal(ev.activeProbesRun, false);
 });

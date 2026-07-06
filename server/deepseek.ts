@@ -164,11 +164,23 @@ Ensure the returned output is strictly valid JSON compliant with the required st
         severity = 'medium';
       }
       const fix = f.fix || '';
+      // Carry a confidence signal so the report can split findings into
+      // "Confirmed" vs "Needs Verification" (see scoring.isConfirmed). Prefer the
+      // model's own value when valid; otherwise infer: a possibly-absent
+      // defense-in-depth header is heuristic ("medium" — needs verification),
+      // while everything else here is backed by direct diagnostic evidence and
+      // is treated as confirmed ("high").
+      const isHeaderGap = /content-security-policy|\bcsp\b|strict-transport|\bhsts\b|x-frame-options|clickjack|x-content-type|referrer-policy/i.test(title);
+      const confidence: 'low' | 'medium' | 'high' =
+        (f.confidence === 'low' || f.confidence === 'medium' || f.confidence === 'high')
+          ? f.confidence
+          : isHeaderGap ? 'medium' : 'high';
       return {
         id: `f_gen_${idx}_${crypto.randomUUID().slice(0,4)}`,
         title,
         description: f.description || '',
         severity,
+        confidence,
         fix,
         category,
         owasp: mapOwasp(category, title),

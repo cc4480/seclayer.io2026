@@ -6,6 +6,14 @@ import {
   Zap, Package, Grid, AlertCircle, Sparkles, Server, Copy
 } from 'lucide-react';
 import { Scan, Finding } from '../types.js';
+// Single source of truth for every risk figure/label shown here — the same
+// module the server scanner and read-model score from. No risk value or label
+// in this component is computed locally; that independent labelling is what let
+// the score, pillar counts and banner contradict each other.
+import {
+  deriveSecurityPosture, riskLabelForSeverity, highestSeverity,
+  bannerForPosture, isConfirmed, type RiskLabel,
+} from '../../server/scoring.js';
 import { jsPDF } from "jspdf";
 import autoTable from 'jspdf-autotable';
 
@@ -33,6 +41,11 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
   const [expandedApiRows, setExpandedApiRows] = useState<Record<string, boolean>>({});
 
   const findings = scan.findings || [];
+  // Derive the whole posture (score, grade, severity, posture rating, counts)
+  // once, from the same shared module the server uses, so every section below
+  // renders from one object instead of recomputing risk independently.
+  const posture = deriveSecurityPosture(findings);
+  const banner = bannerForPosture(findings);
 
   const handleSaveSuppression = async (finding: Finding) => {
     setIsSuppressing(true);
@@ -136,10 +149,11 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
     doc.setFontSize(11);
     doc.setFont("helvetica", "normal");
     doc.text(`Target Assessed: ${scan.url}`, 15, 65);
-    doc.text(`Security Posture Score: ${scan.score}/100`, 15, 72);
-    const riskSev = scan.severity ? scan.severity.toUpperCase() : 'UNKNOWN';
-    doc.text(`Risk Severity: ${scan.score < 60 ? 'HIGH RISK' : scan.score < 85 ? 'MODERATE' : 'LOW RISK'} (${riskSev})`, 15, 79);
-    doc.text(`Total Vulnerabilities: ${findings.length}`, 15, 86);
+    // Same shared posture as the on-screen report, so the PDF can never disagree
+    // with the UI it was exported from.
+    doc.text(`Security Posture Score: ${posture.score}/100 (Grade ${posture.grade})`, 15, 72);
+    doc.text(`Risk Rating: ${posture.postureRating} (${posture.severity.toUpperCase()})`, 15, 79);
+    doc.text(`Total Findings: ${posture.activeCount} (${posture.confirmedCount} confirmed, ${posture.needsVerificationCount} need verification)`, 15, 86);
     
     // AI Summary
     let currentY = 96;
@@ -261,36 +275,30 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
     doc.save(`seclayer-appsec-audit-${scan.url.replace(/https?:\/\//i, '').replace(/[^a-zA-Z0-9]/g, '_')}.pdf`);
   };
 
-  // Score metrics
-  const score = scan.score || 100;
-  const isHighRisk = score < 60;
-  const isMediumRisk = score >= 60 && score < 85;
-  const isLowRisk = score >= 85;
-
-  const scoreColorClass = 
-    isLowRisk ? 'text-[#22c55e] border-[#22c55e]/25 bg-[#22c55e]/5' :
-    isMediumRisk ? 'text-amber-400 border-amber-500/20 bg-amber-500/5' :
-    'text-red-400 border-red-500/20 bg-red-500/5';
+  // Colour keyed off SEVERITY (not ad-hoc score thresholds) so a colour can
+  // never contradict the posture rating. Shared by the executive score card and
+  // the pillar cards.
+  const severityColorClass = (label: RiskLabel) => {
+    if (label === 'CRITICAL' || label === 'HIGH RISK') return 'text-red-400 border-red-500/20 bg-red-500/5';
+    if (label === 'MODERATE') return 'text-amber-400 border-amber-500/20 bg-amber-500/5';
+    if (label === 'LOW RISK') return 'text-blue-400 border-blue-500/20 bg-blue-500/5';
+    if (label === 'INFO') return 'text-zinc-300 border-zinc-500/20 bg-zinc-500/5';
+    return 'text-[#22c55e] border-[#22c55e]/25 bg-[#22c55e]/5'; // SECURE
+  };
+  const scoreColorClass = severityColorClass(posture.postureRating);
 
   const getCategoryCount = (cat: SecCategory) => {
-    return findings.filter(f => f.category === cat).length;
+    return findings.filter(f => f.category === cat && !f.isFalsePositive).length;
   };
 
-  const getCategorySeverity = (cat: SecCategory) => {
+  // Per-pillar label, derived from the SAME shared severity model as everything
+  // else — an info-only category reads "INFO", never "LOW RISK".
+  const getCategorySeverity = (cat: SecCategory): RiskLabel => {
     const catFindings = findings.filter(f => f.category === cat);
-    if (catFindings.length === 0) return 'SECURE';
-    if (catFindings.some(f => f.severity === 'critical' || f.severity === 'high')) return 'HIGH RISK';
-    if (catFindings.some(f => f.severity === 'medium')) return 'MODERATE';
-    return 'LOW RISK';
+    return riskLabelForSeverity(highestSeverity(catFindings));
   };
 
-  const getCategoryColor = (cat: SecCategory) => {
-    const status = getCategorySeverity(cat);
-    if (status === 'SECURE') return 'text-[#22c55e] border-[#22c55e]/20 bg-[#22c55e]/5';
-    if (status === 'HIGH RISK') return 'text-red-400 border-red-500/20 bg-red-500/5';
-    if (status === 'MODERATE') return 'text-amber-400 border-amber-500/20 bg-amber-500/5';
-    return 'text-blue-400 border-blue-500/20 bg-blue-500/5';
-  };
+  const getCategoryColor = (cat: SecCategory) => severityColorClass(getCategorySeverity(cat));
 
   const categoryTabLabels = [
     { key: 'SAST' as const, label: 'SAST', icon: Code, term: 'Static Analysis' },
@@ -375,11 +383,12 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
               <div className={`p-4 rounded border flex items-center space-x-5 h-full shrink-0 ${scoreColorClass}`}>
                 <div className="text-right">
                   <span className="text-[9px] font-mono text-[#52525b] uppercase block tracking-wider select-none">AppSec Score</span>
-                  <span className="text-3xl font-mono font-black leading-none">{scan.score}<span className="text-xs text-[#52525b] font-normal">/100</span></span>
+                  <span className="text-3xl font-mono font-black leading-none">{posture.score}<span className="text-xs text-[#52525b] font-normal">/100</span></span>
+                  <span className="text-[9px] font-mono uppercase block tracking-wider mt-1 opacity-80">Grade {posture.grade}</span>
                 </div>
                 <div className="border-l border-[#27272a] pl-4">
                   <span className="text-[9px] font-mono text-[#52525b] uppercase block tracking-wider select-none">Posture Rating</span>
-                  <span className="text-xs font-mono font-bold uppercase tracking-wider block mt-1">{scan.severity}</span>
+                  <span className="text-xs font-mono font-bold uppercase tracking-wider block mt-1">{posture.postureRating}</span>
                 </div>
               </div>
             </div>
@@ -401,7 +410,18 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
 
             {categoryTabLabels.map(cat => {
               const count = getCategoryCount(cat.key);
-              const hasAlerts = count > 0;
+              const label = getCategorySeverity(cat.key);
+              // Colour the count by real severity, not merely "count > 0", so an
+              // info-only pillar doesn't glow red like a critical one.
+              const alertBadge = label === 'CRITICAL' || label === 'HIGH RISK'
+                ? 'bg-red-500/10 text-red-400 border border-red-500/25'
+                : label === 'MODERATE'
+                ? 'bg-amber-500/10 text-amber-400 border border-amber-500/25'
+                : label === 'LOW RISK'
+                ? 'bg-blue-500/10 text-blue-400 border border-blue-500/25'
+                : label === 'INFO'
+                ? 'bg-zinc-500/10 text-zinc-300 border border-zinc-500/25'
+                : 'bg-[#22c55e]/10 text-[#22c55e] border border-[#22c55e]/25';
               return (
                 <button
                   key={cat.key}
@@ -414,11 +434,7 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
                 >
                   <cat.icon className={`w-4 h-4 ${activeTab === cat.key ? 'text-[#22c55e]' : 'text-[#52525b]'}`} />
                   <span className="font-bold">{cat.label}</span>
-                  <span className={`text-[10px] px-1.5 py-0.2 ml-1 rounded font-mono ${
-                    hasAlerts 
-                      ? 'bg-red-500/10 text-red-400 border border-red-500/25' 
-                      : 'bg-[#22c55e]/10 text-[#22c55e] border border-[#22c55e]/25'
-                  }`}>
+                  <span className={`text-[10px] px-1.5 py-0.2 ml-1 rounded font-mono ${alertBadge}`}>
                     {count}
                   </span>
                 </button>
@@ -546,61 +562,106 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
                   </div>
                 </div>
 
-                {/* Additional Technical Metadata parameters bento box */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="bg-[#0c0c0e] border border-[#27272a] rounded p-5 space-y-3">
-                    <h5 className="text-[10px] font-mono text-white uppercase tracking-wider font-bold">Network & Active Attack Surface Perimeter (EASM)</h5>
-                    <div className="font-mono text-xs space-y-2 text-zinc-400">
-                      <div className="flex justify-between border-b border-[#27272a]/40 pb-1.5">
-                        <span className="text-[#52525b]">Resolved Target IP:</span>
-                        <span className="text-zinc-300">104.244.42.1 (Anycast Route)</span>
+                {/* Real diagnostic evidence behind the findings — resolved from
+                    the actual scan, not placeholder values. */}
+                {scan.evidence && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="bg-[#0c0c0e] border border-[#27272a] rounded p-5 space-y-3">
+                      <h5 className="text-[10px] font-mono text-white uppercase tracking-wider font-bold">Network & Attack Surface (EASM)</h5>
+                      <div className="font-mono text-xs space-y-2 text-zinc-400">
+                        <div className="flex justify-between gap-3 border-b border-[#27272a]/40 pb-1.5">
+                          <span className="text-[#52525b] shrink-0">Resolved IP:</span>
+                          <span className="text-zinc-300 text-right break-all">{scan.evidence.resolvedIp || 'not resolved'}</span>
+                        </div>
+                        <div className="flex justify-between gap-3 border-b border-[#27272a]/40 pb-1.5">
+                          <span className="text-[#52525b] shrink-0">Nameserver:</span>
+                          <span className="text-zinc-300 text-right break-all">{scan.evidence.nameserver || 'not disclosed'}</span>
+                        </div>
+                        <div className="flex justify-between gap-3 border-b border-[#27272a]/40 pb-1.5">
+                          <span className="text-[#52525b] shrink-0">Protocol / Status:</span>
+                          <span className="text-zinc-300 text-right">{scan.evidence.protocol} · HTTP {scan.evidence.responseStatus}</span>
+                        </div>
+                        <div className="flex justify-between gap-3 border-b border-[#27272a]/40 pb-1.5">
+                          <span className="text-[#52525b] shrink-0">Server Header:</span>
+                          <span className="text-zinc-300 text-right break-all">{scan.evidence.serverHeader || 'suppressed (good)'}</span>
+                        </div>
+                        <div className="flex justify-between gap-3">
+                          <span className="text-[#52525b] shrink-0">Live Subdomains:</span>
+                          <span className="text-right">
+                            {scan.evidence.liveSubdomains.length > 0
+                              ? <span className="text-amber-400 break-all">{scan.evidence.liveSubdomains.slice(0, 4).join(', ')}{scan.evidence.liveSubdomains.length > 4 ? ` +${scan.evidence.liveSubdomains.length - 4} more` : ''}</span>
+                              : <span className="text-zinc-500">none of {scan.evidence.subdomainsChecked} checked</span>}
+                          </span>
+                        </div>
                       </div>
-                      <div className="flex justify-between border-b border-[#27272a]/40 pb-1.5">
-                        <span className="text-[#52525b]">Nameservers Detected:</span>
-                        <span className="text-zinc-300">ns1.seclayer-dns.net</span>
-                      </div>
-                      <div className="flex justify-between border-b border-[#27272a]/40 pb-1.5">
-                        <span className="text-[#52525b]">TLS Connection standard:</span>
-                        <span className="text-zinc-300">{scan.score && scan.score >= 80 ? 'TLS 1.3 Secure ECC-Curve' : 'HTTP plaintext link standard'}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-[#52525b]">Scanned Subdomains:</span>
-                        <span className="text-amber-400">api.${scan.url.replace(/https?:\/\//i, '')}</span>
+                    </div>
+
+                    <div className="bg-[#0c0c0e] border border-[#27272a] rounded p-5 space-y-3">
+                      <h5 className="text-[10px] font-mono text-white uppercase tracking-wider font-bold">Dynamic Coverage (DAST)</h5>
+                      <div className="font-mono text-xs space-y-2 text-zinc-400">
+                        <div className="flex justify-between gap-3 border-b border-[#27272a]/40 pb-1.5">
+                          <span className="text-[#52525b] shrink-0">Sensitive Paths:</span>
+                          <span className="text-right">
+                            {(() => {
+                              const exposed = scan.evidence!.probedPaths.filter(p => p.exposed);
+                              return exposed.length > 0
+                                ? <span className="text-red-400 break-all">{exposed.map(p => p.path).join(', ')} exposed</span>
+                                : <span className="text-[#22c55e]">{scan.evidence!.probedPaths.length} probed, all locked down</span>;
+                            })()}
+                          </span>
+                        </div>
+                        <div className="flex justify-between gap-3 border-b border-[#27272a]/40 pb-1.5">
+                          <span className="text-[#52525b] shrink-0">Crawl Coverage:</span>
+                          <span className="text-zinc-300 text-right">
+                            {scan.evidence.crawl
+                              ? `${scan.evidence.crawl.pagesVisited} page(s), ${scan.evidence.crawl.endpointsDiscovered} endpoint(s)`
+                              : 'root only'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between gap-3 border-b border-[#27272a]/40 pb-1.5">
+                          <span className="text-[#52525b] shrink-0">Params Fuzzed:</span>
+                          <span className="text-zinc-300 text-right">{scan.evidence.activeProbesRun ? (scan.evidence.crawl?.paramsTested ?? 0) : 'skipped (unverified)'}</span>
+                        </div>
+                        <div className="flex justify-between gap-3">
+                          <span className="text-[#52525b] shrink-0">Detected Libraries:</span>
+                          <span className="text-right break-all">
+                            {scan.evidence.detectedLibraries.length > 0
+                              ? scan.evidence.detectedLibraries.map((l, i) => (
+                                  <span key={i} className={l.vulnerable ? 'text-red-400' : 'text-zinc-300'}>{l.name} {l.version}{i < scan.evidence!.detectedLibraries.length - 1 ? ', ' : ''}</span>
+                                ))
+                              : <span className="text-zinc-500">none flagged</span>}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   </div>
+                )}
 
-                  <div className="bg-[#0c0c0e] border border-[#27272a] rounded p-5 space-y-3">
-                    <h5 className="text-[10px] font-mono text-white uppercase tracking-wider font-bold">Dynamic Test Parameters Checked (DAST)</h5>
-                    <div className="font-mono text-xs space-y-2 text-zinc-400">
-                      <div className="flex justify-between border-b border-[#27272a]/40 pb-1.5">
-                        <span className="text-[#52525b]">Sensitive Probed Paths:</span>
-                        <span className="text-zinc-300">/.env, /.git/config, /admin</span>
-                      </div>
-                      <div className="flex justify-between border-b border-[#27272a]/40 pb-1.5">
-                        <span className="text-[#52525b]">Unsecured Form Post actions:</span>
-                        <span className="text-zinc-300">No token form methods scrutinized</span>
-                      </div>
-                      <div className="flex justify-between border-b border-[#27272a]/40 pb-1.5">
-                        <span className="text-[#52525b]">Static Javascript payloads scanned:</span>
-                        <span className="text-zinc-300">Inline HTML blocks, script assets</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-[#52525b]">Technology Composition:</span>
-                        <span className="text-zinc-300">Bootstrap, jQuery version reviews</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Total vulnerabilities warning banner */}
-                {findings.length > 0 && (
-                  <div className="bg-red-950/20 border border-red-500/20 rounded p-4 flex items-center space-x-3">
-                    <AlertCircle className="w-5 h-5 text-red-400 shrink-0" />
+                {/* Severity-proportionate summary banner. Language and colour are
+                    DERIVED from the actual highest-severity finding (bannerForPosture)
+                    — never a hard-coded "arbitrary code execution / fix immediately"
+                    string, and no red alarm when the worst finding is only INFO/LOW. */}
+                {banner && (
+                  <div className={`rounded p-4 flex items-center space-x-3 border ${
+                    banner.level === 'critical' ? 'bg-red-950/20 border-red-500/20' :
+                    banner.level === 'warning' ? 'bg-amber-950/20 border-amber-500/20' :
+                    'bg-[#0c0c0e] border-[#27272a]'
+                  }`}>
+                    {banner.level === 'critical'
+                      ? <AlertCircle className="w-5 h-5 text-red-400 shrink-0" />
+                      : banner.level === 'warning'
+                      ? <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+                      : <AlertCircle className="w-5 h-5 text-[#52525b] shrink-0" />}
                     <div>
-                      <p className="text-xs text-white font-mono font-bold uppercase tracking-wide">Dynamic Perimeter Warning Summary</p>
-                      <p className="text-[11px] font-mono text-red-300/80 mt-0.5 leading-relaxed">
-                        Assessors detected {findings.length} actionable vulnerabilities. Attacks targeting these components can execute arbitrary code blocks or capture client login frameworks. Fix configurations immediately.
+                      <p className={`text-xs font-mono font-bold uppercase tracking-wide ${
+                        banner.level === 'notice' ? 'text-[#a1a1aa]' : 'text-white'
+                      }`}>{banner.title}</p>
+                      <p className={`text-[11px] font-mono mt-0.5 leading-relaxed ${
+                        banner.level === 'critical' ? 'text-red-300/80' :
+                        banner.level === 'warning' ? 'text-amber-200/80' :
+                        'text-[#71717a]'
+                      }`}>
+                        {banner.message}
                       </p>
                     </div>
                   </div>
@@ -650,7 +711,21 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {findings.filter(f => f.category === activeTab).map(finding => {
+                    {(() => {
+                      // Confirmed vs. Needs-Verification split (Bug 3): probe-
+                      // confirmed findings first, then heuristic ones, then
+                      // suppressed — each group introduced by a header so the
+                      // confidence level is legible at a glance.
+                      const moduleFindings = findings.filter(f => f.category === activeTab);
+                      const groupOf = (f: Finding): 'confirmed' | 'needs' | 'suppressed' =>
+                        f.isFalsePositive ? 'suppressed' : isConfirmed(f) ? 'confirmed' : 'needs';
+                      const rank = { confirmed: 0, needs: 1, suppressed: 2 };
+                      const ordered = [...moduleFindings].sort((a, b) => rank[groupOf(a)] - rank[groupOf(b)]);
+                      let lastGroup = '';
+                      return ordered.map(finding => {
+                      const group = groupOf(finding);
+                      const showGroupHeader = group !== lastGroup;
+                      lastGroup = group;
                       let severityColor = 'bg-black text-[#52525b] border border-[#27272a]';
                       if (finding.isFalsePositive) severityColor = 'bg-zinc-800 text-zinc-400 border border-zinc-700/60 font-medium';
                       else if (finding.severity === 'critical') severityColor = 'bg-red-500/10 border border-red-500/25 text-red-400 font-bold';
@@ -659,11 +734,29 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
                       else if (finding.severity === 'low') severityColor = 'bg-[#22c55e]/10 text-[#22c55e] border border-[#22c55e]/25';
 
                       return (
-                        <div 
-                          key={finding.id} 
+                        <React.Fragment key={finding.id}>
+                        {showGroupHeader && (
+                          <div className="flex flex-wrap items-center gap-2 pt-3 first:pt-0">
+                            {group === 'confirmed' ? (
+                              <><CheckCircle2 className="w-3.5 h-3.5 text-[#22c55e] shrink-0" /><span className="text-[10px] font-mono uppercase tracking-wider font-bold text-[#22c55e]">Confirmed</span></>
+                            ) : group === 'needs' ? (
+                              <><AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" /><span className="text-[10px] font-mono uppercase tracking-wider font-bold text-amber-400">Needs Verification</span></>
+                            ) : (
+                              <><Eye className="w-3.5 h-3.5 text-zinc-500 shrink-0" /><span className="text-[10px] font-mono uppercase tracking-wider font-bold text-zinc-500">Suppressed (False Positive)</span></>
+                            )}
+                            <span className="text-[9px] font-mono text-[#52525b]">
+                              {group === 'confirmed'
+                                ? 'Engine-verified — high confidence'
+                                : group === 'needs'
+                                ? 'Heuristic / pattern match — verify before acting'
+                                : 'Excluded from the posture score'}
+                            </span>
+                          </div>
+                        )}
+                        <div
                           className={`border rounded p-5 transition-colors shadow ${
-                            finding.isFalsePositive 
-                              ? 'bg-[#0f0f11]/60 border-zinc-800 border-dashed opacity-70 hover:border-zinc-750' 
+                            finding.isFalsePositive
+                              ? 'bg-[#0f0f11]/60 border-zinc-800 border-dashed opacity-70 hover:border-zinc-750'
                               : 'bg-black border-[#27272a]/90 hover:border-[#3f3f46]'
                           }`}
                         >
@@ -891,8 +984,10 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
                           </div>
 
                         </div>
+                        </React.Fragment>
                       );
-                    })}
+                    });
+                    })()}
                   </div>
                 )}
 
@@ -918,47 +1013,60 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
           {showRaw && (
             <div className="mt-5 space-y-4 pt-4 border-t border-[#27272a] animate-fade-in">
               <p className="text-[#52525b] text-[11px] leading-relaxed font-mono">
-                Tracelog components capture direct responses matching initial dynamic server socket scans. Use these coordinates for raw manual exploit confirmations.
+                The exact evidence captured during this scan of {scan.url} — resolved network data, per-path probe results, and observed header state. Everything below is real output from this run.
               </p>
-              
-              <div className="bg-black p-4 rounded font-mono text-[10px] text-zinc-400 space-y-2 border border-[#27272a] max-h-96 overflow-y-auto">
-                <span className="text-[#52525b] text-[9px] uppercase font-bold block mb-1">Raw pen-testing log sequences</span>
-                <p className="text-zinc-200">{'GET / HTTP/1.1'}</p>
-                <p className="text-zinc-200">Host: {scan.url.replace(/https?:\/\//i, '')}</p>
-                <p className="text-[#52525b]">User-Agent: Seclayer-Security-Scanner/2.0</p>
-                <p className="text-[#52525b]">Accept: text/html,application/xhtml+xml,application/xml</p>
-                
-                <p className="text-[#22c55e] font-bold mt-3">{'[EASM EDGE SCAN CHECKS]'}</p>
-                <p className="text-zinc-400">Target host: {scan.url}</p>
-                <p className="text-zinc-400">DNS Resolution IP (Detected/Anycast Route): 104.244.42.1</p>
-                <p className="text-zinc-400">Nameservers resolved properly: DNS Sec verified</p>
-                
-                <p className="text-[#22c55e] font-bold mt-3">{'[DAST DIRECTORY AUDIT CHECKS]'}</p>
-                <p className="text-zinc-200">Path: <span className="text-amber-400">/.env</span> - Status: 404 Not Found (Protected)</p>
-                <p className="text-zinc-200">Path: <span className="text-amber-400">/.git/config</span> - Status: 404 Not Found (Protected)</p>
-                <p className="text-zinc-200">Path: <span className="text-amber-400">/admin</span> - Status: 403 Forbidden (Blocked)</p>
-                
-                <p className="text-[#22c55e] font-bold mt-4">{'[HTTP RESPONSE HEADERS]'}</p>
-                <p className="text-zinc-300">Server: Nginx/1.18.0 (Ubuntu)</p>
-                <p className="text-zinc-350">Date: {new Date(scan.createdAt).toUTCString()}</p>
-                <p className="text-zinc-300">Content-Type: text/html; charset=UTF-8</p>
-                <p className="text-zinc-300">Connection: keep-alive</p>
-                
-                <p className="text-[#22c55e] font-bold mt-4">{'[IAST CONTROLS CHECK]'}</p>
-                <p className="text-zinc-450">Content-Security-Policy header verified: {findings.some(f => f.title.includes('CSP')) ? 'DEPRESSED / ABSENT' : 'ACTIVE'}</p>
-                <p className="text-zinc-450">Strict-Transport-Security verified: {findings.some(f => f.title.includes('Strict-Transport-Security')) ? 'DEPRESSED / ABSENT' : 'ACTIVE'}</p>
-                <p className="text-zinc-450">X-Frame-Options framing locks: {findings.some(f => f.title.includes('Clickjacking')) ? 'DEPRESSED / ABSENT' : 'ACTIVE'}</p>
 
-                <p className="text-red-500 font-bold mt-4">{'[RED TEAM ACTIVE FUZZING PROBES]'}</p>
-                <p className="text-zinc-400">Target host: {scan.url}</p>
-                {findings.filter(f => f.category === 'RED_TEAM').length > 0 ? (
-                  findings.filter(f => f.category === 'RED_TEAM').map((f, i) => (
-                    <p key={i} className="text-zinc-300">{`Phase ${i + 1}: ${f.title} -> ${f.severity.toUpperCase()} ALERT DETECTED`}</p>
-                  ))
-                ) : (
-                  <p className="text-zinc-300">{'No active Red Team exploit signatures successfully executed.'}</p>
-                )}
-              </div>
+              {!scan.evidence ? (
+                <div className="bg-black p-4 rounded font-mono text-[10px] text-zinc-500 border border-[#27272a]">
+                  Raw diagnostic evidence was not captured for this scan (it predates evidence logging). Re-run the scan to populate it.
+                </div>
+              ) : (
+                <div className="bg-black p-4 rounded font-mono text-[10px] text-zinc-400 space-y-2 border border-[#27272a] max-h-96 overflow-y-auto">
+                  <span className="text-[#52525b] text-[9px] uppercase font-bold block mb-1">Captured scan trace</span>
+                  <p className="text-zinc-200">GET / HTTP/1.1</p>
+                  <p className="text-zinc-200">Host: {scan.url.replace(/https?:\/\//i, '').replace(/\/.*$/, '')}</p>
+                  <p className="text-[#52525b]">User-Agent: Seclayer-Security-Scanner/2.0 (seclayer.io)</p>
+                  <p className="text-zinc-300">→ HTTP {scan.evidence.responseStatus} over {scan.evidence.protocol}</p>
+
+                  <p className="text-[#22c55e] font-bold mt-3">[EASM — DNS &amp; PERIMETER]</p>
+                  <p className="text-zinc-400">Resolved IP: {scan.evidence.resolvedIp || '(not resolved)'}</p>
+                  <p className="text-zinc-400">Authoritative nameserver: {scan.evidence.nameserver || '(not disclosed)'}</p>
+                  <p className="text-zinc-400">Subdomains probed: {scan.evidence.subdomainsChecked} · live: {scan.evidence.liveSubdomains.length}</p>
+                  {scan.evidence.liveSubdomains.slice(0, 8).map((d, i) => (
+                    <p key={i} className="text-amber-400">  ↳ {d}</p>
+                  ))}
+
+                  <p className="text-[#22c55e] font-bold mt-3">[DAST — SENSITIVE PATH PROBES]</p>
+                  {scan.evidence.probedPaths.map((p, i) => (
+                    <p key={i} className="text-zinc-200">
+                      Path: <span className={p.exposed ? 'text-red-400' : 'text-amber-400'}>{p.path}</span> — HTTP {p.status} <span className={p.exposed ? 'text-red-400' : 'text-[#22c55e]'}>({p.exposed ? 'EXPOSED' : 'locked down'})</span>
+                    </p>
+                  ))}
+
+                  <p className="text-[#22c55e] font-bold mt-4">[HTTP RESPONSE]</p>
+                  <p className="text-zinc-300">Server: {scan.evidence.serverHeader || '(suppressed)'}</p>
+                  <p className="text-zinc-300">Scanned at: {new Date(scan.evidence.scannedAt).toUTCString()}</p>
+
+                  <p className="text-[#22c55e] font-bold mt-4">[IAST — DEFENSIVE HEADERS]</p>
+                  {['content-security-policy','strict-transport-security','x-frame-options','x-content-type-options','referrer-policy'].map((h) => {
+                    const present = scan.evidence!.presentSecurityHeaders.includes(h);
+                    return (
+                      <p key={h} className="text-zinc-450">{h}: <span className={present ? 'text-[#22c55e]' : 'text-amber-400'}>{present ? 'PRESENT' : 'ABSENT'}</span></p>
+                    );
+                  })}
+
+                  <p className="text-red-500 font-bold mt-4">[RED TEAM — ACTIVE EXPLOIT PROBES]</p>
+                  {!scan.evidence.activeProbesRun ? (
+                    <p className="text-zinc-400">Skipped — domain ownership not verified (passive recon only).</p>
+                  ) : findings.filter(f => f.category === 'RED_TEAM' || f.category === 'API_SEC').length > 0 ? (
+                    findings.filter(f => f.category === 'RED_TEAM' || f.category === 'API_SEC').map((f, i) => (
+                      <p key={i} className="text-red-300">{`✗ ${f.title} — ${f.severity.toUpperCase()} confirmed`}</p>
+                    ))
+                  ) : (
+                    <p className="text-[#22c55e]">Active probes ran — no exploitable injection/SSRF/API signatures confirmed.</p>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>

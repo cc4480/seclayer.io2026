@@ -1,4 +1,4 @@
-import { Finding, Severity } from "../src/types.js";
+import { Finding, Severity, ScanEvidence } from "../src/types.js";
 import { scoreFindings } from "./scoring.js";
 import { crawlSite, targetsFromHtml, dedupeTargets, paramsOf, InjectableTarget } from "./crawler.js";
 import { runTemplates, selectTemplates } from "./templateEngine.js";
@@ -1283,4 +1283,37 @@ export function compileStaticFindings(diag: DiagnosticResult): {
   // recalculation (after suppression) always use identical weights.
   const { score, severity } = scoreFindings(deduped);
   return { score, severity, findings: deduped };
+}
+
+// The five defensive response headers the scanner tracks (see runDiagnostics).
+const TRACKED_SECURITY_HEADERS = [
+  "content-security-policy",
+  "strict-transport-security",
+  "x-frame-options",
+  "x-content-type-options",
+  "referrer-policy",
+];
+
+// Distils the raw diagnostics into the compact, display-oriented evidence the
+// report renders — real resolved IP, nameserver, live subdomains, per-path
+// probe results, detected libraries, crawl coverage, and header state. This is
+// what replaces the report's previously-hardcoded placeholder network data.
+export function compileScanEvidence(diag: DiagnosticResult): ScanEvidence {
+  const present = TRACKED_SECURITY_HEADERS.filter((h) => !diag.missingHeaders.includes(h));
+  return {
+    scannedAt: diag.scannedAt,
+    responseStatus: diag.responseStatus,
+    protocol: diag.easmPerimeter.protocol || (diag.sslSecure ? "HTTPS" : "HTTP"),
+    resolvedIp: diag.easmPerimeter.ip || undefined,
+    nameserver: diag.easmPerimeter.nameserver || undefined,
+    serverHeader: diag.headers["server"] || undefined,
+    presentSecurityHeaders: present,
+    missingSecurityHeaders: [...diag.missingHeaders],
+    liveSubdomains: diag.easmPerimeter.subdomains.filter((s) => s.status === "live").map((s) => s.domain),
+    subdomainsChecked: diag.easmPerimeter.subdomains.length,
+    probedPaths: diag.probedPaths.map((p) => ({ path: p.path, status: p.status, exposed: p.exposed })),
+    detectedLibraries: diag.scaLibraries.map((l) => ({ name: l.name, version: l.version, vulnerable: l.status === "vuln" })),
+    crawl: diag.crawl,
+    activeProbesRun: !diag.activeProbesSkipped,
+  };
 }

@@ -128,6 +128,7 @@ class SqliteDb {
     this.addColumnIfMissing("scans", "aiReasoning", "TEXT");
     this.addColumnIfMissing("scans", "narrationLog", "TEXT");
     this.addColumnIfMissing("scans", "executiveBreakdown", "TEXT");
+    this.addColumnIfMissing("scans", "evidence", "TEXT");
     this.migrateLegacyPlaintextApiKeys();
   }
 
@@ -233,6 +234,7 @@ class SqliteDb {
       aiReasoning: row.aiReasoning ?? undefined,
       narrationLog: row.narrationLog ? JSON.parse(row.narrationLog) : undefined,
       executiveBreakdown: row.executiveBreakdown ? JSON.parse(row.executiveBreakdown) : undefined,
+      evidence: row.evidence ? JSON.parse(row.evidence) : undefined,
       error: row.error ?? undefined,
       createdAt: row.createdAt,
       completedAt: row.completedAt ?? undefined,
@@ -342,7 +344,7 @@ class SqliteDb {
     if (!existing) throw new Error('Scan not found');
     const merged = { ...existing, ...updates };
     this.db.prepare(`
-      UPDATE scans SET status = ?, score = ?, severity = ?, findings = ?, aiSummary = ?, aiReasoning = ?, narrationLog = ?, executiveBreakdown = ?, error = ?, completedAt = ?
+      UPDATE scans SET status = ?, score = ?, severity = ?, findings = ?, aiSummary = ?, aiReasoning = ?, narrationLog = ?, executiveBreakdown = ?, evidence = ?, error = ?, completedAt = ?
       WHERE id = ?
     `).run(
       merged.status,
@@ -353,6 +355,7 @@ class SqliteDb {
       merged.aiReasoning ?? null,
       merged.narrationLog ? JSON.stringify(merged.narrationLog) : null,
       merged.executiveBreakdown ? JSON.stringify(merged.executiveBreakdown) : null,
+      merged.evidence ? JSON.stringify(merged.evidence) : null,
       merged.error ?? null,
       merged.completedAt ?? null,
       id

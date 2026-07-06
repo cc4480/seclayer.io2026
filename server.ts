@@ -4,7 +4,7 @@ import path from 'path';
 import cookieParser from 'cookie-parser';
 import { createServer as createViteServer } from 'vite';
 import { db, recalculateScore } from './server/db.js';
-import { runDiagnostics, compileStaticFindings, assertScanTargetSafe } from './server/scanner.js';
+import { runDiagnostics, compileStaticFindings, compileScanEvidence, assertScanTargetSafe } from './server/scanner.js';
 import { generateAiReport } from './server/deepseek.js';
 import { narrateScanning, narrateAnalysis } from './server/narrate.js';
 import { sendEmail, buildMagicLinkEmail, isEmailConfigured } from './server/email.js';
@@ -252,6 +252,7 @@ async function startServer() {
       aiSummary: scan.aiSummary,
       aiReasoning: scan.aiReasoning,
       executiveBreakdown: scan.executiveBreakdown,
+      evidence: scan.evidence,
       findings: scan.findings,
       createdAt: scan.createdAt,
       completedAt: scan.completedAt
@@ -485,6 +486,7 @@ async function startServer() {
       
       // Save completed scan in background for dashboard history as well
       const completedScan = db.createScan(user.id, url, authHeader);
+      const evidence = compileScanEvidence(diagnostics);
       db.updateScan(completedScan.id, {
         status: 'complete',
         score: aiReport.score,
@@ -493,6 +495,7 @@ async function startServer() {
         aiSummary: aiReport.aiSummary,
         aiReasoning: aiReport.aiReasoning,
         executiveBreakdown: aiReport.executiveBreakdown,
+        evidence,
         completedAt: new Date().toISOString()
       });
 
@@ -504,6 +507,7 @@ async function startServer() {
         analysisSummary: aiReport.aiSummary,
         executiveBreakdown: aiReport.executiveBreakdown,
         securityFindings: aiReport.findings,
+        evidence,
         creditsRemaining: user.credits
       });
     } catch (err: any) {
@@ -554,6 +558,7 @@ async function startServer() {
         aiReasoning: outputReport.aiReasoning,
         narrationLog: narration,
         executiveBreakdown: outputReport.executiveBreakdown,
+        evidence: compileScanEvidence(diagnostics),
         completedAt: new Date().toISOString()
       });
       console.log(`[Job Worker] Completed scan ${scanId}`);

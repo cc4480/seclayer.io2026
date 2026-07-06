@@ -59,6 +59,7 @@ export interface Scan {
   // progresses; read by the ScanProgress UI instead of scripted filler text.
   narrationLog?: string[];
   executiveBreakdown?: ExecutiveBreakdown;
+  evidence?: ScanEvidence; // real diagnostic evidence behind the findings
   error?: string;
   createdAt: string;
   completedAt?: string;
@@ -94,6 +95,29 @@ export interface ApiKey {
   credits: number;
   active: boolean;
   createdAt: string;
+}
+
+// A compact, display-oriented slice of the raw scan diagnostics — the real
+// evidence behind the findings (resolved IP, nameserver, live subdomains,
+// per-path probe results, detected libraries, crawl coverage, header state).
+// Persisted on the scan and rendered in the report so the "Network & Attack
+// Surface" and raw-log sections show the ACTUAL target data instead of
+// placeholder values.
+export interface ScanEvidence {
+  scannedAt: string;
+  responseStatus: number;
+  protocol: string; // "HTTPS" | "HTTP"
+  resolvedIp?: string;
+  nameserver?: string;
+  serverHeader?: string; // value of the Server response header, if disclosed
+  presentSecurityHeaders: string[]; // which of the tracked headers ARE set
+  missingSecurityHeaders: string[]; // which are absent
+  liveSubdomains: string[]; // subdomain hostnames that resolved live
+  subdomainsChecked: number; // how many candidate subdomains were probed
+  probedPaths: Array<{ path: string; status: number; exposed: boolean }>;
+  detectedLibraries: Array<{ name: string; version: string; vulnerable: boolean }>;
+  crawl?: { pagesVisited: number; endpointsDiscovered: number; paramsTested: number; sampleEndpoints: string[] };
+  activeProbesRun: boolean; // false when gated off for an unverified domain
 }
 
 export interface ExecutiveRiskArea {
