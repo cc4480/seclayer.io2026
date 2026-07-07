@@ -288,6 +288,41 @@ export default function Dashboard({
     }
   };
 
+  // Attestation path: the user explicitly affirms authorization (recorded
+  // server-side) instead of proving control via DNS/file. window.confirm forces
+  // a deliberate, unambiguous acknowledgement before active probes are unlocked.
+  const handleAcknowledgeVerification = async () => {
+    if (!currentDomain) return;
+    const ok = window.confirm(
+      `Authorize ACTIVE security testing of ${currentDomain}?\n\n` +
+      `I attest that I own, or am explicitly authorized by the owner to perform active ` +
+      `security testing (including exploit probes such as SQLi / XSS / SSRF) against ${currentDomain}.\n\n` +
+      `This acknowledgement is recorded. Only proceed if you have authorization — testing a ` +
+      `domain you don't control may be illegal.`
+    );
+    if (!ok) return;
+    setIsVerifying(true);
+    setVerifyError('');
+    try {
+      const res = await fetch('/api/domains/verify/acknowledge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: scanUrl.trim(), acknowledged: true })
+      });
+      const data = await res.json();
+      if (res.ok && data.verified) {
+        setVerifyInfo(null);
+        fetchDomainVerifications();
+      } else {
+        setVerifyError(data.message || 'Could not record acknowledgement.');
+      }
+    } catch {
+      setVerifyError('Could not record acknowledgement.');
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
   const filteredScans = scans.filter((scan) => {
     // 1. URL search
     if (searchQuery.trim() && !scan.url.toLowerCase().includes(searchQuery.toLowerCase())) {
@@ -386,16 +421,24 @@ export default function Dashboard({
                       ) : (
                         <>
                           <span>
-                            Unverified target — this scan will run passive recon only (headers, TLS, DNS, exposed files). Verify ownership of <strong>{currentDomain}</strong> to unlock active exploit probes.
+                            Unverified target — this scan will run passive recon only (headers, TLS, DNS, exposed files). Confirm authorization for <strong>{currentDomain}</strong> to unlock active exploit probes.
                           </span>
                           <div className="flex items-center flex-wrap gap-2 pt-0.5">
+                            <button
+                              type="button"
+                              onClick={handleAcknowledgeVerification}
+                              disabled={isVerifying}
+                              className="px-2 py-1 rounded bg-amber-500/10 border border-amber-500/40 text-amber-300 hover:border-amber-500/70 font-mono text-[9px] uppercase tracking-wide transition-all disabled:opacity-50 cursor-pointer"
+                            >
+                              I'm Authorized — Acknowledge
+                            </button>
                             <button
                               type="button"
                               onClick={handleStartVerification}
                               disabled={isVerifying}
                               className="px-2 py-1 rounded bg-black border border-amber-500/30 text-amber-400 hover:border-amber-500/60 font-mono text-[9px] uppercase tracking-wide transition-all disabled:opacity-50 cursor-pointer"
                             >
-                              Verify Ownership
+                              Verify via DNS/File
                             </button>
                             {verifyInfo && verifyInfo.domain === currentDomain && !verifyInfo.verified && (
                               <button

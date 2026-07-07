@@ -158,4 +158,9 @@ export interface DomainVerification {
   verified: boolean;
   createdAt: string;
   verifiedAt?: string;
+  // How ownership was established: 'dns'/'file' (cryptographic proof) or
+  // 'attestation' (the user explicitly affirmed they own or are authorized to
+  // actively test the domain). Recorded for the audit trail.
+  method?: 'dns' | 'file' | 'attestation';
+  attestation?: string; // the exact statement the user affirmed, when method === 'attestation'
 }

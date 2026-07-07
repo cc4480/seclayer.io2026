@@ -119,6 +119,35 @@ test('domain verification starts pending, is idempotent, and flips to verified',
   assert.equal(db.isDomainVerified(other.id, 'owned.test'), false);
 });
 
+test('attestation verifies a domain in one step and records the exact statement', () => {
+  const u = db.getOrCreateUser('attest@test.io');
+  assert.equal(db.isDomainVerified(u.id, 'myapp.test'), false);
+
+  const statement = 'I attest that I own myapp.test.';
+  const rec = db.attestDomainOwnership(u.id, 'myapp.test', statement);
+
+  assert.equal(rec.verified, true);
+  assert.equal(rec.method, 'attestation');
+  assert.equal(rec.attestation, statement, 'the affirmed statement is stored for the audit trail');
+  assert.ok(rec.verifiedAt, 'verifiedAt is set');
+  assert.equal(db.isDomainVerified(u.id, 'myapp.test'), true, 'active probes are now unlocked for this user');
+
+  // Still scoped per-user — one user attesting does not authorize another.
+  const other = db.getOrCreateUser('other-attest@test.io');
+  assert.equal(db.isDomainVerified(other.id, 'myapp.test'), false);
+});
+
+test('attestation upgrades an existing pending verification without losing scope', () => {
+  const u = db.getOrCreateUser('attest2@test.io');
+  db.startDomainVerification(u.id, 'pending.test', 'sl-verify-xyz');
+  assert.equal(db.isDomainVerified(u.id, 'pending.test'), false);
+
+  const rec = db.attestDomainOwnership(u.id, 'pending.test', 'authorized by owner');
+  assert.equal(rec.verified, true);
+  assert.equal(rec.method, 'attestation');
+  assert.equal(db.isDomainVerified(u.id, 'pending.test'), true);
+});
+
 test('monitoring scheduler surfaces only due targets', () => {
   const u = db.getOrCreateUser('monitor@test.io');
   const t = db.addMonitoredTarget(u.id, 'https://watch.test', 7);
