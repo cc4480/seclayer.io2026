@@ -40,12 +40,31 @@ export function isBlockedIp(ip: string): boolean {
   return true; // unrecognized format -> block
 }
 
+// Dev-only, opt-in escape hatch for scanning a LOCAL target on this machine
+// (e.g. an intentionally-vulnerable test app) so the active-probe pipeline can
+// be exercised against infrastructure the operator owns. HARD-disabled in
+// production, off unless SCAN_DEV_ALLOW_HOSTS lists the exact host[:port]
+// (comma-separated, e.g. "127.0.0.1:4100"). This is the ONLY way the SSRF guard
+// yields an internal address, and only for a hand-listed loopback test target.
+function isDevAllowedHost(parsedUrl: URL): boolean {
+  if (process.env.NODE_ENV === "production") return false;
+  const allow = (process.env.SCAN_DEV_ALLOW_HOSTS || "")
+    .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  if (allow.length === 0) return false;
+  const host = parsedUrl.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  const port = parsedUrl.port || (parsedUrl.protocol === "https:" ? "443" : "80");
+  return allow.includes(`${host}:${port}`) || allow.includes(host);
+}
+
 async function assertTargetIsScannable(parsedUrl: URL): Promise<void> {
   if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
     throw new Error(
       `Unsupported protocol "${parsedUrl.protocol}". Only http(s) targets can be scanned.`,
     );
   }
+
+  // Dev-only allowlisted local target (never reachable in production).
+  if (isDevAllowedHost(parsedUrl)) return;
 
   const hostname = parsedUrl.hostname.replace(/^\[|\]$/g, ""); // strip IPv6 brackets
   const lower = hostname.toLowerCase();

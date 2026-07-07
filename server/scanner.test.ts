@@ -31,6 +31,30 @@ test('assertScanTargetSafe allows a public literal IP', async () => {
   await assert.doesNotReject(assertScanTargetSafe('https://93.184.216.34'));
 });
 
+test('SCAN_DEV_ALLOW_HOSTS opens a loopback target only in dev, only for exact matches', async () => {
+  const prevAllow = process.env.SCAN_DEV_ALLOW_HOSTS;
+  const prevEnv = process.env.NODE_ENV;
+  try {
+    // Off by default: loopback stays blocked.
+    delete process.env.SCAN_DEV_ALLOW_HOSTS;
+    await assert.rejects(assertScanTargetSafe('http://127.0.0.1:4100'), 'blocked without the flag');
+
+    // Dev + exact host:port allowlisted -> permitted.
+    process.env.NODE_ENV = 'development';
+    process.env.SCAN_DEV_ALLOW_HOSTS = '127.0.0.1:4100';
+    await assert.doesNotReject(assertScanTargetSafe('http://127.0.0.1:4100'), 'allowed in dev when listed');
+    // A different port on the same host is NOT covered.
+    await assert.rejects(assertScanTargetSafe('http://127.0.0.1:9999'), 'other port still blocked');
+
+    // Production hard-disables the escape hatch even when the flag is set.
+    process.env.NODE_ENV = 'production';
+    await assert.rejects(assertScanTargetSafe('http://127.0.0.1:4100'), 'never allowed in production');
+  } finally {
+    if (prevAllow === undefined) delete process.env.SCAN_DEV_ALLOW_HOSTS; else process.env.SCAN_DEV_ALLOW_HOSTS = prevAllow;
+    if (prevEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = prevEnv;
+  }
+});
+
 test('looksLikeHtml separates a SPA shell from a raw config file', () => {
   assert.equal(looksLikeHtml('<!doctype html><html><head>'), true);
   assert.equal(looksLikeHtml('DB_PASSWORD=secret\nAPI_KEY=abc'), false);
