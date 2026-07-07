@@ -14,6 +14,10 @@ import {
   deriveSecurityPosture, riskLabelForSeverity, highestSeverity,
   bannerForPosture, isConfirmed, type RiskLabel,
 } from '../../server/scoring.js';
+import { SEVERITY_TOKENS, tokenForRiskLabel } from '../lib/severity.js';
+import ScoreGauge from '../components/ScoreGauge.js';
+import SeverityBar from '../components/SeverityBar.js';
+import BrowserFrame from '../components/BrowserFrame.js';
 import { jsPDF } from "jspdf";
 import autoTable from 'jspdf-autotable';
 
@@ -285,7 +289,6 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
     if (label === 'INFO') return 'text-zinc-300 border-zinc-500/20 bg-zinc-500/5';
     return 'text-[#22c55e] border-[#22c55e]/25 bg-[#22c55e]/5'; // SECURE
   };
-  const scoreColorClass = severityColorClass(posture.postureRating);
 
   const getCategoryCount = (cat: SecCategory) => {
     return findings.filter(f => f.category === cat && !f.isFalsePositive).length;
@@ -380,15 +383,20 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
                   </div>
                 </div>
               )}
-              <div className={`p-4 rounded border flex items-center space-x-5 h-full shrink-0 ${scoreColorClass}`}>
-                <div className="text-right">
-                  <span className="text-[9px] font-mono text-[#52525b] uppercase block tracking-wider select-none">AppSec Score</span>
-                  <span className="text-3xl font-mono font-black leading-none">{posture.score}<span className="text-xs text-[#52525b] font-normal">/100</span></span>
-                  <span className="text-[9px] font-mono uppercase block tracking-wider mt-1 opacity-80">Grade {posture.grade}</span>
-                </div>
-                <div className="border-l border-[#27272a] pl-4">
-                  <span className="text-[9px] font-mono text-[#52525b] uppercase block tracking-wider select-none">Posture Rating</span>
-                  <span className="text-xs font-mono font-bold uppercase tracking-wider block mt-1">{posture.postureRating}</span>
+              <div className="p-4 rounded-lg border border-[#27272a] bg-black/30 flex items-center gap-5 h-full shrink-0">
+                <ScoreGauge score={posture.score} grade={posture.grade} size={124} />
+                <div className="border-l border-[#27272a] pl-5 space-y-3">
+                  <div>
+                    <span className="text-[10px] font-mono text-[#71717a] uppercase block tracking-wider select-none">Posture Rating</span>
+                    <span className={`text-sm font-bold uppercase tracking-wider block mt-1 ${tokenForRiskLabel(posture.postureRating).text}`}>{posture.postureRating}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-mono text-[#71717a] uppercase block tracking-wider select-none mb-1.5">Findings</span>
+                    <SeverityBar counts={posture.findingsBySeverity} className="w-32" />
+                    <span className="text-[10px] font-mono text-[#71717a] mt-1.5 block">
+                      {posture.activeCount === 0 ? 'None found' : `${posture.confirmedCount} confirmed · ${posture.needsVerificationCount} to verify`}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -457,7 +465,7 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
                   <h3 className="text-xs font-bold font-mono text-white mb-2 uppercase tracking-wider flex items-center space-x-1.5">
                     <span>Executive Summary</span>
                   </h3>
-                  <p className="text-zinc-300 text-xs font-mono leading-relaxed prose-invert">
+                  <p className="text-zinc-200 text-[13px] font-sans leading-relaxed prose-invert">
                     {scan.aiSummary || 'Security pipeline completed. Report compiles diagnostics...'}
                   </p>
 
@@ -493,36 +501,36 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
                       <span>Detailed Executive Breakdown</span>
                     </h3>
 
-                    <p className="text-zinc-300 text-xs font-mono leading-relaxed">
+                    <p className="text-zinc-200 text-[13px] font-sans leading-relaxed">
                       {scan.executiveBreakdown.overview}
                     </p>
 
                     {scan.executiveBreakdown.riskAreas.length > 0 && (
                       <div className="space-y-2">
-                        <h4 className="text-[10px] font-mono text-[#52525b] uppercase tracking-wider font-bold">Key Risk Areas</h4>
+                        <h4 className="text-[10px] font-mono text-[#71717a] uppercase tracking-wider font-bold">Key Risk Areas</h4>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           {scan.executiveBreakdown.riskAreas.map((r, idx) => (
-                            <div key={idx} className="p-3 bg-black border border-[#27272a] rounded">
-                              <span className="text-[11px] font-mono font-bold text-white block mb-1">{r.area}</span>
-                              <span className="text-[11px] font-mono text-zinc-400 leading-relaxed">{r.detail}</span>
+                            <div key={idx} className="p-3.5 bg-black border border-[#27272a] rounded-lg">
+                              <span className="text-[13px] font-sans font-semibold text-white block mb-1">{r.area}</span>
+                              <span className="text-[12px] font-sans text-zinc-400 leading-relaxed">{r.detail}</span>
                             </div>
                           ))}
                         </div>
                       </div>
                     )}
 
-                    <div className="p-3.5 rounded border border-amber-500/20 bg-amber-500/5">
+                    <div className="p-3.5 rounded-lg border border-amber-500/20 bg-amber-500/5">
                       <h4 className="text-[10px] font-mono text-amber-400 uppercase tracking-wider font-bold mb-1.5">Business Impact</h4>
-                      <p className="text-[11px] font-mono text-amber-100/80 leading-relaxed">{scan.executiveBreakdown.businessImpact}</p>
+                      <p className="text-[12px] font-sans text-amber-100/90 leading-relaxed">{scan.executiveBreakdown.businessImpact}</p>
                     </div>
 
                     {scan.executiveBreakdown.priorityActions.length > 0 && (
                       <div className="space-y-2">
-                        <h4 className="text-[10px] font-mono text-[#52525b] uppercase tracking-wider font-bold">Priority Actions (Ranked)</h4>
-                        <ol className="space-y-1.5">
+                        <h4 className="text-[10px] font-mono text-[#71717a] uppercase tracking-wider font-bold">Priority Actions (Ranked)</h4>
+                        <ol className="space-y-2">
                           {scan.executiveBreakdown.priorityActions.map((action, idx) => (
-                            <li key={idx} className="flex items-start space-x-2.5 text-[11px] font-mono text-zinc-300 leading-relaxed">
-                              <span className="shrink-0 w-4 h-4 rounded-full bg-[#22c55e]/10 border border-[#22c55e]/30 text-[#22c55e] text-[9px] font-bold flex items-center justify-center mt-0.5">{idx + 1}</span>
+                            <li key={idx} className="flex items-start space-x-2.5 text-[12px] font-sans text-zinc-200 leading-relaxed">
+                              <span className="shrink-0 w-4 h-4 rounded-full bg-[#22c55e]/10 border border-[#22c55e]/30 text-[#22c55e] text-[9px] font-mono font-bold flex items-center justify-center mt-0.5">{idx + 1}</span>
                               <span>{action}</span>
                             </li>
                           ))}
@@ -540,12 +548,16 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
                       const count = getCategoryCount(cell.key);
                       const stateText = getCategorySeverity(cell.key);
                       const colorClass = getCategoryColor(cell.key);
+                      // Per-severity counts for this pillar, feeding the mini bar.
+                      const cellCounts = findings
+                        .filter(f => f.category === cell.key && !f.isFalsePositive)
+                        .reduce((acc, f) => { acc[f.severity] = (acc[f.severity] || 0) + 1; return acc; }, {} as Record<string, number>);
 
                       return (
-                        <div 
+                        <div
                           key={cell.key}
                           onClick={() => setActiveTab(cell.key)}
-                          className={`p-4 rounded border transition-all cursor-pointer hover:border-[#3f3f46] hover:bg-black/40 ${colorClass}`}
+                          className={`p-4 rounded-lg border transition-all cursor-pointer hover:border-[#3f3f46] hover:bg-black/40 ${colorClass}`}
                         >
                           <div className="flex justify-between items-start mb-2">
                             <cell.icon className="w-5 h-5 opacity-80" />
@@ -556,6 +568,7 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
                             <span className="text-[10px] font-mono font-semibold">{stateText}</span>
                             <span className="text-lg font-mono font-black">{count}</span>
                           </div>
+                          <SeverityBar counts={cellCounts} className="mt-2.5" />
                         </div>
                       );
                     })}
@@ -640,25 +653,27 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
                 {/* Visual recon — a headless-browser screenshot of the target's
                     landing page, captured during the scan (opt-in feature). */}
                 {scan.evidence?.screenshot && (
-                  <div className="bg-[#0c0c0e] border border-[#27272a] rounded p-5 space-y-3">
+                  <div className="bg-[#0c0c0e] border border-[#27272a] rounded-lg p-5 space-y-3">
                     <div className="flex items-center justify-between">
                       <h5 className="text-[10px] font-mono text-white uppercase tracking-wider font-bold flex items-center space-x-1.5">
                         <Eye className="w-3.5 h-3.5 text-[#22c55e]" />
                         <span>Visual Recon — Target Landing Page</span>
                       </h5>
-                      <span className="text-[9px] font-mono text-[#52525b]">
+                      <span className="text-[9px] font-mono text-[#71717a]">
                         Captured {new Date(scan.evidence.screenshot.capturedAt).toLocaleString()} · {scan.evidence.screenshot.width}×{scan.evidence.screenshot.height}
                       </span>
                     </div>
-                    <a href={scan.evidence.screenshot.dataUri} target="_blank" rel="noreferrer" className="block border border-[#27272a] rounded overflow-hidden hover:border-[#3f3f46] transition-colors">
-                      <img
-                        src={scan.evidence.screenshot.dataUri}
-                        alt={`Screenshot of ${scan.url}`}
-                        className="w-full h-auto block"
-                        loading="lazy"
-                      />
+                    <a href={scan.evidence.screenshot.dataUri} target="_blank" rel="noreferrer" className="block hover:opacity-95 transition-opacity">
+                      <BrowserFrame url={scan.url}>
+                        <img
+                          src={scan.evidence.screenshot.dataUri}
+                          alt={`Screenshot of ${scan.url}`}
+                          className="w-full h-auto block"
+                          loading="lazy"
+                        />
+                      </BrowserFrame>
                     </a>
-                    <p className="text-[10px] font-mono text-[#52525b] leading-relaxed">
+                    <p className="text-[10px] font-sans text-[#71717a] leading-relaxed">
                       Rendered by a headless browser as an anonymous visitor would see it. Click to open full size.
                     </p>
                   </div>
@@ -753,12 +768,11 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
                       const group = groupOf(finding);
                       const showGroupHeader = group !== lastGroup;
                       lastGroup = group;
-                      let severityColor = 'bg-black text-[#52525b] border border-[#27272a]';
-                      if (finding.isFalsePositive) severityColor = 'bg-zinc-800 text-zinc-400 border border-zinc-700/60 font-medium';
-                      else if (finding.severity === 'critical') severityColor = 'bg-red-500/10 border border-red-500/25 text-red-400 font-bold';
-                      else if (finding.severity === 'high') severityColor = 'bg-red-500/10 border border-red-500/20 text-rose-400';
-                      else if (finding.severity === 'medium') severityColor = 'bg-amber-500/10 border border-amber-500/20 text-amber-400';
-                      else if (finding.severity === 'low') severityColor = 'bg-[#22c55e]/10 text-[#22c55e] border border-[#22c55e]/25';
+                      // Severity chip styling from the shared token map (single
+                      // source of truth for severity colour).
+                      const severityColor = finding.isFalsePositive
+                        ? 'bg-zinc-800 text-zinc-400 border border-zinc-700/60 font-medium'
+                        : (SEVERITY_TOKENS[finding.severity]?.chip ?? 'bg-black text-[#52525b] border border-[#27272a]');
 
                       return (
                         <React.Fragment key={finding.id}>
@@ -818,12 +832,12 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
 
                           {/* Detail summary */}
                           <div className="mb-4">
-                            <p className={`text-xs font-mono leading-relaxed pl-1 ${finding.isFalsePositive ? 'text-zinc-500' : 'text-[#a1a1aa]'}`}>
+                            <p className={`text-[13px] font-sans leading-relaxed pl-1 ${finding.isFalsePositive ? 'text-zinc-500' : 'text-zinc-300'}`}>
                               {finding.description}
                             </p>
                             {finding.impact && !finding.isFalsePositive && (
-                              <p className="text-[11px] font-mono leading-relaxed mt-1.5 pl-1 text-amber-400/80">
-                                <strong className="text-amber-400">Impact:</strong> {finding.impact}
+                              <p className="text-[12px] font-sans leading-relaxed mt-2 pl-1 text-amber-300/90">
+                                <strong className="text-amber-400 font-semibold">Impact:</strong> {finding.impact}
                               </p>
                             )}
                           </div>
