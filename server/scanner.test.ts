@@ -431,6 +431,43 @@ test('two-identity BOLA: public endpoint → Unauthenticated Access (§3.1b), no
   });
 });
 
+test('smart discovered-parameter fuzzer proves XSS + SQLi and skips an inert param', async () => {
+  // Root links to three parameterized endpoints; the crawler discovers them and
+  // the fuzzer injects. /search reflects (XSS), /item errors (SQLi), /static is inert.
+  const handler: http.RequestListener = (req, res) => {
+    const u = new URL(req.url || '/', 'http://127.0.0.1');
+    if (u.pathname === '/search') {
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(`<!doctype html><html><body><div>Results for: ${u.searchParams.get('q') || ''}</div></body></html>`);
+      return;
+    }
+    if (u.pathname === '/item') {
+      let body = '<!doctype html><html><body>item';
+      if (u.searchParams.has('id')) body += `<div>Database error: You have an error in your SQL syntax; near '${u.searchParams.get('id')}'</div>`;
+      res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(body + '</body></html>'); return;
+    }
+    if (u.pathname === '/static') {
+      res.writeHead(200, { 'Content-Type': 'text/html' }); res.end('<!doctype html><html><body>static, input ignored</body></html>'); return;
+    }
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end('<!doctype html><html><body><h1>home</h1>'
+      + '<a href="/search?q=hello">search</a><a href="/item?id=1">item</a><a href="/static?ref=x">static</a>'
+      + '</body></html>');
+  };
+  await withServer(handler, async (port) => {
+    const diag = await runDiagnostics(`http://127.0.0.1:${port}`, undefined, { allowActiveProbes: true });
+    const rt = diag.redTeamFindings || [];
+    const xss = rt.find((f) => /Reflected XSS \(discovered parameter\)/i.test(f.testName));
+    const sqli = rt.find((f) => /SQL Injection \(discovered parameter\)/i.test(f.testName));
+    assert.ok(xss && xss.evidence && isProven({ evidence: xss.evidence } as any), 'XSS on the reflecting param must be PROVEN');
+    assert.match(xss!.payload, /q=/);
+    assert.ok(sqli && sqli.evidence && isProven({ evidence: sqli.evidence } as any), 'SQLi on the erroring param must be PROVEN');
+    // The inert /static?ref param must never be flagged.
+    assert.ok(!rt.some((f) => /ref=/.test(f.payload || '')), 'the inert param must not be flagged');
+    assert.ok((diag.crawl?.paramsTested || 0) >= 2, 'multiple discovered params were fuzzed');
+  });
+});
+
 test('SSRF probe proves server-side fetch by quoting the leaked internal banner', async () => {
   const server = http.createServer((req, res) => {
     const u = new URL(req.url || '/', 'http://127.0.0.1');
