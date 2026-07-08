@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { assertScanTargetSafe, isBlockedIp, looksLikeHtml, compileStaticFindings, compileScanEvidence } from './scanner.js';
-import { SEVERITY_WEIGHTS } from './scoring.js';
+import http from 'node:http';
+import { assertScanTargetSafe, isBlockedIp, looksLikeHtml, compileStaticFindings, compileScanEvidence, runDiagnostics, windowAround } from './scanner.js';
+import { SEVERITY_WEIGHTS, isProven } from './scoring.js';
 
 function baseDiag(overrides: any = {}): any {
   return {
@@ -156,4 +157,276 @@ test('compileScanEvidence distils the real diagnostics into display evidence', (
 test('compileScanEvidence marks active probes as not run when they were skipped', () => {
   const ev = compileScanEvidence(baseDiag({ activeProbesSkipped: true }));
   assert.equal(ev.activeProbesRun, false);
+});
+
+test('windowAround keeps the proof intact and marks truncation explicitly', () => {
+  // Short body: returned whole, no markers.
+  assert.equal(windowAround('abcDEFghi', 3, 3, 2000), 'abcDEFghi');
+  // Long body: the match survives and both sides are marked.
+  const big = 'x'.repeat(5000) + 'PROOF' + 'y'.repeat(5000);
+  const out = windowAround(big, 5000, 5, 200);
+  assert.ok(out.includes('PROOF'), 'the proof must survive truncation');
+  assert.ok(/\[…truncated \d+ bytes\]/.test(out), 'truncation must be explicit');
+  assert.ok(out.length < big.length);
+});
+
+test('active XSS probe against a reflecting target yields a PROVEN finding with a valid receipt', async () => {
+  // A minimal target that reflects the `q` parameter back unescaped — exactly the
+  // shape the reflected-XSS probe is designed to catch.
+  const server = http.createServer((req, res) => {
+    const u = new URL(req.url || '/', 'http://127.0.0.1');
+    const q = u.searchParams.get('q');
+    let body = '<!doctype html><html><body><h1>hi</h1>';
+    if (q) body += `<div>Search results for: ${q}</div>`;
+    body += '</body></html>';
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(body);
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+  const port = (server.address() as any).port;
+
+  const prevEnv = process.env.NODE_ENV;
+  const prevAllow = process.env.SCAN_DEV_ALLOW_HOSTS;
+  try {
+    // Open the dev-only loopback escape hatch for this exact host:port so the
+    // active pipeline can run against the owned local target.
+    process.env.NODE_ENV = 'development';
+    process.env.SCAN_DEV_ALLOW_HOSTS = `127.0.0.1:${port}`;
+
+    const diag = await runDiagnostics(`http://127.0.0.1:${port}`, undefined, { allowActiveProbes: true });
+
+    const xss = (diag.redTeamFindings || []).find((f) => /XSS/i.test(f.testName));
+    assert.ok(xss, 'expected a reflected-XSS red-team finding');
+    assert.ok(xss!.evidence, 'the XSS finding must carry an exploit receipt');
+    // The core invariant: the quoted proof is literally present in the stored response.
+    assert.ok(
+      xss!.evidence!.attack.response.includes(xss!.evidence!.signal.quote),
+      'signal.quote must be a literal substring of the stored attack response',
+    );
+    assert.equal(isProven({ evidence: xss!.evidence } as any), true);
+    assert.ok(xss!.evidence!.reproduction.includes(`127.0.0.1:${port}`), 'receipt carries a replayable curl');
+
+    // And it survives compilation into a PROVEN Finding the report can render.
+    const compiled = compileStaticFindings(diag);
+    const proven = compiled.findings.find((f) => f.category === 'RED_TEAM' && /XSS/i.test(f.title));
+    assert.ok(proven && isProven(proven), 'the compiled XSS finding must be PROVEN');
+  } finally {
+    if (prevEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = prevEnv;
+    if (prevAllow === undefined) delete process.env.SCAN_DEV_ALLOW_HOSTS; else process.env.SCAN_DEV_ALLOW_HOSTS = prevAllow;
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+});
+
+test('active SQLi probe against a DB-erroring target yields a PROVEN finding quoting the DB error', async () => {
+  // Target that leaks a MySQL error when `id` is present — what the SQLi probe hunts.
+  const server = http.createServer((req, res) => {
+    const u = new URL(req.url || '/', 'http://127.0.0.1');
+    let body = '<!doctype html><html><body><h1>store</h1>';
+    if (u.searchParams.has('id')) {
+      body += `<div class="err">Database error: You have an error in your SQL syntax; `
+        + `check the manual near '${u.searchParams.get('id')}' at line 1</div>`;
+    }
+    body += '</body></html>';
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(body);
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+  const port = (server.address() as any).port;
+
+  const prevEnv = process.env.NODE_ENV;
+  const prevAllow = process.env.SCAN_DEV_ALLOW_HOSTS;
+  try {
+    process.env.NODE_ENV = 'development';
+    process.env.SCAN_DEV_ALLOW_HOSTS = `127.0.0.1:${port}`;
+
+    const diag = await runDiagnostics(`http://127.0.0.1:${port}`, undefined, { allowActiveProbes: true });
+
+    const sqli = (diag.redTeamFindings || []).find((f) => /SQL Injection/i.test(f.testName));
+    assert.ok(sqli, 'expected a SQL injection red-team finding');
+    assert.ok(sqli!.evidence, 'the SQLi finding must carry an exploit receipt');
+    assert.equal(sqli!.evidence!.method, 'error-signature');
+    // The receipt quotes the actual DB error, and it is literally in the response.
+    assert.match(sqli!.evidence!.signal.quote, /SQL syntax/i);
+    assert.ok(sqli!.evidence!.attack.response.includes(sqli!.evidence!.signal.quote));
+    assert.equal(isProven({ evidence: sqli!.evidence } as any), true);
+
+    const compiled = compileStaticFindings(diag);
+    const proven = compiled.findings.find((f) => f.category === 'RED_TEAM' && /SQL Injection/i.test(f.title));
+    assert.ok(proven && isProven(proven), 'the compiled SQLi finding must be PROVEN');
+  } finally {
+    if (prevEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = prevEnv;
+    if (prevAllow === undefined) delete process.env.SCAN_DEV_ALLOW_HOSTS; else process.env.SCAN_DEV_ALLOW_HOSTS = prevAllow;
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+});
+
+test('cmd-injection arithmetic oracle proves execution via the computed sum, not a page string', async () => {
+  // A target that actually evaluates `expr A + B` from the ping param — so only a
+  // real execution produces the sum. It never echoes the literal payload, ensuring
+  // the proof cannot be a coincidental reflection.
+  const server = http.createServer((req, res) => {
+    const u = new URL(req.url || '/', 'http://127.0.0.1');
+    let body = '<!doctype html><html><body>';
+    const ping = u.searchParams.get('ping');
+    const m = ping && /expr\s+(\d+)\s*\+\s*(\d+)/.exec(ping);
+    if (m) body += `<pre>${Number(m[1]) + Number(m[2])}</pre>`;
+    body += '</body></html>';
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(body);
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+  const port = (server.address() as any).port;
+  const prevEnv = process.env.NODE_ENV;
+  const prevAllow = process.env.SCAN_DEV_ALLOW_HOSTS;
+  try {
+    process.env.NODE_ENV = 'development';
+    process.env.SCAN_DEV_ALLOW_HOSTS = `127.0.0.1:${port}`;
+    const diag = await runDiagnostics(`http://127.0.0.1:${port}`, undefined, { allowActiveProbes: true });
+    const cmd = (diag.redTeamFindings || []).find((f) => /Command Injection/i.test(f.testName));
+    assert.ok(cmd, 'expected a command-injection finding');
+    assert.ok(cmd!.evidence, 'the cmd-injection finding must carry a receipt');
+    assert.equal(cmd!.evidence!.method, 'oracle');
+    // The quote is the computed sum — a pure number — and it is literally present.
+    assert.match(cmd!.evidence!.signal.quote, /^\d+$/);
+    assert.ok(cmd!.evidence!.attack.response.includes(cmd!.evidence!.signal.quote));
+    assert.equal(isProven({ evidence: cmd!.evidence } as any), true);
+  } finally {
+    if (prevEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = prevEnv;
+    if (prevAllow === undefined) delete process.env.SCAN_DEV_ALLOW_HOSTS; else process.env.SCAN_DEV_ALLOW_HOSTS = prevAllow;
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+});
+
+// --- GraphQL + BOLA (API_SEC) receipts -------------------------------------
+
+async function withServer(handler: http.RequestListener, fn: (port: number) => Promise<void>) {
+  const server = http.createServer(handler);
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+  const port = (server.address() as any).port;
+  const prevEnv = process.env.NODE_ENV;
+  const prevAllow = process.env.SCAN_DEV_ALLOW_HOSTS;
+  try {
+    process.env.NODE_ENV = 'development';
+    process.env.SCAN_DEV_ALLOW_HOSTS = `127.0.0.1:${port}`;
+    await fn(port);
+  } finally {
+    if (prevEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = prevEnv;
+    if (prevAllow === undefined) delete process.env.SCAN_DEV_ALLOW_HOSTS; else process.env.SCAN_DEV_ALLOW_HOSTS = prevAllow;
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+}
+
+test('GraphQL introspection port yields a PROVEN finding (high, not critical)', async () => {
+  await withServer((req, res) => {
+    const u = new URL(req.url || '/', 'http://127.0.0.1');
+    if (req.method === 'POST' && u.pathname === '/graphql') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ data: { __schema: { types: [{ name: 'Query' }, { name: 'User' }, { name: 'Order' }] } } }));
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end('<!doctype html><html><body>home</body></html>');
+  }, async (port) => {
+    const diag = await runDiagnostics(`http://127.0.0.1:${port}`, undefined, { allowActiveProbes: true });
+    const gql = (diag.apiSecFindings || []).find((f) => /Introspection/i.test(f.testName));
+    assert.ok(gql, 'expected a GraphQL introspection finding');
+    assert.equal(gql!.severity, 'high', 'introspection is a disclosure — high, never critical');
+    assert.ok(gql!.evidence && gql!.evidence.method === 'introspection');
+    assert.ok(gql!.evidence!.attack.response.includes(gql!.evidence!.signal.quote));
+    assert.equal(isProven({ evidence: gql!.evidence } as any), true);
+  });
+});
+
+// A store where /api/orders/:id is readable by ANY authenticated token (BOLA) or,
+// in `mode`, either enforces ownership or requires no auth at all.
+function ordersHandler(mode: 'bola' | 'secure' | 'public'): http.RequestListener {
+  const ORDERS: Record<string, any> = {
+    '1001': { id: '1001', owner: 'tok-A', email: 'alice@example.test' },
+    '1002': { id: '1002', owner: 'tok-B', email: 'bob@example.test' },
+  };
+  return (req, res) => {
+    const u = new URL(req.url || '/', 'http://127.0.0.1');
+    const m = u.pathname.match(/^\/api\/orders\/(\d+)$/);
+    if (!m) { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end('<!doctype html><html><body>home</body></html>'); return; }
+    const order = ORDERS[m[1]];
+    if (!order) { res.writeHead(404); res.end('not found'); return; }
+    const token = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
+    if (mode !== 'public' && !token) { res.writeHead(401); res.end('unauthorized'); return; }
+    if (mode === 'secure' && token !== order.owner) { res.writeHead(403); res.end('forbidden'); return; }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(order));
+  };
+}
+
+const IDS: [any, any] = [
+  { label: 'tenant-A', authHeader: 'Bearer tok-A', ownResource: '/api/orders/1001', ownMarker: 'alice@example.test' },
+  { label: 'tenant-B', authHeader: 'Bearer tok-B', ownResource: '/api/orders/1002', ownMarker: 'bob@example.test' },
+];
+
+test('two-identity BOLA: A reads B\'s object → PROVEN with baseline+attack+control', async () => {
+  await withServer(ordersHandler('bola'), async (port) => {
+    const diag = await runDiagnostics(`http://127.0.0.1:${port}`, undefined, { allowActiveProbes: true, bolaIdentities: IDS });
+    const bola = (diag.apiSecFindings || []).find((f) => /^Broken Object Level Authorization/i.test(f.testName));
+    assert.ok(bola, 'expected a PROVEN BOLA finding');
+    assert.equal(bola!.severity, 'critical');
+    const ev = bola!.evidence!;
+    assert.equal(ev.method, 'differential');
+    assert.equal(ev.signal.quote, 'bob@example.test'); // B's data in A's response
+    assert.ok(ev.attack.response.includes('bob@example.test'));
+    assert.ok(ev.baseline, 'baseline (A reads own) must be captured');
+    assert.ok(ev.control && /401/.test(ev.control.response), 'control (unauth) must be denied');
+    assert.equal(isProven({ evidence: ev } as any), true);
+  });
+});
+
+test('two-identity BOLA: authorization enforced → passing info note, no BOLA', async () => {
+  await withServer(ordersHandler('secure'), async (port) => {
+    const diag = await runDiagnostics(`http://127.0.0.1:${port}`, undefined, { allowActiveProbes: true, bolaIdentities: IDS });
+    const bola = (diag.apiSecFindings || []).find((f) => /^Broken Object Level Authorization/i.test(f.testName));
+    assert.equal(bola, undefined, 'must NOT report BOLA when authorization holds');
+    const held = (diag.apiSecFindings || []).find((f) => /Authorization Enforced/i.test(f.testName));
+    assert.ok(held && held.severity === 'info', 'should surface a passing authorization note');
+  });
+});
+
+test('two-identity BOLA: public endpoint → Unauthenticated Access (§3.1b), not BOLA', async () => {
+  await withServer(ordersHandler('public'), async (port) => {
+    const diag = await runDiagnostics(`http://127.0.0.1:${port}`, undefined, { allowActiveProbes: true, bolaIdentities: IDS });
+    assert.equal((diag.apiSecFindings || []).some((f) => /^Broken Object Level Authorization/i.test(f.testName)), false);
+    const unauth = (diag.apiSecFindings || []).find((f) => /Unauthenticated Access/i.test(f.testName));
+    assert.ok(unauth, 'a world-readable per-user resource is unauthenticated exposure');
+    assert.equal(isProven({ evidence: unauth!.evidence } as any), true);
+  });
+});
+
+test('SSRF probe proves server-side fetch by quoting the leaked internal banner', async () => {
+  const server = http.createServer((req, res) => {
+    const u = new URL(req.url || '/', 'http://127.0.0.1');
+    let body = '<!doctype html><html><body>';
+    if ((u.searchParams.get('url') || '').includes('127.0.0.1:22')) {
+      body += `<pre>Response from internal fetch:\nSSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.1</pre>`;
+    }
+    body += '</body></html>';
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(body);
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+  const port = (server.address() as any).port;
+  const prevEnv = process.env.NODE_ENV;
+  const prevAllow = process.env.SCAN_DEV_ALLOW_HOSTS;
+  try {
+    process.env.NODE_ENV = 'development';
+    process.env.SCAN_DEV_ALLOW_HOSTS = `127.0.0.1:${port}`;
+    const diag = await runDiagnostics(`http://127.0.0.1:${port}`, undefined, { allowActiveProbes: true });
+    const ssrf = (diag.redTeamFindings || []).find((f) => /SSRF/i.test(f.testName));
+    assert.ok(ssrf, 'expected an SSRF finding');
+    assert.ok(ssrf!.evidence, 'the SSRF finding must carry a receipt');
+    assert.match(ssrf!.evidence!.signal.quote, /^SSH-2\.0-/);
+    assert.ok(ssrf!.evidence!.attack.response.includes(ssrf!.evidence!.signal.quote));
+    assert.equal(isProven({ evidence: ssrf!.evidence } as any), true);
+  } finally {
+    if (prevEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = prevEnv;
+    if (prevAllow === undefined) delete process.env.SCAN_DEV_ALLOW_HOSTS; else process.env.SCAN_DEV_ALLOW_HOSTS = prevAllow;
+    await new Promise<void>((r) => server.close(() => r()));
+  }
 });

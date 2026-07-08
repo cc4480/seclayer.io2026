@@ -3,7 +3,37 @@ import assert from 'node:assert/strict';
 import {
   scoreFindings, SEVERITY_WEIGHTS, SCORE_FLOOR,
   deriveSecurityPosture, riskLabelForSeverity, bannerForPosture,
+  isProven, isConfirmed,
 } from './scoring.js';
+
+function evidence(response: string, quote: string): any {
+  return {
+    method: 'reflection',
+    attack: { request: 'GET /?q=… HTTP/1.1', response },
+    signal: { quote, offsetInResponse: response.indexOf(quote), why: 'reflected' },
+    demonstration: 'demo', reproduction: 'curl …', capturedAt: '',
+  };
+}
+
+test('isProven requires the quoted proof to actually appear in the stored response', () => {
+  // Valid receipt: the quote is a literal substring of the captured response.
+  assert.equal(isProven({ evidence: evidence('x<script>abc</script>y', '<script>abc</script>') } as any), true);
+  // Invalid: we claim a proof the stored response does not contain → never PROVEN.
+  assert.equal(isProven({ evidence: evidence('nothing to see here', '<script>abc</script>') } as any), false);
+  // No bundle at all.
+  assert.equal(isProven({} as any), false);
+  assert.equal(isProven({ evidence: { attack: { response: 'x' }, signal: { quote: '' } } } as any), false);
+});
+
+test('adding PROVEN never demotes a legacy high-confidence finding (additive)', () => {
+  // A finding with no evidence bundle but high confidence stays Confirmed.
+  assert.equal(isConfirmed({ confidence: 'high' } as any), true);
+  assert.equal(isConfirmed({ confidence: undefined } as any), true);
+  // A valid receipt is Confirmed too (via PROVEN), regardless of confidence.
+  assert.equal(isConfirmed({ confidence: 'low', evidence: evidence('a<b>c', '<b>') } as any), true);
+  // A low-confidence heuristic with no receipt stays in the lower tier.
+  assert.equal(isConfirmed({ confidence: 'low' } as any), false);
+});
 
 test('no findings yields a perfect, info-level score', () => {
   const r = scoreFindings([]);

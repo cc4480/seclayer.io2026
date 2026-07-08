@@ -12,7 +12,7 @@ import { Scan, Finding } from '../types.js';
 // the score, pillar counts and banner contradict each other.
 import {
   deriveSecurityPosture, riskLabelForSeverity, highestSeverity,
-  bannerForPosture, isConfirmed, type RiskLabel,
+  bannerForPosture, isConfirmed, isProven, type RiskLabel,
 } from '../../server/scoring.js';
 import { SEVERITY_TOKENS, tokenForRiskLabel } from '../lib/severity.js';
 import ScoreGauge from '../components/ScoreGauge.js';
@@ -759,9 +759,12 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
                       // suppressed — each group introduced by a header so the
                       // confidence level is legible at a glance.
                       const moduleFindings = findings.filter(f => f.category === activeTab);
-                      const groupOf = (f: Finding): 'confirmed' | 'needs' | 'suppressed' =>
-                        f.isFalsePositive ? 'suppressed' : isConfirmed(f) ? 'confirmed' : 'needs';
-                      const rank = { confirmed: 0, needs: 1, suppressed: 2 };
+                      // PROVEN sits above CONFIRMED: a finding that carries a valid,
+                      // replayable exploit receipt is the top truth-tier. Adding it
+                      // never demotes anything — confirmed stays confirmed.
+                      const groupOf = (f: Finding): 'proven' | 'confirmed' | 'needs' | 'suppressed' =>
+                        f.isFalsePositive ? 'suppressed' : isProven(f) ? 'proven' : isConfirmed(f) ? 'confirmed' : 'needs';
+                      const rank = { proven: 0, confirmed: 1, needs: 2, suppressed: 3 };
                       const ordered = [...moduleFindings].sort((a, b) => rank[groupOf(a)] - rank[groupOf(b)]);
                       let lastGroup = '';
                       return ordered.map(finding => {
@@ -778,7 +781,9 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
                         <React.Fragment key={finding.id}>
                         {showGroupHeader && (
                           <div className="flex flex-wrap items-center gap-2 pt-3 first:pt-0">
-                            {group === 'confirmed' ? (
+                            {group === 'proven' ? (
+                              <><Zap className="w-3.5 h-3.5 text-[#22c55e] shrink-0" /><span className="text-[10px] font-mono uppercase tracking-wider font-bold text-[#22c55e]">Proven</span></>
+                            ) : group === 'confirmed' ? (
                               <><CheckCircle2 className="w-3.5 h-3.5 text-[#22c55e] shrink-0" /><span className="text-[10px] font-mono uppercase tracking-wider font-bold text-[#22c55e]">Confirmed</span></>
                             ) : group === 'needs' ? (
                               <><AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" /><span className="text-[10px] font-mono uppercase tracking-wider font-bold text-amber-400">Needs Verification</span></>
@@ -786,7 +791,9 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
                               <><Eye className="w-3.5 h-3.5 text-zinc-500 shrink-0" /><span className="text-[10px] font-mono uppercase tracking-wider font-bold text-zinc-500">Suppressed (False Positive)</span></>
                             )}
                             <span className="text-[9px] font-mono text-[#52525b]">
-                              {group === 'confirmed'
+                              {group === 'proven'
+                                ? 'Demonstrated live — replayable exploit receipt attached'
+                                : group === 'confirmed'
                                 ? 'Engine-verified — high confidence'
                                 : group === 'needs'
                                 ? 'Heuristic / pattern match — verify before acting'
@@ -808,6 +815,11 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
                               <span className={`text-[9px] font-mono uppercase px-2 py-0.5 rounded ${severityColor}`}>
                                 {finding.isFalsePositive ? 'SUPPRESSED (FP)' : finding.severity}
                               </span>
+                              {!finding.isFalsePositive && isProven(finding) && (
+                                <span className="text-[9px] font-mono uppercase px-2 py-0.5 rounded border border-[#22c55e]/40 bg-[#22c55e]/10 text-[#22c55e] flex items-center gap-1">
+                                  <Zap className="w-2.5 h-2.5 shrink-0" /> Proven
+                                </span>
+                              )}
                               {finding.confidence && (
                                 <span className={`text-[9px] font-mono uppercase px-2 py-0.5 rounded border bg-black ${
                                   finding.confidence === 'high' ? 'border-[#22c55e]/30 text-[#22c55e]' :
@@ -841,6 +853,82 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
                               </p>
                             )}
                           </div>
+
+                          {/* Exploit receipt — the proof-by-demonstration that earns
+                              the PROVEN badge. Plain-English demonstration up top so a
+                              non-expert can read it and believe it, then the highlighted
+                              signal, then the raw attack exchange for anyone who wants it. */}
+                          {!finding.isFalsePositive && finding.evidence && (() => {
+                            const ev = finding.evidence!;
+                            const resp = ev.attack.response;
+                            const q = ev.signal?.quote ?? '';
+                            const qi = q ? resp.indexOf(q) : -1;
+                            return (
+                              <div className="mb-4 p-4 rounded border border-[#22c55e]/25 bg-[#22c55e]/[0.04]">
+                                <div className="flex items-center gap-1.5 mb-2">
+                                  <Zap className="w-3 h-3 text-[#22c55e] shrink-0" />
+                                  <span className="text-[9px] font-mono uppercase tracking-wider font-bold text-[#22c55e]">Exploit Receipt — Proven Live</span>
+                                </div>
+                                <p className="text-[13px] font-sans leading-relaxed text-zinc-200">{ev.demonstration}</p>
+
+                                {qi !== -1 && (
+                                  <div className="mt-3">
+                                    <span className="text-[#52525b] font-mono text-[9px] uppercase tracking-wider">Proof — captured verbatim in the response</span>
+                                    <div className="mt-1 p-2.5 rounded bg-black border border-zinc-800 overflow-x-auto scrollbar-thin">
+                                      <code className="text-[10px] font-mono whitespace-pre-wrap break-all leading-relaxed">
+                                        <span className="text-zinc-600">{resp.slice(Math.max(0, qi - 90), qi)}</span>
+                                        <span className="bg-[#22c55e]/20 text-[#22c55e] rounded px-0.5 font-bold">{q}</span>
+                                        <span className="text-zinc-600">{resp.slice(qi + q.length, qi + q.length + 90)}</span>
+                                      </code>
+                                    </div>
+                                    {ev.signal?.why && <p className="mt-1.5 text-[11px] font-sans text-zinc-400 leading-relaxed">{ev.signal.why}</p>}
+                                  </div>
+                                )}
+
+                                <div className="mt-3">
+                                  <button
+                                    onClick={() => setExpandedApiRows(p => ({ ...p, [`ev-${finding.id}`]: !p[`ev-${finding.id}`] }))}
+                                    className="w-full flex items-center justify-between p-2.5 rounded bg-black/40 hover:bg-black border border-zinc-800/80 transition-colors cursor-pointer group"
+                                  >
+                                    <span className="flex items-center gap-2 text-[10px] font-mono text-zinc-400 group-hover:text-[#22c55e] transition-colors uppercase tracking-wider font-bold">
+                                      <Terminal className="w-3.5 h-3.5 shrink-0" /> Raw attack exchange & replay
+                                    </span>
+                                    {expandedApiRows[`ev-${finding.id}`] ? <ChevronUp className="w-4 h-4 text-zinc-500" /> : <ChevronDown className="w-4 h-4 text-zinc-500" />}
+                                  </button>
+                                  {expandedApiRows[`ev-${finding.id}`] && (
+                                    <div className="mt-2 space-y-2 animate-fade-in">
+                                      {ev.reproduction && (
+                                        <div className="p-2.5 bg-black border border-zinc-800 rounded flex items-center justify-between gap-2 overflow-x-auto">
+                                          <code className="text-[10px] font-mono whitespace-pre text-zinc-300 break-all">{ev.reproduction}</code>
+                                          <button onClick={() => handleCopyCode(`repro-${finding.id}`, ev.reproduction)} className="text-zinc-500 hover:text-white cursor-pointer shrink-0"><Copy className="w-3 h-3"/></button>
+                                        </div>
+                                      )}
+                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                        <div className="p-3 bg-black border border-zinc-800 rounded relative overflow-hidden">
+                                          <div className="absolute top-0 left-0 w-full bg-zinc-900/80 p-1.5 border-b border-zinc-800 text-[9px] uppercase tracking-wider font-mono text-amber-500/80 flex items-center justify-between">
+                                            <span>Attack Request</span>
+                                            <button onClick={() => handleCopyCode(`evreq-${finding.id}`, ev.attack.request)} className="text-zinc-500 hover:text-white cursor-pointer"><Copy className="w-3 h-3"/></button>
+                                          </div>
+                                          <div className="pt-6 overflow-x-auto max-h-64 scrollbar-thin">
+                                            <code className="text-[10px] font-mono whitespace-pre text-zinc-400 break-all">{ev.attack.request}</code>
+                                          </div>
+                                        </div>
+                                        <div className="p-3 bg-black border border-zinc-800 rounded relative overflow-hidden">
+                                          <div className="absolute top-0 left-0 w-full bg-zinc-900/80 p-1.5 border-b border-zinc-800 text-[9px] uppercase tracking-wider font-mono text-red-400/80 flex items-center justify-between">
+                                            <span>Attack Response</span>
+                                            <button onClick={() => handleCopyCode(`evres-${finding.id}`, ev.attack.response)} className="text-zinc-500 hover:text-white cursor-pointer"><Copy className="w-3 h-3"/></button>
+                                          </div>
+                                          <div className="pt-6 overflow-x-auto max-h-64 scrollbar-thin">
+                                            <code className="text-[10px] font-mono whitespace-pre text-zinc-400 break-all">{ev.attack.response}</code>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })()}
 
                           {/* Detailed Remediation code fix payload block */}
                           <div className={`p-4 rounded border ${finding.isFalsePositive ? 'bg-zinc-950/40 border-zinc-850' : 'bg-[#0c0c0e] border-[#27272a]'}`}>

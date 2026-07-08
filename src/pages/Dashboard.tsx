@@ -3,7 +3,7 @@ import {
   Shield, Play, Plus, Trash2, Key, HelpCircle, 
   Clock, Coins, Globe, Terminal, RefreshCw, CheckCircle, 
   ExternalLink, ArrowRight, AlertTriangle, ShieldCheck,
-  Code, Copy, FileText
+  Code, Copy, FileText, Eye, Zap
 } from 'lucide-react';
 import { Scan, ApiKey, User } from '../types.js';
 
@@ -15,7 +15,7 @@ interface DashboardProps {
   transactions: any[];
   justGeneratedKey: { id: string; rawKey: string } | null;
   onDismissGeneratedKey: () => void;
-  onInitiateScan: (url: string, authHeader?: string) => void;
+  onInitiateScan: (url: string, authHeader?: string, bolaIdentities?: any, activeProbes?: boolean) => void;
   onGenerateKey: () => void;
   onRevokeKey: (keyId: string) => void;
   onPurchaseCredits: (packName: 'single' | 'pack5' | 'pack20') => void;
@@ -41,6 +41,11 @@ export default function Dashboard({
   const [scanUrl, setScanUrl] = useState('');
   const [authHeader, setAuthHeader] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
+  // Two-identity BOLA/IDOR cross-tenant test (docs/confirmed-evidence-spec.md §3.1a).
+  const [bolaEnabled, setBolaEnabled] = useState(false);
+  const emptyIdentity = { authHeader: '', ownResource: '', ownMarker: '' };
+  const [bolaA, setBolaA] = useState({ ...emptyIdentity });
+  const [bolaB, setBolaB] = useState({ ...emptyIdentity });
   const [buyPack, setBuyPack] = useState<'single' | 'pack5' | 'pack20'>('pack5');
   const [isBuying, setIsBuying] = useState(false);
   const [errorText, setErrorText] = useState('');
@@ -171,8 +176,11 @@ export default function Dashboard({
     setPrevCredits(credits);
   }, [credits, prevCredits]);
 
-  const handleScanSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  // Launch a scan in the chosen mode. `active` = red-team (real exploit probes),
+  // which first requires an authorization attestation for the target domain.
+  // `active === false` = passive recon only, allowed on any URL with no attestation.
+  // The URL is intentionally NOT cleared so the same target can be run both ways.
+  const launchScan = async (active: boolean) => {
     setErrorText('');
     const urlStr = scanUrl.trim();
     if (!urlStr) return;
@@ -182,9 +190,34 @@ export default function Dashboard({
       return;
     }
 
-    onInitiateScan(urlStr, authHeader.trim() || undefined);
-    setScanUrl('');
-    setAuthHeader('');
+    let bolaIdentities: any = undefined;
+    if (active && bolaEnabled) {
+      const a = { label: 'tenant-A', authHeader: bolaA.authHeader.trim(), ownResource: bolaA.ownResource.trim(), ownMarker: bolaA.ownMarker.trim() || undefined };
+      const b = { label: 'tenant-B', authHeader: bolaB.authHeader.trim(), ownResource: bolaB.ownResource.trim(), ownMarker: bolaB.ownMarker.trim() || undefined };
+      if (!a.authHeader || !a.ownResource || !b.authHeader || !b.ownResource) {
+        setErrorText('The BOLA test needs an auth credential and an owned resource path for BOTH identities.');
+        return;
+      }
+      bolaIdentities = [a, b];
+    }
+
+    // Red-team requires an authorization attestation for this domain (once per
+    // domain — it then stays unlocked). Passive needs none.
+    if (active) {
+      const authorized = await attestCurrentDomain();
+      if (!authorized) {
+        if (!verifyError) setErrorText(`Active red-team needs you to confirm authorization for ${currentDomain || 'this domain'}.`);
+        return;
+      }
+    }
+
+    onInitiateScan(urlStr, authHeader.trim() || undefined, bolaIdentities, active);
+  };
+
+  // Enter key / form submit → the primary action (active red-team).
+  const handleScanSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    void launchScan(true);
   };
 
   const handleBuyCredits = async () => {
@@ -291,8 +324,10 @@ export default function Dashboard({
   // Attestation path: the user explicitly affirms authorization (recorded
   // server-side) instead of proving control via DNS/file. window.confirm forces
   // a deliberate, unambiguous acknowledgement before active probes are unlocked.
-  const handleAcknowledgeVerification = async () => {
-    if (!currentDomain) return;
+  // Returns true when the domain is (now) authorized for active testing.
+  const attestCurrentDomain = async (): Promise<boolean> => {
+    if (!currentDomain) return false;
+    if (currentDomainVerified) return true;
     const ok = window.confirm(
       `Authorize ACTIVE security testing of ${currentDomain}?\n\n` +
       `I attest that I own, or am explicitly authorized by the owner to perform active ` +
@@ -300,7 +335,7 @@ export default function Dashboard({
       `This acknowledgement is recorded. Only proceed if you have authorization — testing a ` +
       `domain you don't control may be illegal.`
     );
-    if (!ok) return;
+    if (!ok) return false;
     setIsVerifying(true);
     setVerifyError('');
     try {
@@ -313,15 +348,18 @@ export default function Dashboard({
       if (res.ok && data.verified) {
         setVerifyInfo(null);
         fetchDomainVerifications();
-      } else {
-        setVerifyError(data.message || 'Could not record acknowledgement.');
+        return true;
       }
+      setVerifyError(data.message || 'Could not record acknowledgement.');
+      return false;
     } catch {
       setVerifyError('Could not record acknowledgement.');
+      return false;
     } finally {
       setIsVerifying(false);
     }
   };
+  const handleAcknowledgeVerification = () => { void attestCurrentDomain(); };
 
   const filteredScans = scans.filter((scan) => {
     // 1. URL search
@@ -496,6 +534,55 @@ export default function Dashboard({
                           id="auth-header-input"
                         />
                       </div>
+
+                      {/* Two-identity BOLA / IDOR cross-tenant test */}
+                      <div className="pt-3 border-t border-[#27272a]/60">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={bolaEnabled}
+                            onChange={(e) => setBolaEnabled(e.target.checked)}
+                            disabled={isPerformingAction}
+                            className="accent-[#22c55e]"
+                            id="bola-enable"
+                          />
+                          <span className="text-[10px] font-mono uppercase tracking-wider text-[#52525b]">Prove BOLA / IDOR — cross-tenant access (two test identities)</span>
+                        </label>
+                        {bolaEnabled && (
+                          <div className="mt-2 space-y-3">
+                            <p className="text-[10px] font-mono text-[#a1a1aa]">Give two accounts you own on this target. We sign in as <span className="text-[#22c55e]">A</span>, try to read <span className="text-[#22c55e]">B's</span> object, and only report <span className="text-[#22c55e]">PROVEN</span> if A receives B's data while a logged-out request is denied. Requires a verified domain.</p>
+                            {([['A', bolaA, setBolaA], ['B', bolaB, setBolaB]] as const).map(([tag, val, set]) => (
+                              <div key={tag} className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                                <div className="md:col-span-3 text-[9px] font-mono uppercase tracking-wider text-[#22c55e]">Identity {tag} (tenant-{tag})</div>
+                                <input
+                                  type="text"
+                                  className="bg-black border border-[#27272a] focus:border-[#22c55e] text-white text-xs font-mono w-full focus:outline-none p-2 rounded placeholder-[#52525b] transition-colors"
+                                  placeholder="Auth: Bearer …  |  Cookie: session=…"
+                                  value={val.authHeader}
+                                  onChange={(e) => set({ ...val, authHeader: e.target.value })}
+                                  disabled={isPerformingAction}
+                                />
+                                <input
+                                  type="text"
+                                  className="bg-black border border-[#27272a] focus:border-[#22c55e] text-white text-xs font-mono w-full focus:outline-none p-2 rounded placeholder-[#52525b] transition-colors"
+                                  placeholder="Owned resource: /api/orders/1001"
+                                  value={val.ownResource}
+                                  onChange={(e) => set({ ...val, ownResource: e.target.value })}
+                                  disabled={isPerformingAction}
+                                />
+                                <input
+                                  type="text"
+                                  className="bg-black border border-[#27272a] focus:border-[#22c55e] text-white text-xs font-mono w-full focus:outline-none p-2 rounded placeholder-[#52525b] transition-colors"
+                                  placeholder="Marker (optional): bob@…"
+                                  value={val.ownMarker}
+                                  onChange={(e) => set({ ...val, ownMarker: e.target.value })}
+                                  disabled={isPerformingAction}
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -507,19 +594,43 @@ export default function Dashboard({
                   </div>
                 )}
 
-                <div className="flex items-center justify-between pt-2">
-                  <span className="text-[10px] font-mono text-[#52525b]">
-                    Cost per scan: <strong className="text-[#22c55e]">1 credit</strong>
-                  </span>
-                  <button
-                    type="submit"
-                    disabled={isPerformingAction || !scanUrl.trim()}
-                    className="px-5 py-2.5 bg-[#22c55e] hover:bg-[#4ade80] text-black text-xs font-mono font-bold uppercase tracking-wider rounded disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center space-x-2 shrink-0 cursor-pointer"
-                    id="trigger-scan-btn"
-                  >
-                    <span>Execute audit</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
+                <div className="flex flex-col gap-2 pt-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-mono text-[#52525b]">
+                      Cost per scan: <strong className="text-[#22c55e]">1 credit</strong>
+                    </span>
+                    {currentDomain && (
+                      <span className="text-[9px] font-mono text-[#52525b]">
+                        {currentDomainVerified
+                          ? 'Red-team unlocked for this domain'
+                          : 'Red-team will ask you to confirm authorization'}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {/* Passive: safe on any URL, no attestation, no exploit payloads. */}
+                    <button
+                      type="button"
+                      onClick={() => void launchScan(false)}
+                      disabled={isPerformingAction || !scanUrl.trim()}
+                      className="px-4 py-2.5 bg-black border border-[#27272a] hover:border-[#3f3f46] text-[#a1a1aa] hover:text-white text-xs font-mono font-bold uppercase tracking-wider rounded disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-2 shrink-0 cursor-pointer"
+                      id="passive-scan-btn"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>Passive Scan</span>
+                    </button>
+                    {/* Active red-team: real exploit probes; attests authorization first. */}
+                    <button
+                      type="submit"
+                      disabled={isPerformingAction || !scanUrl.trim()}
+                      className="px-5 py-2.5 bg-[#22c55e] hover:bg-[#4ade80] text-black text-xs font-mono font-bold uppercase tracking-wider rounded disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-2 shrink-0 cursor-pointer"
+                      id="trigger-scan-btn"
+                    >
+                      <Zap className="w-3.5 h-3.5" />
+                      <span>Active Red-Team Scan</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
               </form>
             </div>

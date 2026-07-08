@@ -1,4 +1,4 @@
-import { Finding, Severity, ScanEvidence } from "../src/types.js";
+import { Finding, Severity, ScanEvidence, ExploitEvidence, RawExchange, BolaIdentity } from "../src/types.js";
 import { scoreFindings } from "./scoring.js";
 import { crawlSite, targetsFromHtml, dedupeTargets, paramsOf, InjectableTarget } from "./crawler.js";
 import { runTemplates, selectTemplates } from "./templateEngine.js";
@@ -172,6 +172,108 @@ export function parseAuthHeader(authHeader?: string): Record<string, string> {
   return { Authorization: raw };
 }
 
+// --- Evidence-bundle helpers (receipts behind PROVEN findings) --------------
+// These turn a live probe exchange into the stored, replayable proof a non-expert
+// can look at and believe. Credentials are redacted; the payload that constitutes
+// the proof is always preserved; bodies are truncated only with explicit markers.
+const SENSITIVE_HEADER = /^(authorization|cookie|set-cookie|x-api-key|proxy-authorization)$/i;
+
+function redactHeaders(headers: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(headers)) {
+    out[k] = SENSITIVE_HEADER.test(k) ? "***(redacted)" : v;
+  }
+  return out;
+}
+
+export function renderRawRequest(
+  method: string,
+  urlStr: string,
+  headers: Record<string, string>,
+  body?: string,
+): string {
+  let u: URL;
+  try {
+    u = new URL(urlStr);
+  } catch {
+    return `${method} ${urlStr}`;
+  }
+  const lines = [`${method} ${u.pathname}${u.search} HTTP/1.1`, `Host: ${u.host}`];
+  for (const [k, v] of Object.entries(redactHeaders(headers))) lines.push(`${k}: ${v}`);
+  if (body != null) lines.push("", body);
+  return lines.join("\n");
+}
+
+// Slice a body down to `budget` bytes while GUARANTEEING the proof at
+// [matchIdx, matchIdx+matchLen) survives intact, with explicit truncation markers
+// on either side. This keeps the invariant that signal.quote is a literal
+// substring of the stored response — the whole basis for calling a finding PROVEN.
+export function windowAround(body: string, matchIdx: number, matchLen: number, budget = 2000): string {
+  if (body.length <= budget) return body;
+  const pad = Math.max(0, Math.floor((budget - matchLen) / 2));
+  let end = Math.min(body.length, matchIdx + matchLen + pad);
+  let start = Math.max(0, end - budget);
+  end = Math.min(body.length, start + budget);
+  let out = body.slice(start, end);
+  if (start > 0) out = `[…truncated ${start} bytes]\n` + out;
+  if (end < body.length) out = out + `\n[…truncated ${body.length - end} bytes]`;
+  return out;
+}
+
+function renderRawResponse(res: Response, bodyWindow: string): string {
+  const lines = [`HTTP/1.1 ${res.status} ${res.statusText}`];
+  for (const h of ["content-type", "server", "content-length"]) {
+    const v = res.headers.get(h);
+    if (v) lines.push(`${h}: ${v}`);
+  }
+  lines.push("", bodyWindow);
+  return lines.join("\n");
+}
+
+// Assemble a full exploit receipt from a single GET attack exchange whose proof is
+// a substring of the response body at [matchIndex, matchIndex+quote.length). The
+// response is windowed so the proof always survives truncation, keeping the
+// invariant that signal.quote is a literal substring of the stored response.
+function buildProbeEvidence(params: {
+  method: ExploitEvidence["method"];
+  attackUrl: string;
+  requestHeaders: Record<string, string>;
+  res: Response;
+  body: string;
+  matchIndex: number;
+  quote: string;
+  why: string;
+  demonstration: string;
+}): ExploitEvidence {
+  const bodyWindow = windowAround(params.body, params.matchIndex, params.quote.length);
+  const response = renderRawResponse(params.res, bodyWindow);
+  return {
+    method: params.method,
+    attack: {
+      request: renderRawRequest("GET", params.attackUrl, params.requestHeaders),
+      response,
+    },
+    signal: {
+      quote: params.quote,
+      offsetInResponse: response.indexOf(params.quote),
+      why: params.why,
+    },
+    demonstration: params.demonstration,
+    reproduction: `curl -s "${params.attackUrl}"`,
+    capturedAt: new Date().toISOString(),
+  };
+}
+
+// Pull a value that distinctively identifies whose data a response carries — used
+// to prove a BOLA cross-tenant read (the marker belongs to identity B yet shows up
+// in identity A's request). An email is the most legible, least-ambiguous marker;
+// a caller-supplied ownMarker always wins.
+function extractIdentityMarker(text: string, provided?: string): string | null {
+  if (provided && text.includes(provided)) return provided;
+  const email = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.exec(text);
+  return email ? email[0] : null;
+}
+
 export interface DiagnosticResult {
   url: string;
   scannedAt: string;
@@ -227,6 +329,7 @@ export interface DiagnosticResult {
     severity: Severity;
     description: string;
     fix: string;
+    evidence?: ExploitEvidence; // stored exploit receipt (promotes to PROVEN)
   }>;
   crawl?: {
     pagesVisited: number;
@@ -241,8 +344,9 @@ export interface DiagnosticResult {
     description: string;
     fix: string;
     endpoint: string;
-    rawRequest: string;
-    rawResponse: string;
+    rawRequest?: string;
+    rawResponse?: string;
+    evidence?: ExploitEvidence; // stored exploit receipt (promotes to PROVEN)
   }>;
   // True when active exploit probing (SQLi/XSS/cmd-injection/SSRF/GraphQL/BOLA
   // fuzzing) was skipped because the target's domain ownership isn't verified.
@@ -256,6 +360,12 @@ export interface ScanOptions {
   // keeps the scanner from being usable as an anonymous attack proxy against
   // arbitrary third-party sites. See server/domainVerify.ts.
   allowActiveProbes?: boolean;
+
+  // Two owned test identities that unlock a PROVEN cross-tenant BOLA/IDOR check
+  // (docs/confirmed-evidence-spec.md §3.1a). Layered on top of allowActiveProbes —
+  // ownership must still be verified. When absent, the two-identity probe is
+  // simply skipped (the rest of the scan is unaffected).
+  bolaIdentities?: [BolaIdentity, BolaIdentity];
 }
 
 export async function runDiagnostics(
@@ -704,7 +814,11 @@ export async function runDiagnostics(
       // error", which appears in unrelated content and causes false positives.
       const sqlErrorSig =
         /(SQL syntax;|valid MySQL result|mysqli?_fetch|ORA-\d{4,5}|PLS-\d{4,5}|PostgreSQL.*?ERROR|PG::\w*Error|SQLSTATE\[|SQLite3?::|SQLiteException|Unclosed quotation mark after the character string|quoted string not properly terminated|Microsoft OLE DB Provider for SQL Server|ODBC SQL Server Driver|Npgsql\.)/i;
-      if (sqlErrorSig.test(sqlText)) {
+      const sqlMatch = sqlErrorSig.exec(sqlText);
+      if (sqlMatch) {
+        // Receipt: the injected request plus the exact database-error text the
+        // engine emitted — quoted verbatim so the proof can be seen, not asserted.
+        const attackUrl = `${url}/?id=%27%20OR%201%3D1--`;
         redTeamFindings.push({
           testName: "Active SQL Injection Probe",
           payload: "' OR 1=1--",
@@ -712,6 +826,18 @@ export async function runDiagnostics(
           description:
             "Active Red Team scanning detected database syntax errors reflected in the HTTP response when injecting escaped SQL boundary characters. This indicates an exploitable database injection vulnerability.",
           fix: "Implement parameterized database queries and prepared statements exclusively. Eliminate dynamic string concatenation for SQL logic.",
+          evidence: buildProbeEvidence({
+            method: "error-signature",
+            attackUrl,
+            requestHeaders: fuzzHeaders,
+            res: sqlRes,
+            body: sqlText,
+            matchIndex: sqlMatch.index,
+            quote: sqlMatch[0],
+            why: "This is a raw database-engine error, emitted only when our injected quote breaks the SQL query's syntax. A benign value does not produce it — so request input is reaching the database unescaped.",
+            demonstration:
+              'We injected the SQL boundary payload "\' OR 1=1--" into the "id" parameter and the server responded with a raw database error. That error is proof the input reaches the SQL engine unescaped — the hallmark of an exploitable injection.',
+          }),
         });
       }
     } catch (e) {
@@ -729,39 +855,107 @@ export async function runDiagnostics(
       );
       clearTimeout(xssId);
       const xssText = await xssRes.text();
-      if (xssText.includes(`<script>${uniqueTrigger}</script>`)) {
+      const marker = `<script>${uniqueTrigger}</script>`;
+      const markerIdx = xssText.indexOf(marker);
+      if (markerIdx !== -1) {
+        // Receipt: the request that carried the payload and the response that
+        // reflected it back verbatim (windowed so the marker survives truncation).
+        const attackUrl = `${url}/?q=%3Cscript%3E${uniqueTrigger}%3C%2Fscript%3E`;
         redTeamFindings.push({
           testName: "Active Reflected XSS Probe",
-          payload: `<script>${uniqueTrigger}</script>`,
+          payload: marker,
           severity: "high",
           description:
             "Active Red Team fuzzing successfully reflected unencoded HTML/JavaScript tags directly in the immediate HTTP response, confirming a Reflected Cross-Site Scripting (XSS) vulnerability.",
           fix: "Implement deep context-aware output encoding. Deploy restrictive Content Security Policy (CSP) headers to prevent unauthorized inline script execution.",
+          evidence: buildProbeEvidence({
+            method: "reflection",
+            attackUrl,
+            requestHeaders: fuzzHeaders,
+            res: xssRes,
+            body: xssText,
+            matchIndex: markerIdx,
+            quote: marker,
+            why: "The unique probe marker was echoed back verbatim and unescaped inside the HTML body, so a browser parses it as a live <script> element rather than text.",
+            demonstration:
+              `We submitted the unique marker ${marker} in the "q" query parameter, and the server reflected it back into the page unescaped. Because it is returned as live HTML — not text — an attacker-supplied script placed here would execute in a visitor's browser.`,
+          }),
         });
       }
     } catch (e) {
       /* Ignore fetch errors for probe */
     }
 
-    // 3. OS Command Injection Active Probe
+    // 3. OS Command Injection Active Probe.
+    // Oracle-first: inject an arithmetic expression with random operands and look
+    // for the COMPUTED SUM in the response. The literal payload never contains the
+    // sum, so its appearance can only mean the backend evaluated our injected
+    // command — a proof that can't be a coincidental page string. We fall back to
+    // the classic `id` output signature only if the arithmetic oracle doesn't land.
+    const cmdFix =
+      "Avoid invoking underlying operating system commands entirely. If required, use strictly sanitized arguments array APIs, never shell-interpolated execution.";
+    const cmdDesc =
+      "Active Red Team command-injection fuzzing evaluated an injected shell command on the backend, confirming arbitrary OS command execution.";
     try {
-      const cmdCtl = new AbortController();
-      const cmdId = setTimeout(() => cmdCtl.abort(), 4000);
-      const cmdRes = await safeFetch(`${url}/?ping=127.0.0.1%3B+id`, {
-        headers: fuzzHeaders,
-        signal: cmdCtl.signal,
-      });
-      clearTimeout(cmdId);
-      const cmdText = await cmdRes.text();
-      if (cmdText.includes("uid=") && cmdText.includes("gid=")) {
+      const a = 100000 + crypto.randomInt(899999); // 6-digit operands so the sum
+      const b = 100000 + crypto.randomInt(899999); // is a distinctive, unlikely string
+      const sum = String(a + b);
+      const oracleUrl = `${url}/?ping=127.0.0.1%3B+expr+${a}+%2B+${b}`;
+      const oCtl = new AbortController();
+      const oId = setTimeout(() => oCtl.abort(), 4000);
+      const oracleRes = await safeFetch(oracleUrl, { headers: fuzzHeaders, signal: oCtl.signal });
+      clearTimeout(oId);
+      const oracleText = await oracleRes.text();
+      const sumIdx = oracleText.indexOf(sum);
+
+      if (sumIdx !== -1) {
         redTeamFindings.push({
           testName: "Active OS Command Injection",
-          payload: "; id",
+          payload: `; expr ${a} + ${b}`,
           severity: "critical",
-          description:
-            "Active Red Team command injection fuzzing triggered a successful `id` evaluation on the backend, exposing sensitive host system access and execution permissions.",
-          fix: "Avoid invoking underlying operating system commands entirely. If required, use strictly sanitized arguments array APIs, never shell-interpolated execution.",
+          description: cmdDesc,
+          fix: cmdFix,
+          evidence: buildProbeEvidence({
+            method: "oracle",
+            attackUrl: oracleUrl,
+            requestHeaders: fuzzHeaders,
+            res: oracleRes,
+            body: oracleText,
+            matchIndex: sumIdx,
+            quote: sum,
+            why: `We injected "expr ${a} + ${b}"; the server returned ${sum}, the exact arithmetic result. The literal payload never contains that number, so the backend must have executed our injected command to produce it.`,
+            demonstration: `We injected the shell command "expr ${a} + ${b}" into the "ping" parameter, and the server responded with ${sum} — the computed sum. The only way that number appears is if the server ran our command, proving arbitrary OS command execution.`,
+          }),
         });
+      } else {
+        // Fallback: classic `id` output signature (uid=…gid=…).
+        const idUrl = `${url}/?ping=127.0.0.1%3B+id`;
+        const iCtl = new AbortController();
+        const iId = setTimeout(() => iCtl.abort(), 4000);
+        const idRes = await safeFetch(idUrl, { headers: fuzzHeaders, signal: iCtl.signal });
+        clearTimeout(iId);
+        const idText = await idRes.text();
+        const idMatch = /uid=\d+\([^)]*\)\s+gid=\d+\([^)]*\)/.exec(idText);
+        if (idMatch) {
+          redTeamFindings.push({
+            testName: "Active OS Command Injection",
+            payload: "; id",
+            severity: "critical",
+            description: cmdDesc,
+            fix: cmdFix,
+            evidence: buildProbeEvidence({
+              method: "oracle",
+              attackUrl: idUrl,
+              requestHeaders: fuzzHeaders,
+              res: idRes,
+              body: idText,
+              matchIndex: idMatch.index,
+              quote: idMatch[0],
+              why: "This is the output of the Unix `id` command (the current user's uid/gid), returned only because the backend executed our injected `; id`. It is not static page content.",
+              demonstration: `We injected "; id" into the "ping" parameter and the server returned "${idMatch[0]}" — the live output of the id command. That output only appears if the server executed our injected command.`,
+            }),
+          });
+        }
       }
     } catch (e) {
       /* Ignore fetch errors for probe */
@@ -778,10 +972,13 @@ export async function runDiagnostics(
       });
       clearTimeout(ssrfId);
       const ssrfText = await ssrfRes.text();
-      if (
-        ssrfText.includes("SSH-2.0-OpenSSH") ||
-        ssrfText.includes("Protocol mismatch")
-      ) {
+      // The signal is internal-only content the public target could not otherwise
+      // return: an SSH banner from the loopback interface. Quote the exact banner so
+      // the proof is the leaked internal data itself, not merely a boolean.
+      // (A true out-of-band callback oracle is the pending upgrade — spec §7 #4.)
+      const ssrfMatch = /SSH-2\.0-\S+|Protocol mismatch\.?/.exec(ssrfText);
+      const ssrfUrl = `${url}/?url=http://127.0.0.1:22`;
+      if (ssrfMatch) {
         redTeamFindings.push({
           testName: "Active Server-Side Request Forgery (SSRF)",
           payload: "http://127.0.0.1:22",
@@ -789,6 +986,17 @@ export async function runDiagnostics(
           description:
             "Active Red Team scanning identified an insecure proxy/fetch behavior that permitted requests returning local loopback (SSH) banner data, confirming an SSRF vulnerability.",
           fix: "Enforce strict network path isolation for backend fetches. Implement allow-listing filters and block internal Class A/B/C IP architectures.",
+          evidence: buildProbeEvidence({
+            method: "oracle",
+            attackUrl: ssrfUrl,
+            requestHeaders: fuzzHeaders,
+            res: ssrfRes,
+            body: ssrfText,
+            matchIndex: ssrfMatch.index,
+            quote: ssrfMatch[0],
+            why: "This is an SSH service banner from 127.0.0.1 — the target's own loopback interface, unreachable from the public internet. Its presence in the response means the server fetched an attacker-chosen internal address on our behalf.",
+            demonstration: `We asked the app to fetch "http://127.0.0.1:22" (its own internal loopback), and the response came back carrying "${ssrfMatch[0]}" — an internal SSH banner a public visitor can never reach. That proves the server can be steered to make requests to internal systems.`,
+          }),
         });
       }
     } catch (e) {
@@ -814,37 +1022,59 @@ export async function runDiagnostics(
     try {
       const gqlCtl = new AbortController();
       const gqlId = setTimeout(() => gqlCtl.abort(), 4000);
-      const reqRaw = `POST /graphql HTTP/1.1\nHost: ${hostname}\nContent-Type: application/json\n\n{"query":"{__schema{types{name}}}"}`;
+      const gqlBody = JSON.stringify({ query: "{__schema{types{name}}}" });
 
       const gqlRes = await safeFetch(`${url}/graphql`, {
         method: "POST",
         headers: { ...apiHeaders, "Content-Type": "application/json" },
-        body: JSON.stringify({ query: "{__schema{types{name}}}" }),
+        body: gqlBody,
         signal: gqlCtl.signal,
       });
       clearTimeout(gqlId);
       const gqlText = await gqlRes.text();
-      const resRaw = `HTTP/1.1 ${gqlRes.status} ${gqlRes.statusText}\n\n${gqlText.substring(0, 500)}...`;
 
       // Confirm a real introspection RESULT (data.__schema.types), not merely
       // the echoed query string or an error mentioning "__schema".
-      let introspectionExposed = false;
+      let typeCount = 0;
       try {
         const parsed = JSON.parse(gqlText);
-        introspectionExposed = Array.isArray(parsed?.data?.__schema?.types) && parsed.data.__schema.types.length > 0;
+        if (Array.isArray(parsed?.data?.__schema?.types)) typeCount = parsed.data.__schema.types.length;
       } catch {
-        introspectionExposed = false;
+        typeCount = 0;
       }
-      if (introspectionExposed) {
+      if (typeCount > 0) {
+        // Receipt: the introspection query and the schema dump it returned. The
+        // returned schema IS the evidence — quote the "__schema" result marker.
+        const quote = '"__schema"';
+        const schemaIdx = gqlText.indexOf(quote);
+        const requestText = renderRawRequest(
+          "POST",
+          `${url}/graphql`,
+          { ...apiHeaders, "Content-Type": "application/json" },
+          gqlBody,
+        );
+        const responseText = renderRawResponse(gqlRes, windowAround(gqlText, Math.max(0, schemaIdx), quote.length, 2000));
         apiSecFindings.push({
           testName: "GraphQL Schema Introspection Exposed",
           endpoint: "/graphql",
+          // Disclosure, not exploitation — the schema is the evidence. Kept at
+          // `high`, never `critical` (spec §3.6 / open decision #3).
           severity: "high",
           description:
             "An active API endpoint probe discovered that GraphQL introspection is globally reachable. Attackers can effortlessly dump the entire undocumented internal schema definitions.",
           fix: "Disable introspection blocks in the production GraphQL backend. Shield API with explicit token authentication schemas.",
-          rawRequest: reqRaw,
-          rawResponse: resRaw,
+          evidence: {
+            method: "introspection",
+            attack: { request: requestText, response: responseText },
+            signal: {
+              quote,
+              offsetInResponse: responseText.indexOf(quote),
+              why: `The endpoint answered a standard introspection query with a full schema result (data.__schema.types — ${typeCount} types), so the entire internal API schema is publicly dumpable.`,
+            },
+            demonstration: `We sent a standard GraphQL introspection query to /graphql and the server returned its full schema — ${typeCount} types — with no authentication required. Anyone can map your entire API surface, including undocumented fields.`,
+            reproduction: `curl -s -X POST "${url}/graphql" -H "Content-Type: application/json" --data '${gqlBody}'`,
+            capturedAt: new Date().toISOString(),
+          },
         });
       }
     } catch (e) {
@@ -893,6 +1123,22 @@ export async function runDiagnostics(
       }
     } catch (e) {
       /* Ignore fetch errors */
+    }
+
+    // 3. Two-identity BOLA / IDOR — proves (or disproves) a cross-tenant read when
+    // the caller supplied two owned test identities. Uses a clean, auth-free base
+    // for the control request so "unauthenticated" really means no credentials.
+    if (opts.bolaIdentities && opts.bolaIdentities.length === 2) {
+      try {
+        const bolaBase = {
+          "User-Agent": headers["User-Agent"] || "Seclayer-Security-Scanner/2.0",
+          "Cache-Control": "no-cache",
+        };
+        const bolaResults = await bolaProbe(host, opts.bolaIdentities, bolaBase);
+        if (bolaResults) apiSecFindings.push(...bolaResults);
+      } catch (e) {
+        /* best-effort */
+      }
     }
   } catch (globalErr) {
     console.warn("API Security fuzzing encounted top-level error", globalErr);
@@ -998,12 +1244,12 @@ async function fuzzDiscoveredTargets(
     return u.toString();
   };
 
-  const probe = async (target: string): Promise<string> => {
+  const probe = async (target: string): Promise<{ res: Response; text: string }> => {
     const ctl = new AbortController();
     const id = setTimeout(() => ctl.abort(), 4000);
     try {
       const res = await safeFetch(target, { headers: fuzzHeaders, signal: ctl.signal });
-      return await res.text();
+      return { res, text: await res.text() };
     } finally {
       clearTimeout(id);
     }
@@ -1023,9 +1269,11 @@ async function fuzzDiscoveredTargets(
       // SQL injection: error-based signature on a discovered parameter.
       try {
         budget--;
-        const text = await probe(buildUrl(t.url, param, "' OR 1=1-- -"));
+        const attackUrl = buildUrl(t.url, param, "' OR 1=1-- -");
+        const { res, text } = await probe(attackUrl);
         const key = `sqli:${endpointPath}:${param}`;
-        if (sqlErrorSig.test(text) && !reported.has(key)) {
+        const m = sqlErrorSig.exec(text);
+        if (m && !reported.has(key)) {
           reported.add(key);
           findings.push({
             testName: "SQL Injection (discovered parameter)",
@@ -1033,6 +1281,17 @@ async function fuzzDiscoveredTargets(
             severity: "critical",
             description: `Injecting SQL metacharacters into the discovered parameter "${param}" on ${endpointPath} provoked a database error in the response, indicating an exploitable SQL injection.`,
             fix: "Use parameterized queries / prepared statements for this endpoint; never concatenate request input into SQL.",
+            evidence: buildProbeEvidence({
+              method: "error-signature",
+              attackUrl,
+              requestHeaders: fuzzHeaders,
+              res,
+              body: text,
+              matchIndex: m.index,
+              quote: m[0],
+              why: `This raw database error is emitted only when the injected quote breaks the SQL query's syntax, proving the "${param}" parameter reaches the database unescaped.`,
+              demonstration: `We injected "' OR 1=1-- -" into the "${param}" parameter on ${endpointPath} and the server returned a raw database error — proof that this parameter's value is concatenated into a SQL query unescaped.`,
+            }),
           });
         }
       } catch { /* probe failed */ }
@@ -1044,9 +1303,11 @@ async function fuzzDiscoveredTargets(
         budget--;
         const token = `sx${crypto.randomBytes(4).toString("hex")}`;
         const payload = `<svg/onload=${token}>`;
-        const text = await probe(buildUrl(t.url, param, payload));
+        const attackUrl = buildUrl(t.url, param, payload);
+        const { res, text } = await probe(attackUrl);
         const key = `xss:${endpointPath}:${param}`;
-        if (text.includes(payload) && !reported.has(key)) {
+        const idx = text.indexOf(payload);
+        if (idx !== -1 && !reported.has(key)) {
           reported.add(key);
           findings.push({
             testName: "Reflected XSS (discovered parameter)",
@@ -1054,6 +1315,17 @@ async function fuzzDiscoveredTargets(
             severity: "high",
             description: `The discovered parameter "${param}" on ${endpointPath} reflects unencoded HTML/JavaScript into the response, confirming a reflected Cross-Site Scripting vulnerability.`,
             fix: "Apply context-aware output encoding for this parameter and deploy a restrictive Content-Security-Policy.",
+            evidence: buildProbeEvidence({
+              method: "reflection",
+              attackUrl,
+              requestHeaders: fuzzHeaders,
+              res,
+              body: text,
+              matchIndex: idx,
+              quote: payload,
+              why: `The payload was reflected verbatim and unescaped, so a browser executes the injected "${param}" value as live markup rather than rendering it as text.`,
+              demonstration: `We placed ${payload} in the "${param}" parameter on ${endpointPath} and the server echoed it back unescaped — an attacker-supplied script in this parameter would run in a visitor's browser.`,
+            }),
           });
         }
       } catch { /* probe failed */ }
@@ -1061,6 +1333,137 @@ async function fuzzDiscoveredTargets(
   }
 
   return { findings, paramsTested };
+}
+
+// Two-identity BOLA / IDOR probe (docs/confirmed-evidence-spec.md §3.1a). Given two
+// owned test identities A and B, it proves — or disproves — that A can read B's
+// object. A PROVEN result requires all three: A reads its own object (baseline),
+// A reads B's object and gets B's data back (attack), and an unauthenticated request
+// to the same object is denied (control). Anything short of that is reported
+// honestly at a lower tier — never as a Confirmed BOLA.
+async function bolaProbe(
+  baseOrigin: string,
+  identities: [BolaIdentity, BolaIdentity],
+  baseHeaders: Record<string, string>,
+): Promise<DiagnosticResult["apiSecFindings"]> {
+  const out: NonNullable<DiagnosticResult["apiSecFindings"]> = [];
+  const [A, B] = identities;
+  const withAuth = (id: BolaIdentity) => ({ ...baseHeaders, ...parseAuthHeader(id.authHeader) });
+
+  const get = async (u: string, headers: Record<string, string>) => {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 4000);
+    try {
+      const res = await safeFetch(u, { headers, signal: ctl.signal });
+      return { res, text: await res.text() };
+    } finally {
+      clearTimeout(t);
+    }
+  };
+  const exchange = (label: string, method: string, u: string, headers: Record<string, string>, res: Response, text: string, focus?: string): RawExchange => {
+    const idx = focus ? Math.max(0, text.indexOf(focus)) : 0;
+    return {
+      identity: label,
+      request: renderRawRequest(method, u, headers),
+      response: renderRawResponse(res, windowAround(text, idx, focus ? focus.length : 0, 1500)),
+    };
+  };
+
+  let aUrl: string, bUrl: string;
+  try {
+    aUrl = new URL(A.ownResource, baseOrigin).toString();
+    bUrl = new URL(B.ownResource, baseOrigin).toString();
+  } catch {
+    return out;
+  }
+
+  try {
+    // baseline (A reads own) + setup (B reads own) → establish distinct markers.
+    const aOwn = await get(aUrl, withAuth(A));
+    const bOwn = await get(bUrl, withAuth(B));
+    const aMarker = extractIdentityMarker(aOwn.text, A.ownMarker);
+    const bMarker = extractIdentityMarker(bOwn.text, B.ownMarker);
+
+    if (!aMarker || !bMarker || aMarker === bMarker) {
+      out.push({
+        testName: "Cross-Tenant Access (needs verification)",
+        endpoint: `${A.ownResource} vs ${B.ownResource}`,
+        severity: "medium",
+        description:
+          "Two distinct identity markers could not be established from the supplied test accounts, so a cross-tenant read could neither be proven nor ruled out. A PROVEN BOLA check needs a value unique to each account's data.",
+        fix: "Supply a distinct ownMarker for each identity (e.g. each test user's email) so the scanner can prove or disprove cross-tenant access.",
+      });
+      return out;
+    }
+
+    // attack (A reads B's object) + control (unauthenticated reads B's object).
+    const attack = await get(bUrl, withAuth(A));
+    const control = await get(bUrl, baseHeaders);
+    const attackHasB = attack.res.status === 200 && attack.text.includes(bMarker);
+    const controlHasB = control.res.status === 200 && control.text.includes(bMarker);
+    // The marker must be B-exclusive: if it also appears in A's own object it is
+    // shared/common data, not proof A crossed a tenant boundary.
+    const bMarkerExclusive = !aOwn.text.includes(bMarker);
+
+    if (controlHasB) {
+      // The resource is world-readable → unauthenticated exposure (§3.1b), not BOLA.
+      out.push({
+        testName: "Unauthenticated Access to Protected Resource",
+        endpoint: B.ownResource,
+        severity: "critical",
+        description: `An unauthenticated request to ${B.ownResource} returned ${B.label}'s object data (identified by "${bMarker}"). This per-user resource is readable with no credentials at all.`,
+        fix: "Require authentication on this endpoint and enforce that the caller owns the requested object before returning it.",
+        evidence: {
+          method: "differential",
+          attack: exchange("unauthenticated", "GET", bUrl, baseHeaders, control.res, control.text, bMarker),
+          signal: { quote: bMarker, offsetInResponse: 0, why: `"${bMarker}" belongs to ${B.label} and was returned to a request carrying no credentials.` },
+          demonstration: `We requested ${B.label}'s resource with no login at all, and the server returned their private data ("${bMarker}"). Anyone on the internet can read it.`,
+          reproduction: `curl -s "${bUrl}"`,
+          capturedAt: new Date().toISOString(),
+        },
+      });
+    } else if (attackHasB && bMarkerExclusive) {
+      // The real thing: a proven cross-tenant authorized read.
+      out.push({
+        testName: "Broken Object Level Authorization (BOLA)",
+        endpoint: B.ownResource,
+        severity: "critical",
+        description: `${A.label}, authenticated as itself, read ${B.label}'s object at ${B.ownResource}. The response contained ${B.label}'s data ("${bMarker}") — absent from ${A.label}'s own object — and an unauthenticated request to the same resource was denied (HTTP ${control.res.status}), confirming the resource is access-controlled.`,
+        fix: "Enforce object-level authorization: verify the authenticated principal owns (or may access) the specific object id before returning it.",
+        evidence: {
+          method: "differential",
+          baseline: exchange(A.label, "GET", aUrl, withAuth(A), aOwn.res, aOwn.text, aMarker),
+          attack: exchange(A.label, "GET", bUrl, withAuth(A), attack.res, attack.text, bMarker),
+          control: exchange("unauthenticated", "GET", bUrl, baseHeaders, control.res, control.text),
+          signal: { quote: bMarker, offsetInResponse: 0, why: `"${bMarker}" is ${B.label}'s data; it appears in ${A.label}'s cross-tenant read, yet a logged-out request is denied.` },
+          demonstration: `Logged in as ${A.label}, we opened ${B.label}'s record and the server returned it — including "${bMarker}", which is ${B.label}'s data, not ${A.label}'s. A logged-out visitor is denied, so this data is meant to be private.`,
+          reproduction: `curl -s "${bUrl}" -H "Authorization: <${A.label} token>"`,
+          capturedAt: new Date().toISOString(),
+        },
+      });
+    } else if (attackHasB && !bMarkerExclusive) {
+      // A got B's marker but it also appears in A's own object → not a clean proof.
+      out.push({
+        testName: "Cross-Tenant Access (needs verification)",
+        endpoint: B.ownResource,
+        severity: "medium",
+        description: `${A.label} received ${B.label}'s marker from ${B.ownResource}, but that value also appears in ${A.label}'s own object, so it may be shared data rather than a tenant-boundary break. Use a marker that is unique to ${B.label} to prove or rule this out.`,
+        fix: "Re-test with an ownMarker unique to each identity's data to confirm whether object-level authorization is actually broken.",
+      });
+    } else {
+      // Authorization held — a passing result, surfaced as a coverage win.
+      out.push({
+        testName: "Object-Level Authorization Enforced",
+        endpoint: B.ownResource,
+        severity: "info",
+        description: `Cross-tenant check passed: ${A.label} could not read ${B.label}'s object at ${B.ownResource} (HTTP ${attack.res.status}) and ${B.label}'s marker was not exposed. Object-level authorization is being enforced here.`,
+        fix: "No action required — this is a passing authorization control, shown for coverage.",
+      });
+    }
+  } catch {
+    /* best-effort probe */
+  }
+  return out;
 }
 
 // Convert diagnostics into structured Category Findings
@@ -1251,6 +1654,7 @@ export function compileStaticFindings(diag: DiagnosticResult): {
         confidence: "high",
         fix: rt.fix,
         category: "RED_TEAM",
+        evidence: rt.evidence, // exploit receipt, when the probe captured one
       });
     });
   }
@@ -1269,6 +1673,7 @@ export function compileStaticFindings(diag: DiagnosticResult): {
         endpoint: api.endpoint,
         rawRequest: api.rawRequest,
         rawResponse: api.rawResponse,
+        evidence: api.evidence, // exploit receipt, when the probe captured one
       });
     });
   }

@@ -14,6 +14,27 @@ import { rateLimit } from './server/rateLimit.js';
 import { createCheckoutSession, parseWebhookEvent, isStripeConfigured } from './server/stripe.js';
 import { notifyScanComplete } from './server/notify.js';
 import { extractDomain, generateVerificationToken, txtRecordName, WELL_KNOWN_PATH, checkTxtRecord, checkWellKnownFile } from './server/domainVerify.js';
+import type { BolaIdentity } from './src/types.js';
+
+// Validate + normalize a client-supplied two-identity BOLA payload. Returns a
+// clean [A, B] tuple, or undefined when the shape is invalid (in which case the
+// scan simply runs without the cross-tenant probe). Credentials here are used for
+// this run only and never persisted on the scan record.
+function sanitizeBolaIdentities(raw: any): [BolaIdentity, BolaIdentity] | undefined {
+  if (!Array.isArray(raw) || raw.length !== 2) return undefined;
+  const one = (x: any, fallbackLabel: string): BolaIdentity | null => {
+    if (!x || typeof x !== 'object') return null;
+    const authHeader = typeof x.authHeader === 'string' ? x.authHeader.trim() : '';
+    const ownResource = typeof x.ownResource === 'string' ? x.ownResource.trim() : '';
+    if (!authHeader || !ownResource) return null;
+    const label = typeof x.label === 'string' && x.label.trim() ? x.label.trim().slice(0, 40) : fallbackLabel;
+    const ownMarker = typeof x.ownMarker === 'string' && x.ownMarker.trim() ? x.ownMarker.trim().slice(0, 200) : undefined;
+    return { label, authHeader, ownResource, ownMarker };
+  };
+  const a = one(raw[0], 'tenant-A');
+  const b = one(raw[1], 'tenant-B');
+  return a && b ? [a, b] : undefined;
+}
 
 async function startServer() {
   if (!validateConfigOnBoot() && config.isProd) {
@@ -184,6 +205,10 @@ async function startServer() {
       return res.status(400).json({ status: 'error', message: 'Target URL is required' });
     }
 
+    // Optional two-identity BOLA/IDOR test. Only meaningful on a verified target
+    // (active probes gated below); when the shape is invalid it is simply dropped.
+    const bolaIdentities = sanitizeBolaIdentities(req.body.bolaIdentities);
+
     const user = db.getUser(userId);
     if (!user) {
       return res.status(404).json({ status: 'error', message: 'User profile not found' });
@@ -209,13 +234,16 @@ async function startServer() {
     // Create the scan entry in queued state
     const scan = db.createScan(userId, url, authHeader);
 
-    // Active exploit probing only runs once this user has verified ownership
-    // of the target's domain (see /api/domains/verify/*); otherwise the scan
-    // still runs, but with passive recon only.
-    const allowActiveProbes = db.isDomainVerified(userId, extractDomain(url));
+    // Active exploit probing runs only when BOTH hold: the caller asked for it
+    // (per-scan choice — omitted defaults to true for back-compat), AND this user
+    // has verified ownership of the target's domain (see /api/domains/verify/*).
+    // Either false → passive recon only. This lets an owner run a passive-only
+    // sweep of a domain they've already verified.
+    const requestedActive = req.body.activeProbes !== false;
+    const allowActiveProbes = requestedActive && db.isDomainVerified(userId, extractDomain(url));
 
     // Trigger asynchronous background worker flow mimicking the pg-boss worker pipeline
-    processScanJob(scan.id, allowActiveProbes);
+    processScanJob(scan.id, allowActiveProbes, bolaIdentities);
 
     res.json({ status: 'ok', scan });
   });
@@ -550,7 +578,7 @@ async function startServer() {
   // --- Background scan worker ---
   // Drives a scan through its real lifecycle: status reflects actual work
   // boundaries (diagnostics, then AI analysis), with no artificial delays.
-  async function processScanJob(scanId: string, allowActiveProbes: boolean) {
+  async function processScanJob(scanId: string, allowActiveProbes: boolean, bolaIdentities?: [BolaIdentity, BolaIdentity]) {
     try {
       console.log(`[Job Worker] Starting scan ${scanId}`);
 
@@ -561,7 +589,7 @@ async function startServer() {
 
       // Active diagnostics (HTTP probing, header/secret/SCA/path checks, fuzzing).
       db.updateScan(scanId, { status: 'scanning' });
-      const diagnostics = await runDiagnostics(scan.url, scan.authHeader, { allowActiveProbes });
+      const diagnostics = await runDiagnostics(scan.url, scan.authHeader, { allowActiveProbes, bolaIdentities });
 
       // Fast (flash), cheap narration of what the sweep actually found — read
       // by the progress UI in place of scripted filler text.

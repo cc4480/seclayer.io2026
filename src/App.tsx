@@ -108,7 +108,7 @@ export default function App() {
     }, 400);
   };
 
-  const onInitiateScan = async (url: string, authHeader?: string) => {
+  const onInitiateScan = async (url: string, authHeader?: string, bolaIdentities?: any, activeProbes: boolean = true) => {
     if (!user) {
       setShowLogin(true);
       return;
@@ -119,7 +119,7 @@ export default function App() {
       const res = await fetch('/api/scans', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, authHeader })
+        body: JSON.stringify({ url, authHeader, bolaIdentities, activeProbes })
       });
 
       if (res.ok) {

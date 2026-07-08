@@ -11,6 +11,27 @@ import { callDeepSeek, getApiKey } from './deepseekClient.js';
 // server/narrate.ts.)
 const MODEL_PRO = process.env.DEEPSEEK_MODEL_PRO || 'deepseek-v4-pro';
 
+// The active-exploit pillars are authored entirely by the scanner, never the model.
+const EXPLOIT_CATEGORIES = new Set(['RED_TEAM', 'API_SEC']);
+
+// Reconcile the model's finding list with machine-collected ground truth. Exploit
+// findings (RED_TEAM/API_SEC) carry receipts the scanner captured live — the model
+// must not author, reword, drop, or soften them. So we discard any exploit-pillar
+// findings the model wrote (it tends to rephrase "Active SQL Injection Probe" into
+// "SQL Injection", which would otherwise double-list next to the PROVEN original)
+// and splice the compiled exploit findings back in verbatim. The model keeps
+// ownership of everything else (headers, TLS, SCA, perimeter, etc.). Mutates and
+// returns `finalFindings`.
+export function reattachEvidence(finalFindings: Finding[], staticFindings: Finding[]): Finding[] {
+  const reconciled = finalFindings.filter((f) => !EXPLOIT_CATEGORIES.has(f.category));
+  for (const orig of staticFindings) {
+    if (EXPLOIT_CATEGORIES.has(orig.category)) reconciled.push(orig);
+  }
+  finalFindings.length = 0;
+  finalFindings.push(...reconciled);
+  return finalFindings;
+}
+
 // The chain-of-thought can run long; cap what we persist/display.
 const MAX_REASONING_CHARS = 8000;
 function truncateReasoning(text: string | undefined): string | undefined {
@@ -192,6 +213,9 @@ Ensure the returned output is strictly valid JSON compliant with the required st
           : buildAgentPrompt({ title, description: f.description || '', fix, category, owasp: mapOwasp(category, title) }, url),
       };
     });
+
+    // Re-attach machine-collected ground truth the model must never author or drop.
+    reattachEvidence(finalFindings, staticCompiled.findings);
 
     // Find highest severity from findings
     let finalSeverity: Severity = 'low';

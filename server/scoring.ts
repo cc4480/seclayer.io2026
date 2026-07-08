@@ -39,13 +39,28 @@ export function normalizeSeverity(sev: string | undefined): Severity {
   return "info";
 }
 
-// A finding is "Confirmed" when the engine is confident it is real (a
-// probe-confirmed exploit, an observed cookie flag, etc. — recorded as
-// confidence: "high"). Everything lower is heuristic and shown as "Needs
-// Verification". Missing confidence is treated as confirmed so legacy findings
-// keep their existing presentation.
-export function isConfirmed(finding: Pick<Finding, "confidence">): boolean {
-  return finding.confidence === undefined || finding.confidence === "high";
+// A finding is PROVEN when it carries a valid, replayable exploit receipt: an
+// evidence bundle whose `signal.quote` actually appears verbatim in the stored
+// `attack.response`. That substring check is the whole guarantee — we can never
+// claim proof of a byte we didn't capture. PROVEN is the top truth-tier; the word
+// only appears when the user can see the receipt.
+export function isProven(finding: Pick<Finding, "evidence">): boolean {
+  const ev = finding.evidence;
+  if (!ev || !ev.attack || typeof ev.attack.response !== "string") return false;
+  const quote = ev.signal?.quote;
+  if (!quote) return false;
+  return ev.attack.response.includes(quote);
+}
+
+// A finding is "Confirmed" when the engine is confident it is real: either it
+// carries a PROVEN exploit receipt, or it was recorded as high-confidence (a
+// probe-confirmed exploit, an observed cookie flag, an exposed file matched by
+// body signature, etc.). Everything lower is heuristic and shown as DETECTED /
+// "Needs Verification". Missing confidence is treated as confirmed so legacy
+// findings keep their existing presentation. (Adding the PROVEN path is purely
+// additive — it never demotes a finding that was already Confirmed.)
+export function isConfirmed(finding: Pick<Finding, "confidence" | "evidence">): boolean {
+  return isProven(finding) || finding.confidence === undefined || finding.confidence === "high";
 }
 
 // Letter grade derived from the numeric score. One mapping, used everywhere a

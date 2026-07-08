@@ -9,6 +9,48 @@ export interface User {
   createdAt: string;
 }
 
+// A single request/response pair captured verbatim during active probing — the
+// raw material of a PROVEN finding's receipt. Bodies are truncated with an
+// explicit "[…truncated N bytes]" marker (never silently), and credentials are
+// redacted while the payload that constitutes the proof is preserved.
+export interface RawExchange {
+  request: string;   // raw HTTP request line + headers + body (secrets redacted)
+  response: string;  // status line + headers + body (explicitly truncated)
+  identity?: string; // which test identity issued it, e.g. "tenant-A"
+}
+
+// The stored, replayable proof behind a PROVEN finding. Its presence — plus a
+// `signal.quote` that is a literal substring of `attack.response` — is what earns
+// a finding the top "PROVEN" tier (see server/scoring.ts:isProven). Without a
+// valid bundle a finding still ships, just in the DETECTED tier.
+export interface ExploitEvidence {
+  method: 'reflection' | 'error-signature' | 'oracle' | 'differential' | 'introspection';
+  attack: RawExchange;      // the request that demonstrated the flaw
+  baseline?: RawExchange;   // authorized/benign control request, when the class uses one
+  control?: RawExchange;    // negative control (e.g. unauthenticated → denied)
+  // The exact bytes that prove the finding, quoted verbatim from `attack.response`
+  // so the UI can highlight them. `offsetInResponse` indexes into the stored
+  // response string; `why` is a one-line explanation of what the quote proves.
+  signal: { quote: string; offsetInResponse: number; why: string };
+  // One plain-English sentence a non-technical builder can read and believe.
+  demonstration: string;
+  reproduction: string;     // copy-pasteable curl to replay the attack exchange
+  capturedAt: string;
+  // Ownership proof this active action was gated behind, when threaded through.
+  ownership?: { verificationId?: string; method?: 'dns' | 'file' | 'attestation' };
+}
+
+// One of the two owned test identities required to PROVE a cross-tenant BOLA/IDOR
+// (see docs/confirmed-evidence-spec.md §3.1a). Authorization is relational: you
+// cannot prove an object should have been private from a single request, so a
+// Confirmed/PROVEN BOLA requires reading identity B's object as identity A.
+export interface BolaIdentity {
+  label: string;       // human tag, e.g. "tenant-A"
+  authHeader: string;  // this identity's credential (Authorization/Cookie/…)
+  ownResource: string; // a path/URL to an object this identity owns, e.g. "/api/v1/orders/1001"
+  ownMarker?: string;  // a value known to be unique to this identity's data (e.g. its email)
+}
+
 export interface Finding {
   id: string;
   title: string;
@@ -24,6 +66,9 @@ export interface Finding {
   endpoint?: string;
   rawRequest?: string;
   rawResponse?: string;
+  // Stored, replayable exploit receipt. When present and valid this promotes the
+  // finding to the PROVEN tier. Generalizes the flat rawRequest/rawResponse above.
+  evidence?: ExploitEvidence;
   impact?: string; // plain-English consequence if this is exploited
   // Ready-to-paste instructions for an AI coding agent (Cursor, Claude Code,
   // Windsurf, etc.) to locate and fix this specific finding in the user's own

@@ -11,9 +11,28 @@ import http from 'node:http';
 
 const PORT = Number(process.argv[2] || process.env.VULN_PORT || 4100);
 
+// Two seeded tenants for the BOLA/IDOR demo. /api/orders/:id returns ANY order to
+// ANY authenticated token (no ownership check) and 401 when unauthenticated — so a
+// two-identity scan can prove tenant-A reading tenant-B's order.
+const ORDERS = {
+  '1001': { id: '1001', owner: 'tok-alice', email: 'alice@vulnshop.test', total: '$42.00', card: '**** 4242' },
+  '1002': { id: '1002', owner: 'tok-bob', email: 'bob@vulnshop.test', total: '$88.00', card: '**** 1881' },
+};
+
 const server = http.createServer((req, res) => {
   const u = new URL(req.url, `http://127.0.0.1:${PORT}`);
   const q = u.searchParams;
+
+  // 5. BOLA / IDOR — object-level authorization is missing: any valid token can
+  //    read any order id.
+  const om = u.pathname.match(/^\/api\/orders\/(\d+)$/);
+  if (om) {
+    const tok = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
+    if (!tok) { res.writeHead(401, { 'Content-Type': 'application/json' }); res.end('{"error":"unauthorized"}'); return; }
+    const o = ORDERS[om[1]];
+    if (!o) { res.writeHead(404, { 'Content-Type': 'application/json' }); res.end('{"error":"not found"}'); return; }
+    res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(o)); return;
+  }
 
   let body = `<!doctype html><html><head><title>Vulnerable Test App</title></head>`
     + `<body><h1>Intentionally Vulnerable Test Target</h1>`
@@ -29,9 +48,17 @@ const server = http.createServer((req, res) => {
   if (q.has('q')) {
     body += `<div class="results">Search results for: ${q.get('q')}</div>`;
   }
-  // 3. OS command injection — emit an `id`-command style output.
+  // 3. OS command injection — simulate a shell that evaluates the injected
+  //    command. `expr A + B` returns the computed sum (arithmetic oracle), and
+  //    `id` returns a uid/gid line. Nothing is actually executed — the responses
+  //    are computed/hardcoded so the target stays safe to run.
   if (q.has('ping')) {
-    body += `<pre>PING ${q.get('ping')}\nuid=0(root) gid=0(root) groups=0(root)</pre>`;
+    const ping = q.get('ping');
+    let out = `PING ${ping}`;
+    const expr = /expr\s+(\d+)\s*\+\s*(\d+)/.exec(ping);
+    if (expr) out += `\n${Number(expr[1]) + Number(expr[2])}`;
+    if (/;\s*id\b/.test(ping)) out += `\nuid=0(root) gid=0(root) groups=0(root)`;
+    body += `<pre>${out}</pre>`;
   }
   // 4. SSRF — pretend to have fetched the attacker-supplied URL and leak a banner.
   if (q.has('url')) {
