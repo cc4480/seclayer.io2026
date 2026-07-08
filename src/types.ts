@@ -64,10 +64,8 @@ export interface Finding {
   suppressionReason?: string;
   suppressedAt?: string;
   endpoint?: string;
-  rawRequest?: string;
-  rawResponse?: string;
   // Stored, replayable exploit receipt. When present and valid this promotes the
-  // finding to the PROVEN tier. Generalizes the flat rawRequest/rawResponse above.
+  // finding to the PROVEN tier and carries the raw request/response exchange(s).
   evidence?: ExploitEvidence;
   impact?: string; // plain-English consequence if this is exploited
   // Ready-to-paste instructions for an AI coding agent (Cursor, Claude Code,

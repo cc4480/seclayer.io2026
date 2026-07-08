@@ -389,6 +389,38 @@ test('two-identity BOLA: authorization enforced → passing info note, no BOLA',
   });
 });
 
+test('exposed user-object endpoint gets a PROVEN receipt and never collides with the real BOLA', async () => {
+  // Serves BOTH the fixed-path user endpoint the legacy probe hits AND a BOLA-
+  // vulnerable orders API, so we prove they coexist as two distinct findings
+  // (the legacy probe no longer shadows the two-identity PROVEN BOLA by title).
+  const handler: http.RequestListener = (req, res) => {
+    const u = new URL(req.url || '/', 'http://127.0.0.1');
+    if (u.pathname === '/api/v1/users/admin') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ email: 'admin@corp.test', role: 'admin' }));
+      return;
+    }
+    // reuse the BOLA-vulnerable orders handler behaviour
+    return ordersHandler('bola')(req, res);
+  };
+  await withServer(handler, async (port) => {
+    const diag = await runDiagnostics(`http://127.0.0.1:${port}`, undefined, { allowActiveProbes: true, bolaIdentities: IDS });
+    const findings = diag.apiSecFindings || [];
+    const exposed = findings.find((f) => /Exposed User Object Endpoint/i.test(f.testName));
+    assert.ok(exposed, 'the fixed-path user endpoint must be reported');
+    assert.ok(exposed!.evidence && exposed!.evidence.signal.quote === 'admin@corp.test', 'with a receipt quoting the leaked field');
+    assert.equal(isProven({ evidence: exposed!.evidence } as any), true);
+    assert.ok(!/BOLA/i.test(exposed!.testName), 'and it must NOT claim BOLA');
+
+    const bola = findings.find((f) => /^Broken Object Level Authorization/i.test(f.testName));
+    assert.ok(bola && bola.evidence, 'the real two-identity BOLA still appears alongside it');
+    // Two distinct titles → both survive title-dedup in compileStaticFindings.
+    const compiled = compileStaticFindings(diag);
+    assert.ok(compiled.findings.some((f) => /Exposed User Object Endpoint/i.test(f.title)));
+    assert.ok(compiled.findings.some((f) => /^Broken Object Level Authorization/i.test(f.title)));
+  });
+});
+
 test('two-identity BOLA: public endpoint → Unauthenticated Access (§3.1b), not BOLA', async () => {
   await withServer(ordersHandler('public'), async (port) => {
     const diag = await runDiagnostics(`http://127.0.0.1:${port}`, undefined, { allowActiveProbes: true, bolaIdentities: IDS });

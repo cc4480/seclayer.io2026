@@ -324,8 +324,8 @@ ranking, never the thing that grants PROVEN.
 
 ## 5. Code deltas (all additive — no probe removed)
 
-1. **`Finding` type** — add `evidence?: ExploitEvidence` (generalizes the existing
-   `rawRequest`/`rawResponse`, which stay populated during transition — open #4).
+1. **`Finding` type** — `evidence?: ExploitEvidence` is now the sole raw-exchange
+   carrier; the flat `rawRequest`/`rawResponse` fields have been retired (decision #5).
 2. **`scanner.ts` RED_TEAM probes** — keep every probe; additionally store the
    request + response + quoted signal as an `ExploitEvidence`. Stop *relying on* a
    hardcoded `confidence:"high"` to mean proof.
@@ -372,12 +372,17 @@ the definition earn the right to run against the scrubbed 20 and 100.
 2. ~~**Confirmed/Inferred vs additive**~~ — **DECIDED (2026-07-07):** additive, keep
    every probe; two tiers rendered **PROVEN / DETECTED**, both shipped and visible.
 
+3. ~~**Severity of introspection**~~ — **DECIDED:** PROVEN-but-`high` (disclosure),
+   never `critical`. Implemented in the GraphQL probe.
+5. ~~**Field migration**~~ — **DECIDED (2026-07-07):** cut over in one change.
+   `rawRequest`/`rawResponse` retired from `Finding`; `ExploitEvidence` is the sole
+   raw-exchange carrier. The legacy single-request BOLA probe was retitled
+   "Exposed User Object Endpoint" (it never proved cross-tenant access) and now
+   carries a proper receipt instead of the flat fields.
+
 Open:
 
-3. **Severity of introspection** — PROVEN-but-`high` (disclosure), not `critical`?
 4. **Collaborator infra for SSRF** — stand up an out-of-band callback listener, or
    accept internal-content-reflection as the only PROVEN SSRF signal for v1? (Without
    it, reflected-only cases ship DETECTED.)
-5. **Field migration** — keep `rawRequest`/`rawResponse` alongside `ExploitEvidence`
-   through the transition (proposed), or cut over in one change?
 ```

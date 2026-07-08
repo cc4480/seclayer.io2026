@@ -344,8 +344,6 @@ export interface DiagnosticResult {
     description: string;
     fix: string;
     endpoint: string;
-    rawRequest?: string;
-    rawResponse?: string;
     evidence?: ExploitEvidence; // stored exploit receipt (promotes to PROVEN)
   }>;
   // True when active exploit probing (SQLi/XSS/cmd-injection/SSRF/GraphQL/BOLA
@@ -1081,44 +1079,60 @@ export async function runDiagnostics(
       /* Ignore fetch errors */
     }
 
-    // 2. Broken Object Level Authorization (BOLA) Probe
+    // 2. Exposed user-object endpoint probe (fixed-path guess). This is a
+    // single-request heuristic: it does NOT prove a cross-tenant authorization
+    // break — that is the separate two-identity BOLA probe below. So it is titled
+    // honestly ("Exposed User Object Endpoint"), never "BOLA", which also keeps it
+    // from colliding with the PROVEN BOLA finding during title-dedup.
     try {
       const idorCtl = new AbortController();
       const idorId = setTimeout(() => idorCtl.abort(), 4000);
-      const reqRawIdor = `GET /api/v1/users/admin HTTP/1.1\nHost: ${hostname}\nAccept: application/json`;
-
-      const idorRes = await safeFetch(`${url}/api/v1/users/admin`, {
-        headers: apiHeaders,
-        signal: idorCtl.signal,
-      });
+      const idorUrl = `${url}/api/v1/users/admin`;
+      const idorRes = await safeFetch(idorUrl, { headers: apiHeaders, signal: idorCtl.signal });
       clearTimeout(idorId);
       const idorText = await idorRes.text();
       const idorCt = idorRes.headers.get("content-type") || "text/plain";
-      const resRawIdor = `HTTP/1.1 ${idorRes.status} ${idorRes.statusText}\nContent-Type: ${idorCt}\n\n${idorText.substring(0, 500)}...`;
 
-      // Only flag when a JSON user object is actually returned — a 200 HTML
-      // page that happens to contain the word "email" is not a BOLA.
-      let bolaConfirmed = false;
+      // Only flag when a JSON user object is actually returned — a 200 HTML page
+      // that happens to contain the word "email" is not an exposed record. Quote a
+      // real identifying value (or the key name) so the receipt shows the leak.
+      let marker = "";
       if (idorRes.status === 200 && /application\/json/i.test(idorCt)) {
         try {
           const obj = JSON.parse(idorText);
           const candidate = obj?.user ?? obj?.data ?? obj;
-          bolaConfirmed = !!candidate && typeof candidate === "object" &&
-            ("email" in candidate || "role" in candidate || "username" in candidate);
-        } catch {
-          bolaConfirmed = false;
-        }
+          if (candidate && typeof candidate === "object") {
+            for (const k of ["email", "username", "role"]) {
+              const v = (candidate as any)[k];
+              if (typeof v === "string" && v) { marker = v; break; }
+            }
+            if (!marker) {
+              for (const k of ["email", "username", "role"]) {
+                if (k in candidate) { marker = `"${k}"`; break; }
+              }
+            }
+          }
+        } catch { marker = ""; }
       }
-      if (bolaConfirmed) {
+      if (marker && idorText.includes(marker)) {
         apiSecFindings.push({
-          testName: "Broken Object Level Authorization (BOLA)",
+          testName: "Exposed User Object Endpoint",
           endpoint: "/api/v1/users/admin",
           severity: "critical",
           description:
-            "API testing successfully resolved protected user entities directly by probing enumerated resource IDs, overriding local tenant boundaries.",
-          fix: "Enforce stringent object-level resource verification. Explicitly map authorization states against the retrieved user objects inside controller logic.",
-          rawRequest: reqRawIdor,
-          rawResponse: resRawIdor,
+            "A request to /api/v1/users/admin returned a JSON user/admin record directly. Protected user objects should not be served from a guessable path.",
+          fix: "Require authentication and object-level authorization on user endpoints; do not expose admin/user records at predictable paths.",
+          evidence: buildProbeEvidence({
+            method: "oracle",
+            attackUrl: idorUrl,
+            requestHeaders: apiHeaders,
+            res: idorRes,
+            body: idorText,
+            matchIndex: idorText.indexOf(marker),
+            quote: marker,
+            why: "The endpoint returned a JSON user record carrying this identifying field, proving the user/admin object is served directly at this path.",
+            demonstration: `We requested /api/v1/users/admin and the server returned a user record containing ${marker}. A protected user object is reachable directly at this path.`,
+          }),
         });
       }
     } catch (e) {
@@ -1671,8 +1685,6 @@ export function compileStaticFindings(diag: DiagnosticResult): {
         fix: api.fix,
         category: "API_SEC",
         endpoint: api.endpoint,
-        rawRequest: api.rawRequest,
-        rawResponse: api.rawResponse,
         evidence: api.evidence, // exploit receipt, when the probe captured one
       });
     });
