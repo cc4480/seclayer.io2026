@@ -13,6 +13,7 @@ import { config, validateConfigOnBoot } from './server/config.js';
 import { rateLimit } from './server/rateLimit.js';
 import { createCheckoutSession, parseWebhookEvent, isStripeConfigured } from './server/stripe.js';
 import { notifyScanComplete } from './server/notify.js';
+import { computeNextRun } from './server/schedule.js';
 import { extractDomain, generateVerificationToken, txtRecordName, WELL_KNOWN_PATH, checkTxtRecord, checkWellKnownFile } from './server/domainVerify.js';
 import type { BolaIdentity } from './src/types.js';
 
@@ -334,11 +335,16 @@ async function startServer() {
   });
 
   app.post('/api/monitoring', requireAuth, (req, res) => {
-    const { url, frequencyDays = 7, scheduleString } = req.body;
+    const { url, frequencyDays = 7, hour, minute, weekday } = req.body || {};
     if (!url) {
       return res.status(400).json({ error: 'url is required' });
     }
-    const target = db.addMonitoredTarget(getUserId(req), url, frequencyDays, scheduleString);
+    const target = db.addMonitoredTarget(getUserId(req), url, {
+      frequencyDays: Number(frequencyDays) || 7,
+      hour: hour == null || hour === '' ? null : Number(hour),
+      minute: minute == null || minute === '' ? null : Number(minute),
+      weekday: weekday == null || weekday === '' ? null : Number(weekday),
+    });
     res.json({ status: 'ok', target });
   });
 
@@ -633,9 +639,14 @@ async function startServer() {
       });
       console.log(`[Job Worker] Completed scan ${scanId}`);
 
-      // Fire the user's alert webhook for actionable results (non-blocking).
+      // Fire the user's alert webhook when posture regresses vs the previous
+      // scan of this target (non-blocking). Both current and baseline are read
+      // through the suppression read-model so a suppressed finding never counts.
       const owner = db.getUser(completed.userId);
-      notifyScanComplete(owner?.notifyWebhook, db.getScanWithSuppressedFindings(completed));
+      const current = db.getScanWithSuppressedFindings(completed);
+      const prior = db.getPreviousCompletedScan(completed.userId, completed.url, completed.id);
+      const priorSuppressed = prior ? db.getScanWithSuppressedFindings(prior) : undefined;
+      notifyScanComplete(owner?.notifyWebhook, current, priorSuppressed);
 
     } catch (err: any) {
       console.error(`[Job Worker] FAILED scan ${scanId}:`, err?.message || err);
@@ -656,7 +667,14 @@ async function startServer() {
     try {
       const due = db.listDueMonitoredTargets(new Date().toISOString());
       for (const target of due) {
-        const next = new Date(Date.now() + (target.frequencyDays || 7) * 24 * 60 * 60 * 1000).toISOString();
+        // Reschedule on the target's real cadence (weekday + time-of-day), not a
+        // fixed now+N days, so the next run lands when the user actually chose.
+        const next = computeNextRun(new Date(), {
+          frequencyDays: target.frequencyDays,
+          hour: target.scanHour,
+          minute: target.scanMinute,
+          weekday: target.scanWeekday,
+        }).toISOString();
         try {
           const user = db.getUser(target.userId);
           if (!user || user.credits < 1) continue; // retry next tick once credits exist

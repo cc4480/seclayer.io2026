@@ -131,18 +131,24 @@ export default function Dashboard({
     if (!monitorUrl.trim()) return;
     setIsAddingMonitor(true);
 
-    let scheduleString = `Every day at ${monitorTime}`;
-    if (monitorFreq === 7) {
-      scheduleString = `Every ${monitorDay} at ${monitorTime}`;
-    } else if (monitorFreq === 30) {
-      scheduleString = `Monthly on the 1st at ${monitorTime}`;
-    }
+    // The time input is interpreted as UTC (see the label below). Send the
+    // schedule as structured fields; the server derives the human label and the
+    // exact next-run instant so display and timing can't drift apart.
+    const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const [hourStr, minuteStr] = (monitorTime || '09:00').split(':');
+    const body: Record<string, unknown> = {
+      url: monitorUrl,
+      frequencyDays: monitorFreq,
+      hour: Number(hourStr),
+      minute: Number(minuteStr),
+    };
+    if (monitorFreq === 7) body.weekday = WEEKDAYS.indexOf(monitorDay);
 
     try {
       const res = await fetch('/api/monitoring', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: monitorUrl, frequencyDays: monitorFreq, scheduleString })
+        body: JSON.stringify(body)
       });
       if (res.ok) {
         setMonitorUrl('');
@@ -1110,7 +1116,7 @@ export default function Dashboard({
                       </div>
                     )}
                     
-                    <div className="w-full sm:w-auto bg-black border border-[#27272a] rounded p-1.5 flex items-center">
+                    <div className="w-full sm:w-auto bg-black border border-[#27272a] rounded p-1.5 flex items-center gap-1.5">
                       <input
                         type="time"
                         value={monitorTime}
@@ -1118,6 +1124,7 @@ export default function Dashboard({
                         className="bg-transparent text-white text-xs font-mono w-full focus:outline-none p-1 cursor-pointer [color-scheme:dark]"
                         disabled={isAddingMonitor}
                       />
+                      <span className="text-[9px] text-[#52525b] font-mono pr-1 shrink-0">UTC</span>
                     </div>
                     
                     <button

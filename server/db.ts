@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import Database from 'better-sqlite3';
 import { User, Scan, CreditTransaction, ApiKey, Finding, SuppressionRule, MonitoredTarget, DomainVerification, ExecutiveBreakdown } from '../src/types.js';
 import { scoreFindings } from './scoring.js';
+import { MonitorSchedule, computeNextRun, describeSchedule } from './schedule.js';
 
 const DB_FILE = process.env.DB_PATH || path.join(process.cwd(), 'data.sqlite');
 
@@ -131,6 +132,9 @@ class SqliteDb {
     this.addColumnIfMissing("scans", "evidence", "TEXT");
     this.addColumnIfMissing("domain_verifications", "method", "TEXT");
     this.addColumnIfMissing("domain_verifications", "attestation", "TEXT");
+    this.addColumnIfMissing("monitored_targets", "scanHour", "INTEGER");
+    this.addColumnIfMissing("monitored_targets", "scanMinute", "INTEGER");
+    this.addColumnIfMissing("monitored_targets", "scanWeekday", "INTEGER");
     this.migrateLegacyPlaintextApiKeys();
   }
 
@@ -334,6 +338,15 @@ class SqliteDb {
     return this.rowToScan(this.db.prepare('SELECT * FROM scans WHERE id = ?').get(id));
   }
 
+  // The most recent *completed* scan of the same target for this user, other
+  // than `excludeScanId` — the baseline a fresh scan is compared against for
+  // monitoring regression detection.
+  getPreviousCompletedScan(userId: string, url: string, excludeScanId: string): Scan | undefined {
+    return this.rowToScan(this.db.prepare(
+      "SELECT * FROM scans WHERE userId = ? AND url = ? AND status = 'complete' AND id != ? ORDER BY createdAt DESC LIMIT 1"
+    ).get(userId, url, excludeScanId));
+  }
+
   createScan(userId: string, url: string, authHeader?: string): Scan {
     const id = 'scan_' + crypto.randomBytes(8).toString('hex');
     const now = new Date().toISOString();
@@ -478,12 +491,16 @@ class SqliteDb {
     return this.db.prepare('SELECT * FROM monitored_targets WHERE userId = ?').all(userId) as MonitoredTarget[];
   }
 
-  addMonitoredTarget(userId: string, url: string, frequencyDays: number, scheduleString?: string): MonitoredTarget {
+  // Accepts either a full schedule (daily/weekly/monthly + time-of-day) or a
+  // bare frequency in days (legacy callers). The next run instant and the human
+  // scheduleString are both derived from that one schedule so they can't drift.
+  addMonitoredTarget(userId: string, url: string, schedule: number | MonitorSchedule): MonitoredTarget {
+    const s: MonitorSchedule = typeof schedule === 'number' ? { frequencyDays: schedule } : schedule;
     const id = 'mon_' + crypto.randomBytes(8).toString('hex');
     const now = new Date().toISOString();
-    const nextScanAt = new Date(Date.now() + frequencyDays * 24 * 60 * 60 * 1000).toISOString();
-    this.db.prepare('INSERT INTO monitored_targets (id, userId, url, frequencyDays, scheduleString, nextScanAt, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(id, userId, url, frequencyDays, scheduleString ?? null, nextScanAt, now);
+    const nextScanAt = computeNextRun(new Date(), s).toISOString();
+    this.db.prepare('INSERT INTO monitored_targets (id, userId, url, frequencyDays, scheduleString, scanHour, scanMinute, scanWeekday, nextScanAt, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(id, userId, url, s.frequencyDays, describeSchedule(s), s.hour ?? null, s.minute ?? null, s.weekday ?? null, nextScanAt, now);
     return this.db.prepare('SELECT * FROM monitored_targets WHERE id = ?').get(id) as MonitoredTarget;
   }
 

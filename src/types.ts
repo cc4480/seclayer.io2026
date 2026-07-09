@@ -123,6 +123,12 @@ export interface MonitoredTarget {
   url: string;
   frequencyDays: number;
   scheduleString?: string;
+  // Structured time-of-day the schedule fires at, in UTC. `scanWeekday` (0=Sun)
+  // applies to weekly cadences. When these are null the target falls back to a
+  // fixed now+frequencyDays interval (legacy rows).
+  scanHour?: number | null;
+  scanMinute?: number | null;
+  scanWeekday?: number | null;
   lastScannedAt?: string;
   nextScanAt?: string;
   createdAt: string;
