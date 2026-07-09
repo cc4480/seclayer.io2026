@@ -1,5 +1,5 @@
 import { Scan, Finding } from "../src/types.js";
-import { assertScanTargetSafe } from "./scanner.js";
+import { assertScanTargetSafe, guardedFetch } from "./scanner.js";
 
 // Outbound scan-completion alerts to a user-configured webhook (Slack incoming
 // webhooks and generic JSON endpoints both accept the { text, ... } payload).
@@ -62,7 +62,9 @@ export async function notifyScanComplete(webhook: string | undefined, scan: Scan
     const payload = buildScanNotification(scan);
     const ctl = new AbortController();
     const id = setTimeout(() => ctl.abort(), 5000);
-    await fetch(webhook, {
+    // guardedFetch pins the connection to a validated IP, so the delivery
+    // cannot be DNS-rebound onto an internal address after the check above.
+    await guardedFetch(webhook, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),

@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import * as dns from "dns/promises";
+import { guardedFetch } from "./scanner.js";
 
 // Domain-ownership verification. Gates the scanner's ACTIVE offensive probes
 // (SQLi/XSS/command-injection/SSRF/GraphQL/BOLA fuzzing) so the platform
@@ -44,7 +45,9 @@ export async function checkWellKnownFile(domain: string, token: string): Promise
   try {
     const ctl = new AbortController();
     const id = setTimeout(() => ctl.abort(), 5000);
-    const res = await fetch(`https://${domain}${WELL_KNOWN_PATH}`, {
+    // guardedFetch pins the connection to a validated, non-internal IP so the
+    // verification request can't be DNS-rebound into internal infrastructure.
+    const res = await guardedFetch(`https://${domain}${WELL_KNOWN_PATH}`, {
       redirect: "manual",
       signal: ctl.signal,
     }).finally(() => clearTimeout(id));

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { assertScanTargetSafe, isBlockedIp, looksLikeHtml, compileStaticFindings, compileScanEvidence, runDiagnostics, windowAround } from './scanner.js';
+import { assertScanTargetSafe, isBlockedIp, looksLikeHtml, compileStaticFindings, compileScanEvidence, runDiagnostics, windowAround, firstBlockedAddress, guardedFetch } from './scanner.js';
 import { SEVERITY_WEIGHTS, isProven } from './scoring.js';
 
 function baseDiag(overrides: any = {}): any {
@@ -53,6 +53,58 @@ test('SCAN_DEV_ALLOW_HOSTS opens a loopback target only in dev, only for exact m
   } finally {
     if (prevAllow === undefined) delete process.env.SCAN_DEV_ALLOW_HOSTS; else process.env.SCAN_DEV_ALLOW_HOSTS = prevAllow;
     if (prevEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = prevEnv;
+  }
+});
+
+test('firstBlockedAddress refuses a rebinding answer set (public + internal)', () => {
+  // A host that resolves purely to public IPs is allowed.
+  assert.equal(firstBlockedAddress('good.example', ['93.184.216.34', '1.1.1.1']), null);
+  // DNS rebinding: the resolver mixes a public IP with an internal one. Even one
+  // internal address must sink the whole connection — this is the exact bypass
+  // the connect-time lookup closes that the resolve-then-connect check could miss.
+  assert.equal(firstBlockedAddress('evil.example', ['93.184.216.34', '127.0.0.1']), '127.0.0.1');
+  assert.equal(firstBlockedAddress('evil.example', ['169.254.169.254']), '169.254.169.254');
+  assert.equal(firstBlockedAddress('evil.example', ['::1']), '::1');
+});
+
+test('firstBlockedAddress honors the dev allowlist at connect time', () => {
+  const prevAllow = process.env.SCAN_DEV_ALLOW_HOSTS;
+  const prevEnv = process.env.NODE_ENV;
+  try {
+    process.env.NODE_ENV = 'development';
+    process.env.SCAN_DEV_ALLOW_HOSTS = '127.0.0.1:4100';
+    // The listed loopback test target may resolve to an otherwise-blocked IP.
+    assert.equal(firstBlockedAddress('127.0.0.1', ['127.0.0.1']), null);
+    // A host NOT on the allowlist is still refused.
+    assert.equal(firstBlockedAddress('other.host', ['127.0.0.1']), '127.0.0.1');
+    // Production hard-disables the escape hatch.
+    process.env.NODE_ENV = 'production';
+    assert.equal(firstBlockedAddress('127.0.0.1', ['127.0.0.1']), '127.0.0.1');
+  } finally {
+    if (prevAllow === undefined) delete process.env.SCAN_DEV_ALLOW_HOSTS; else process.env.SCAN_DEV_ALLOW_HOSTS = prevAllow;
+    if (prevEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = prevEnv;
+  }
+});
+
+test('guardedFetch pins the socket: a hostname resolving to an internal IP is refused at connect', async () => {
+  // Bind a real loopback server, then ask guardedFetch for a hostname that
+  // (via the OS hosts file) maps to 127.0.0.1. With no dev allowlist the pinned
+  // dispatcher must refuse the connection rather than reach the internal server.
+  const server = http.createServer((_req, res) => res.end('reached-internal'));
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+  const port = (server.address() as any).port;
+  const prevAllow = process.env.SCAN_DEV_ALLOW_HOSTS;
+  try {
+    delete process.env.SCAN_DEV_ALLOW_HOSTS; // ensure loopback is NOT allowlisted
+    // "localhost" resolves to 127.0.0.1/::1 — a stand-in for any hostname a
+    // hostile resolver could rebind to an internal address.
+    await assert.rejects(
+      guardedFetch(`http://localhost:${port}/`, { redirect: 'manual' }),
+      'guardedFetch must refuse a host resolving to an internal address',
+    );
+  } finally {
+    if (prevAllow === undefined) delete process.env.SCAN_DEV_ALLOW_HOSTS; else process.env.SCAN_DEV_ALLOW_HOSTS = prevAllow;
+    server.close();
   }
 });
 

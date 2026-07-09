@@ -10,6 +10,7 @@ import { renderPage, isRenderingEnabled } from "./render.js";
 import crypto from "crypto";
 import net from "net";
 import * as dns from "dns/promises";
+import { Agent } from "undici";
 
 // --- SSRF protection ---------------------------------------------------------
 // The scanner issues server-side HTTP requests to user-supplied targets, so it
@@ -54,6 +55,98 @@ function isDevAllowedHost(parsedUrl: URL): boolean {
   const host = parsedUrl.hostname.replace(/^\[|\]$/g, "").toLowerCase();
   const port = parsedUrl.port || (parsedUrl.protocol === "https:" ? "443" : "80");
   return allow.includes(`${host}:${port}`) || allow.includes(host);
+}
+
+// Hostname-level view of the dev allowlist. The connect-time DNS lookup only
+// sees a hostname (never a port), so this matches on the host part alone; a
+// listed loopback test target still connects in dev. Hard-off in production,
+// exactly like isDevAllowedHost.
+function isDevAllowedHostname(hostname: string): boolean {
+  if (process.env.NODE_ENV === "production") return false;
+  const allow = (process.env.SCAN_DEV_ALLOW_HOSTS || "")
+    .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  if (allow.length === 0) return false;
+  const h = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  return allow.some((entry) => entry === h || entry.split(":")[0] === h);
+}
+
+// The rebinding-guard decision, isolated so it can be unit-tested without a live
+// resolver: given the addresses a host actually resolved to, return the first
+// one that must be refused (honoring the dev allowlist), or null if all are
+// safe. A single internal answer among otherwise-public ones — the shape of a
+// DNS-rebinding response — is enough to refuse the whole connection.
+export function firstBlockedAddress(hostname: string, addresses: string[]): string | null {
+  if (isDevAllowedHostname(hostname)) return null;
+  for (const a of addresses) if (isBlockedIp(a)) return a;
+  return null;
+}
+
+// --- SSRF-safe dispatcher (closes the DNS-rebinding TOCTOU) -------------------
+// The pre-flight assertTargetIsScannable() resolves and validates the host, but
+// the socket layer then resolves it AGAIN independently — so a hostile resolver
+// that returns a public IP to the check and an internal IP to the connection
+// (DNS rebinding) can slip past. This dispatcher removes that gap: it performs
+// the resolution ITSELF inside the connect lookup, validates every address with
+// isBlockedIp, and hands the socket only vetted IPs. The validated lookup IS the
+// connect lookup — there is no second, unchecked resolution — so a rebinding
+// answer can never reach connect(). Every request to a user-supplied target MUST
+// go through guardedFetch/safeFetch so it is bound to this dispatcher.
+export const safeDispatcher = new Agent({
+  connect: {
+    lookup(
+      hostname: string,
+      options: any,
+      cb: (err: NodeJS.ErrnoException | null, address?: any, family?: number) => void,
+    ) {
+      const finish = (addrs: Array<{ address: string; family: number }>) => {
+        const blocked = firstBlockedAddress(hostname, addrs.map((a) => a.address));
+        if (blocked) {
+          return cb(
+            Object.assign(
+              new Error(
+                `Refusing to connect: "${hostname}" resolves to blocked internal address ${blocked}`,
+              ),
+              { code: "ESSRFBLOCKED" },
+            ),
+          );
+        }
+        // undici calls lookup with { all: true } and expects an address array;
+        // support the single-address callback form too for completeness.
+        return options && options.all
+          ? cb(null, addrs as any)
+          : cb(null, addrs[0].address, addrs[0].family);
+      };
+      // IP literals never reach the lookup (net connects directly) and are
+      // validated by assertTargetIsScannable; handled here only defensively.
+      if (net.isIP(hostname)) {
+        return finish([{ address: hostname, family: net.isIPv6(hostname) ? 6 : 4 }]);
+      }
+      Promise.all([
+        dns.resolve4(hostname).catch(() => [] as string[]),
+        dns.resolve6(hostname).catch(() => [] as string[]),
+      ])
+        .then(([v4, v6]) => {
+          const addrs = [
+            ...v4.map((address) => ({ address, family: 4 })),
+            ...v6.map((address) => ({ address, family: 6 })),
+          ];
+          if (addrs.length === 0) return cb(new Error(`DNS resolution failed for ${hostname}`));
+          finish(addrs);
+        })
+        .catch((e) => cb(e));
+    },
+  },
+});
+
+// The one SSRF-safe fetch primitive. Identical to fetch() but pinned to the
+// validating dispatcher above, so the connection can never be rebound onto an
+// internal address between the guard and the socket. It does NOT follow
+// redirects on its own — callers set `redirect` as they need; safeFetch layers
+// per-hop re-validation on top for the multi-hop scan path. Any server-side
+// request to a user-controlled host (scan target, alert webhook, domain-
+// verification file) must go through this.
+export function guardedFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  return fetch(url, { ...options, dispatcher: safeDispatcher } as any);
 }
 
 async function assertTargetIsScannable(parsedUrl: URL): Promise<void> {
@@ -133,7 +226,7 @@ async function safeFetch(targetUrl: string, options: RequestInit, maxRedirects =
   let current = targetUrl;
   for (let hop = 0; hop <= maxRedirects; hop++) {
     await assertTargetIsScannable(new URL(current));
-    const res = await fetch(current, { ...options, redirect: "manual" });
+    const res = await guardedFetch(current, { ...options, redirect: "manual" });
     if (res.status >= 300 && res.status < 400) {
       const loc = res.headers.get("location");
       if (loc) {
