@@ -175,3 +175,19 @@ test('OOB collaborator records callbacks only for tokens we issued, and not stal
   // A different, never-issued token is still refused after a successful record.
   assert.equal(db.recordOobEvent('b'.repeat(48), { method: 'GET', sourceIp: '9.9.9.9', path: '/x' }), false);
 });
+
+test('OOB collaborator refuses a callback for a token issued more than 15 minutes ago', () => {
+  const tok = 'c'.repeat(48);
+  db.registerOobToken(tok, 'scan_stale');
+  // A fresh token accepts the callback...
+  assert.equal(db.recordOobEvent(tok, { method: 'GET', sourceIp: '1.2.3.4', path: `/api/oob/${tok}` }), true);
+
+  // ...but backdate its issue time past the 15-minute window and it must be
+  // refused — an old collaborator URL can't be replayed to forge a proof.
+  const sixteenMinAgo = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+  (db as any).db.prepare('UPDATE oob_tokens SET createdAt = ? WHERE token = ?').run(sixteenMinAgo, tok);
+  assert.equal(db.recordOobEvent(tok, { method: 'GET', sourceIp: '5.6.7.8', path: `/api/oob/${tok}` }), false);
+  // The stale callback left no trace; only the original in-window hit remains.
+  assert.equal(db.getOobEvents(tok).length, 1);
+  assert.equal(db.getOobEvents(tok)[0].sourceIp, '1.2.3.4');
+});
