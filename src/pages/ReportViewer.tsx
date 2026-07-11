@@ -863,11 +863,18 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
                             const resp = ev.attack.response;
                             const q = ev.signal?.quote ?? '';
                             const qi = q ? resp.indexOf(q) : -1;
+                            const isOob = ev.method === 'out-of-band';
+                            const methodLabel = ({
+                              reflection: 'Reflection', 'error-signature': 'Error signature',
+                              oracle: 'Oracle', differential: 'Differential',
+                              introspection: 'Introspection', 'out-of-band': 'Out-of-band callback',
+                            } as Record<string, string>)[ev.method] || ev.method;
                             return (
                               <div className="mb-4 p-4 rounded border border-[#22c55e]/25 bg-[#22c55e]/[0.04]">
                                 <div className="flex items-center gap-1.5 mb-2">
                                   <Zap className="w-3 h-3 text-[#22c55e] shrink-0" />
                                   <span className="text-[9px] font-mono uppercase tracking-wider font-bold text-[#22c55e]">Exploit Receipt — Proven Live</span>
+                                  <span className="ml-auto text-[8px] font-mono uppercase tracking-wider font-bold text-[#22c55e]/80 border border-[#22c55e]/30 rounded px-1.5 py-0.5">{methodLabel}</span>
                                 </div>
                                 <p className="text-[13px] font-sans leading-relaxed text-zinc-200">{ev.demonstration}</p>
 
@@ -915,7 +922,7 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
                                         </div>
                                         <div className="p-3 bg-black border border-zinc-800 rounded relative overflow-hidden">
                                           <div className="absolute top-0 left-0 w-full bg-zinc-900/80 p-1.5 border-b border-zinc-800 text-[9px] uppercase tracking-wider font-mono text-red-400/80 flex items-center justify-between">
-                                            <span>Attack Response</span>
+                                            <span>{isOob ? 'Out-of-Band Callback' : 'Attack Response'}</span>
                                             <button onClick={() => handleCopyCode(`evres-${finding.id}`, ev.attack.response)} className="text-zinc-500 hover:text-white cursor-pointer"><Copy className="w-3 h-3"/></button>
                                           </div>
                                           <div className="pt-6 overflow-x-auto max-h-64 scrollbar-thin">

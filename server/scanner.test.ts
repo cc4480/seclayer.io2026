@@ -349,6 +349,91 @@ test('cmd-injection arithmetic oracle proves execution via the computed sum, not
   }
 });
 
+test('out-of-band probe proves BLIND SSRF via a real collaborator callback', async () => {
+  const { createOobCollaborator } = await import('./oob.js');
+  // Fake collaborator store + a real listener the target will call back on. The
+  // listener records a callback for any token the collaborator registered.
+  const tokens = new Set<string>();
+  const events = new Map<string, any[]>();
+  const store = {
+    registerOobToken: (t: string) => { tokens.add(t); },
+    getOobEvents: (t: string) => events.get(t) || [],
+  };
+  const listener = http.createServer((req, res) => {
+    const m = (req.url || '').match(/^\/api\/oob\/([a-f0-9]+)/i);
+    if (m && tokens.has(m[1])) {
+      const arr = events.get(m[1]) || [];
+      arr.push({ id: 'e' + arr.length, token: m[1], method: req.method, sourceIp: '127.0.0.1', path: req.url, receivedAt: new Date().toISOString() });
+      events.set(m[1], arr);
+    }
+    res.writeHead(200); res.end('ok');
+  });
+  await new Promise<void>((r) => listener.listen(0, '127.0.0.1', () => r()));
+  const listenerPort = (listener.address() as any).port;
+
+  // A target that performs a REAL blind SSRF: it fetches the attacker-supplied
+  // `url` param server-side (fire-and-forget) and reflects NOTHING about it.
+  const target = http.createServer((req, res) => {
+    const u = new URL(req.url || '/', 'http://127.0.0.1');
+    const urlParam = u.searchParams.get('url');
+    if (urlParam && /^https?:\/\//i.test(urlParam)) fetch(urlParam).catch(() => {});
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end('<!doctype html><html><body>ok</body></html>'); // no echo of urlParam
+  });
+  await new Promise<void>((r) => target.listen(0, '127.0.0.1', () => r()));
+  const targetPort = (target.address() as any).port;
+
+  const prevEnv = process.env.NODE_ENV;
+  const prevAllow = process.env.SCAN_DEV_ALLOW_HOSTS;
+  try {
+    process.env.NODE_ENV = 'development';
+    process.env.SCAN_DEV_ALLOW_HOSTS = `127.0.0.1:${targetPort}`;
+    const oob = createOobCollaborator(store as any, `http://127.0.0.1:${listenerPort}`);
+    const diag = await runDiagnostics(`http://127.0.0.1:${targetPort}`, undefined, { allowActiveProbes: true, oob });
+    const blind = (diag.redTeamFindings || []).find((f) => /out-of-band/i.test(f.testName));
+    assert.ok(blind, 'expected a blind out-of-band SSRF finding');
+    assert.ok(blind!.evidence, 'the blind SSRF finding must carry a receipt');
+    assert.equal(blind!.evidence!.method, 'out-of-band');
+    // The proof is the unique token, present verbatim in the recorded callback.
+    assert.ok(blind!.evidence!.attack.response.includes(blind!.evidence!.signal.quote));
+    assert.equal(isProven({ evidence: blind!.evidence } as any), true);
+    assert.equal(blind!.severity, 'critical');
+  } finally {
+    if (prevEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = prevEnv;
+    if (prevAllow === undefined) delete process.env.SCAN_DEV_ALLOW_HOSTS; else process.env.SCAN_DEV_ALLOW_HOSTS = prevAllow;
+    await new Promise<void>((r) => target.close(() => r()));
+    await new Promise<void>((r) => listener.close(() => r()));
+  }
+});
+
+test('out-of-band probe is skipped (no false finding) when the target makes no callback', async () => {
+  const { createOobCollaborator } = await import('./oob.js');
+  const store = { registerOobToken: () => {}, getOobEvents: () => [] as any[] };
+  // A target that ignores the url param entirely — no SSRF.
+  const target = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end('<!doctype html><html><body>ok</body></html>');
+  });
+  await new Promise<void>((r) => target.listen(0, '127.0.0.1', () => r()));
+  const targetPort = (target.address() as any).port;
+  const prevEnv = process.env.NODE_ENV;
+  const prevAllow = process.env.SCAN_DEV_ALLOW_HOSTS;
+  try {
+    process.env.NODE_ENV = 'development';
+    process.env.SCAN_DEV_ALLOW_HOSTS = `127.0.0.1:${targetPort}`;
+    const oob = createOobCollaborator(store as any, `http://127.0.0.1:9`);
+    // Short-circuit the 8s poll wait for a no-callback target.
+    (oob as any).poll = async () => null;
+    const diag = await runDiagnostics(`http://127.0.0.1:${targetPort}`, undefined, { allowActiveProbes: true, oob });
+    const blind = (diag.redTeamFindings || []).find((f) => /out-of-band/i.test(f.testName));
+    assert.equal(blind, undefined, 'no callback → no blind SSRF finding');
+  } finally {
+    if (prevEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = prevEnv;
+    if (prevAllow === undefined) delete process.env.SCAN_DEV_ALLOW_HOSTS; else process.env.SCAN_DEV_ALLOW_HOSTS = prevAllow;
+    await new Promise<void>((r) => target.close(() => r()));
+  }
+});
+
 // --- GraphQL + BOLA (API_SEC) receipts -------------------------------------
 
 async function withServer(handler: http.RequestListener, fn: (port: number) => Promise<void>) {
@@ -517,6 +602,69 @@ test('smart discovered-parameter fuzzer proves XSS + SQLi and skips an inert par
     // The inert /static?ref param must never be flagged.
     assert.ok(!rt.some((f) => /ref=/.test(f.payload || '')), 'the inert param must not be flagged');
     assert.ok((diag.crawl?.paramsTested || 0) >= 2, 'multiple discovered params were fuzzed');
+  });
+});
+
+test('passive mode stays passive: a would-be-vulnerable target is crawled but never gets an exploit payload', async () => {
+  // This target would trip EVERY active probe if they ran: it reflects `q`
+  // unescaped (XSS), leaks a SQL error on `id` (SQLi), evaluates `expr` in
+  // `ping` (cmd-injection), fetches the `url` param (SSRF), and answers GraphQL
+  // introspection. It also links to parameterized endpoints the crawler will
+  // discover. In passive mode NONE of the exploit payloads may be sent.
+  const seenUrls: string[] = [];
+  const handler: http.RequestListener = (req, res) => {
+    seenUrls.push(req.url || '');
+    const u = new URL(req.url || '/', 'http://127.0.0.1');
+    if (req.method === 'POST' && u.pathname === '/graphql') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ data: { __schema: { types: [{ name: 'Query' }] } } }));
+      return;
+    }
+    if (u.pathname === '/search') {
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(`<!doctype html><html><body><div>Results for: ${u.searchParams.get('q') || ''}</div></body></html>`);
+      return;
+    }
+    if (u.pathname === '/item') {
+      let body = '<!doctype html><html><body>item';
+      if (u.searchParams.has('id')) body += `<div>Database error: You have an error in your SQL syntax; near '${u.searchParams.get('id')}'</div>`;
+      res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(body + '</body></html>'); return;
+    }
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end('<!doctype html><html><body><h1>home</h1>'
+      + '<a href="/search?q=hello">search</a><a href="/item?id=1">item</a>'
+      + '</body></html>');
+  };
+  await withServer(handler, async (port) => {
+    // allowActiveProbes omitted → passive black-box recon only.
+    const diag = await runDiagnostics(`http://127.0.0.1:${port}`, undefined);
+
+    // No active exploit findings whatsoever.
+    assert.equal((diag.redTeamFindings || []).length, 0, 'passive mode must produce no red-team findings');
+    assert.equal((diag.apiSecFindings || []).length, 0, 'passive mode must produce no API-sec findings');
+    // The diag is flagged so the report can surface the skipped-probes notice.
+    assert.equal(diag.activeProbesSkipped, true);
+    // Passive recon still ran: the crawler mapped the surface (GET /item?id=1 etc.)
+    // but reported zero params actively fuzzed.
+    assert.ok((diag.crawl?.endpointsDiscovered || 0) >= 1, 'passive crawl must still map the surface');
+    assert.equal(diag.crawl?.paramsTested, 0, 'no parameter may be actively fuzzed in passive mode');
+
+    // The decisive guarantee: the target never received an injection payload. The
+    // scanner may passively GET discovered links with their benign HTML values
+    // (?q=hello, ?id=1), but no request may carry a probe signature.
+    const attackSignatures = [
+      "OR%201%3D1", "or 1=1", "'", "%27",      // SQLi
+      "<script", "%3Cscript", "onerror",         // XSS
+      "expr", "%20%2B%20", ";id", "%3Bid",       // cmd-injection
+      "url=http", "127.0.0.1:22",                // SSRF
+    ];
+    const offending = seenUrls.filter((raw) => {
+      const s = raw.toLowerCase();
+      return attackSignatures.some((sig) => s.includes(sig.toLowerCase()));
+    });
+    assert.deepEqual(offending, [], `passive mode must never send an exploit payload; sent: ${offending.join(', ')}`);
+    // And it must never POST a GraphQL introspection query.
+    assert.ok(!seenUrls.some((raw) => raw.includes('/graphql')), 'passive mode must not probe /graphql');
   });
 });
 

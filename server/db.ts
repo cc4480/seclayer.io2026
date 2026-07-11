@@ -1,7 +1,7 @@
 import path from 'path';
 import crypto from 'crypto';
 import Database from 'better-sqlite3';
-import { User, Scan, CreditTransaction, ApiKey, Finding, SuppressionRule, MonitoredTarget, DomainVerification, ExecutiveBreakdown } from '../src/types.js';
+import { User, Scan, CreditTransaction, ApiKey, Finding, SuppressionRule, MonitoredTarget, DomainVerification, ExecutiveBreakdown, OobEvent } from '../src/types.js';
 import { scoreFindings } from './scoring.js';
 import { MonitorSchedule, computeNextRun, describeSchedule } from './schedule.js';
 
@@ -122,6 +122,21 @@ class SqliteDb {
         createdAt TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(userId);
+      CREATE TABLE IF NOT EXISTS oob_tokens (
+        token TEXT PRIMARY KEY,
+        scanId TEXT,
+        createdAt TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS oob_events (
+        id TEXT PRIMARY KEY,
+        token TEXT NOT NULL,
+        method TEXT NOT NULL,
+        sourceIp TEXT NOT NULL,
+        path TEXT NOT NULL,
+        userAgent TEXT,
+        receivedAt TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_oob_events_token ON oob_events(token);
     `);
     // Additive column migrations (safe across existing databases).
     this.addColumnIfMissing("users", "notifyWebhook", "TEXT");
@@ -345,6 +360,44 @@ class SqliteDb {
     return this.rowToScan(this.db.prepare(
       "SELECT * FROM scans WHERE userId = ? AND url = ? AND status = 'complete' AND id != ? ORDER BY createdAt DESC LIMIT 1"
     ).get(userId, url, excludeScanId));
+  }
+
+  // --- Out-of-band collaborator (blind SSRF/RCE proof) ---
+  //
+  // A token is registered when the scanner mints a callback URL, so the public
+  // /api/oob/:token endpoint only records hits for tokens WE issued (and only
+  // recent ones) — the endpoint can't be used as an open write-anything store.
+  registerOobToken(token: string, scanId?: string): void {
+    this.db.prepare('INSERT OR IGNORE INTO oob_tokens (token, scanId, createdAt) VALUES (?, ?, ?)')
+      .run(token, scanId ?? null, new Date().toISOString());
+  }
+
+  // Records a callback IFF the token was issued by us within the last 15 minutes.
+  // Returns true when stored. Opportunistically prunes tokens/events older than a
+  // day so the tables can't grow without bound. Unknown/expired tokens are a
+  // no-op (the route still returns 200 so it leaks nothing about validity).
+  recordOobEvent(
+    token: string,
+    ev: { method: string; sourceIp: string; path: string; userAgent?: string },
+  ): boolean {
+    const tok = this.db.prepare('SELECT createdAt FROM oob_tokens WHERE token = ?').get(token) as
+      | { createdAt: string }
+      | undefined;
+    if (!tok) return false;
+    if (Date.now() - new Date(tok.createdAt).getTime() > 15 * 60 * 1000) return false;
+    const id = 'oob_' + crypto.randomBytes(8).toString('hex');
+    this.db.prepare(
+      'INSERT INTO oob_events (id, token, method, sourceIp, path, userAgent, receivedAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    ).run(id, token, ev.method, ev.sourceIp, ev.path, ev.userAgent ?? null, new Date().toISOString());
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    this.db.prepare('DELETE FROM oob_events WHERE receivedAt < ?').run(cutoff);
+    this.db.prepare('DELETE FROM oob_tokens WHERE createdAt < ?').run(cutoff);
+    return true;
+  }
+
+  getOobEvents(token: string): OobEvent[] {
+    return this.db.prepare('SELECT * FROM oob_events WHERE token = ? ORDER BY receivedAt ASC')
+      .all(token) as OobEvent[];
   }
 
   createScan(userId: string, url: string, authHeader?: string): Scan {

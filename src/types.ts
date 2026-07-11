@@ -24,7 +24,7 @@ export interface RawExchange {
 // a finding the top "PROVEN" tier (see server/scoring.ts:isProven). Without a
 // valid bundle a finding still ships, just in the DETECTED tier.
 export interface ExploitEvidence {
-  method: 'reflection' | 'error-signature' | 'oracle' | 'differential' | 'introspection';
+  method: 'reflection' | 'error-signature' | 'oracle' | 'differential' | 'introspection' | 'out-of-band';
   attack: RawExchange;      // the request that demonstrated the flaw
   baseline?: RawExchange;   // authorized/benign control request, when the class uses one
   control?: RawExchange;    // negative control (e.g. unauthenticated → denied)
@@ -38,6 +38,20 @@ export interface ExploitEvidence {
   capturedAt: string;
   // Ownership proof this active action was gated behind, when threaded through.
   ownership?: { verificationId?: string; method?: 'dns' | 'file' | 'attestation' };
+}
+
+// A recorded out-of-band callback: the scanned target reached back to our
+// collaborator endpoint after we injected its unique URL into a payload. Its
+// existence is the proof of a BLIND vulnerability (SSRF/RCE/XXE) where nothing
+// is reflected inline — see server/oob.ts and the 'out-of-band' evidence method.
+export interface OobEvent {
+  id: string;
+  token: string;       // the unique per-probe token embedded in the callback URL
+  method: string;      // HTTP method the target used to reach us (GET/POST/…)
+  sourceIp: string;    // remote address the callback came from
+  path: string;        // full path the target requested on the collaborator
+  userAgent?: string;  // User-Agent the target sent, when present
+  receivedAt: string;
 }
 
 // One of the two owned test identities required to PROVE a cross-tenant BOLA/IDOR

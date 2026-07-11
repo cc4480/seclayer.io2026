@@ -1,4 +1,5 @@
-import { Finding, Severity, ScanEvidence, ExploitEvidence, RawExchange, BolaIdentity } from "../src/types.js";
+import { Finding, Severity, ScanEvidence, ExploitEvidence, RawExchange, BolaIdentity, OobEvent } from "../src/types.js";
+import type { OobCollaborator } from "./oob.js";
 import { scoreFindings } from "./scoring.js";
 import { crawlSite, targetsFromHtml, dedupeTargets, paramsOf, InjectableTarget } from "./crawler.js";
 import { runTemplates, selectTemplates } from "./templateEngine.js";
@@ -357,6 +358,50 @@ function buildProbeEvidence(params: {
   };
 }
 
+// Assemble a receipt for a BLIND finding proven out-of-band. There is no inline
+// signal to quote from the target's HTTP response, so the captured proof IS the
+// callback our collaborator recorded: attack.request is the payload we sent to
+// the target, and attack.response is the reconstructed callback the target then
+// made to us. signal.quote is the unique per-probe token — it can only appear in
+// that record if the target actually reached our URL, so isProven's substring
+// check stays an honest guarantee ("we never claim a byte we didn't capture").
+function buildOobEvidence(params: {
+  attackUrl: string;
+  requestHeaders: Record<string, string>;
+  callbackUrl: string;
+  token: string;
+  event: OobEvent;
+  demonstration: string;
+  why: string;
+}): ExploitEvidence {
+  const response = [
+    `Out-of-band callback received by Seclayer collaborator:`,
+    `${params.event.method} ${params.event.path} HTTP/1.1`,
+    `From: ${params.event.sourceIp}`,
+    params.event.userAgent ? `User-Agent: ${params.event.userAgent}` : undefined,
+    `Received-At: ${params.event.receivedAt}`,
+    `Correlation-Token: ${params.token}`,
+  ]
+    .filter((l): l is string => l != null)
+    .join("\n");
+  return {
+    method: "out-of-band",
+    attack: {
+      request: renderRawRequest("GET", params.attackUrl, params.requestHeaders),
+      // The callback the target made to us, reconstructed from what we recorded.
+      response,
+    },
+    signal: {
+      quote: params.token,
+      offsetInResponse: response.indexOf(params.token),
+      why: params.why,
+    },
+    demonstration: params.demonstration,
+    reproduction: `curl -s "${params.attackUrl}"  # then observe a callback to ${params.callbackUrl}`,
+    capturedAt: new Date().toISOString(),
+  };
+}
+
 // Pull a value that distinctively identifies whose data a response carries — used
 // to prove a BOLA cross-tenant read (the marker belongs to identity B yet shows up
 // in identity A's request). An email is the most legible, least-ambiguous marker;
@@ -457,6 +502,16 @@ export interface ScanOptions {
   // ownership must still be verified. When absent, the two-identity probe is
   // simply skipped (the rest of the scan is unaffected).
   bolaIdentities?: [BolaIdentity, BolaIdentity];
+
+  // Out-of-band collaborator used to PROVE blind vulnerabilities: the scanner
+  // injects a unique callback URL and, if the target reaches back to it, emits a
+  // PROVEN 'out-of-band' finding. Threaded in by the server only when a reachable
+  // public base URL is configured; when absent, the OOB probe is simply skipped.
+  oob?: OobCollaborator;
+
+  // Optional scan id, forwarded to the collaborator so a recorded callback can be
+  // attributed to this scan. Purely for the audit trail.
+  scanId?: string;
 }
 
 export async function runDiagnostics(
@@ -1092,6 +1147,50 @@ export async function runDiagnostics(
       }
     } catch (e) {
       /* Ignore fetch errors for probe */
+    }
+
+    // 5. Out-of-band SSRF probe (blind). Reflection only catches SSRF that echoes
+    // internal content back inline; this catches the blind case by injecting a
+    // unique collaborator URL and watching for the target to call it. A recorded
+    // callback is the proof — see server/oob.ts and buildOobEvidence.
+    if (opts.oob) {
+      try {
+        const probe = opts.oob.issue(opts.scanId);
+        const oobAttackUrl = `${url}/?url=${encodeURIComponent(probe.url)}`;
+        const oobCtl = new AbortController();
+        const oobId = setTimeout(() => oobCtl.abort(), 4000);
+        try {
+          // Fire the trigger: ask the target to fetch our collaborator URL.
+          await safeFetch(oobAttackUrl, { headers: fuzzHeaders, signal: oobCtl.signal });
+        } catch {
+          /* the target may not respond to us directly — the callback is the proof */
+        } finally {
+          clearTimeout(oobId);
+        }
+        // Wait a bounded window for the target to reach our collaborator.
+        const event = await opts.oob.poll(probe.token, 8000);
+        if (event) {
+          redTeamFindings.push({
+            testName: "Blind Server-Side Request Forgery (out-of-band)",
+            payload: probe.url,
+            severity: "critical",
+            description:
+              "The target fetched a unique Seclayer collaborator URL supplied in the \"url\" parameter, reaching our out-of-band listener from its own infrastructure. This proves the server makes attacker-controlled outbound requests even though nothing is reflected in its response — a blind SSRF that can be aimed at internal services or cloud metadata.",
+            fix: "Do not fetch user-supplied URLs directly. Enforce an allow-list of permitted hosts, resolve and validate the destination IP (blocking loopback/link-local/RFC1918/metadata ranges), and disable redirects to internal addresses.",
+            evidence: buildOobEvidence({
+              attackUrl: oobAttackUrl,
+              requestHeaders: fuzzHeaders,
+              callbackUrl: probe.url,
+              token: probe.token,
+              event,
+              why: "This is our collaborator's record of the target calling the unique, unguessable URL we injected. Only a server that fetched our payload URL could produce this callback — a public visitor cannot forge it.",
+              demonstration: `We put a one-time Seclayer URL in the "url" parameter, and moments later the target itself connected to that URL from ${event.sourceIp}. That callback — carrying our unique token — proves the server made a request we controlled, without leaking anything in its own response.`,
+            }),
+          });
+        }
+      } catch (e) {
+        /* Ignore OOB probe errors */
+      }
     }
   } catch (globalErr) {
     console.warn(

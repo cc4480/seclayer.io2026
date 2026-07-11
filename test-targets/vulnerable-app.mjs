@@ -1,8 +1,10 @@
 // INTENTIONALLY VULNERABLE test target — for exercising Seclayer's active
 // red-team probes against a local app you own. NOT for production. It only
-// *simulates* vulnerable responses (it never actually runs SQL, shells out, or
-// makes outbound requests) so it is safe to run, while still tripping each probe
-// signature the scanner looks for.
+// *simulates* vulnerable responses (it never actually runs SQL or shells out) so
+// it is safe to run, while still tripping each probe signature the scanner looks
+// for. The ONE real side effect is a deliberate blind-SSRF: it fetches an
+// attacker-supplied http(s) URL server-side so the out-of-band collaborator probe
+// has something to catch (see the `url` handler below).
 //
 //   node test-targets/vulnerable-app.mjs [port]
 //
@@ -60,9 +62,16 @@ const server = http.createServer((req, res) => {
     if (/;\s*id\b/.test(ping)) out += `\nuid=0(root) gid=0(root) groups=0(root)`;
     body += `<pre>${out}</pre>`;
   }
-  // 4. SSRF — pretend to have fetched the attacker-supplied URL and leak a banner.
+  // 4. SSRF — pretend to have fetched the attacker-supplied URL and leak a banner
+  //    (reflected case). For a real http(s) URL that ISN'T the simulated
+  //    loopback:22 banner, actually fetch it server-side (fire-and-forget) so the
+  //    out-of-band collaborator probe records a genuine blind-SSRF callback.
   if (q.has('url')) {
-    body += `<pre>Response from ${q.get('url')}:\nSSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.1</pre>`;
+    const target = q.get('url');
+    if (/^https?:\/\//i.test(target) && !/127\.0\.0\.1:22/.test(target)) {
+      fetch(target).catch(() => {});
+    }
+    body += `<pre>Response from ${target}:\nSSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.1</pre>`;
   }
 
   body += `</body></html>`;

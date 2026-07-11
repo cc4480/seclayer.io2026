@@ -157,3 +157,21 @@ test('monitoring scheduler surfaces only due targets', () => {
   db.markMonitoredScanned(t.id, new Date(Date.now() - 1000).toISOString(), new Date(Date.now() - 1000).toISOString());
   assert.equal(db.listDueMonitoredTargets(new Date().toISOString()).some((x) => x.id === t.id), true);
 });
+
+test('OOB collaborator records callbacks only for tokens we issued, and not stale ones', () => {
+  const tok = 'a'.repeat(48);
+  // Unknown token → refused (the public endpoint can't be an open write store).
+  assert.equal(db.recordOobEvent(tok, { method: 'GET', sourceIp: '1.2.3.4', path: `/api/oob/${tok}` }), false);
+  assert.equal(db.getOobEvents(tok).length, 0);
+
+  // Issued token → the callback is recorded and readable.
+  db.registerOobToken(tok, 'scan_x');
+  assert.equal(db.recordOobEvent(tok, { method: 'GET', sourceIp: '1.2.3.4', path: `/api/oob/${tok}`, userAgent: 'curl/8' }), true);
+  const events = db.getOobEvents(tok);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].sourceIp, '1.2.3.4');
+  assert.equal(events[0].method, 'GET');
+
+  // A different, never-issued token is still refused after a successful record.
+  assert.equal(db.recordOobEvent('b'.repeat(48), { method: 'GET', sourceIp: '9.9.9.9', path: '/x' }), false);
+});

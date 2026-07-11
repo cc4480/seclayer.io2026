@@ -14,6 +14,7 @@ import { rateLimit } from './server/rateLimit.js';
 import { createCheckoutSession, parseWebhookEvent, isStripeConfigured } from './server/stripe.js';
 import { notifyScanComplete } from './server/notify.js';
 import { computeNextRun } from './server/schedule.js';
+import { createOobCollaborator } from './server/oob.js';
 import { extractDomain, generateVerificationToken, txtRecordName, WELL_KNOWN_PATH, checkTxtRecord, checkWellKnownFile } from './server/domainVerify.js';
 import type { BolaIdentity } from './src/types.js';
 
@@ -45,6 +46,13 @@ async function startServer() {
 
   const app = express();
   const PORT = config.port;
+
+  // Out-of-band collaborator for blind-vuln proofs. Needs a base URL the SCANNED
+  // TARGET can reach back on — APP_URL in production (OOB_BASE_URL overrides it,
+  // e.g. to a loopback base in local testing). When neither is set the OOB probe
+  // is skipped and the rest of the scan is unaffected.
+  const oobBase = process.env.OOB_BASE_URL || config.appUrl;
+  const oobCollaborator = oobBase ? createOobCollaborator(db, oobBase) : undefined;
 
   // Behind a proxy/load balancer in production so req.protocol, req.ip and
   // Secure cookies are derived from the X-Forwarded-* headers.
@@ -130,6 +138,28 @@ async function startServer() {
       version: 'v2.1.2-stable',
       timestamp: new Date().toISOString()
     });
+  });
+
+  // --- Out-of-band collaborator listener ---
+  // Public and unauthenticated by necessity: the SCANNED TARGET (not the user)
+  // calls this back when a blind-SSRF/RCE payload we injected fires. Any HTTP
+  // method is accepted. recordOobEvent stores a hit only for a token WE issued
+  // recently, so this can't be used as an open write-anything store; the token
+  // is 48 hex chars of CSPRNG output, so callbacks can't be forged or enumerated.
+  // Always returns a flat 200 so it reveals nothing about which tokens are valid.
+  app.all('/api/oob/:token', (req, res) => {
+    const token = req.params.token || '';
+    if (/^[a-f0-9]{16,96}$/i.test(token)) {
+      try {
+        db.recordOobEvent(token, {
+          method: req.method,
+          sourceIp: req.ip || req.socket?.remoteAddress || 'unknown',
+          path: req.originalUrl,
+          userAgent: req.get('user-agent') || undefined,
+        });
+      } catch { /* never let a callback error affect anything */ }
+    }
+    res.status(200).type('text/plain').send('ok');
   });
 
   // --- Auth (passwordless magic link) ---
@@ -545,7 +575,7 @@ async function startServer() {
       const allowActiveProbes = db.isDomainVerified(user.id, extractDomain(url));
 
       // Runs scan diagnostic synchronously for MCP tools context
-      const diagnostics = await runDiagnostics(url, authHeader, { allowActiveProbes });
+      const diagnostics = await runDiagnostics(url, authHeader, { allowActiveProbes, oob: oobCollaborator });
       const staticCompiled = compileStaticFindings(diagnostics);
       const aiReport = await generateAiReport(url, diagnostics, staticCompiled);
       
@@ -595,7 +625,7 @@ async function startServer() {
 
       // Active diagnostics (HTTP probing, header/secret/SCA/path checks, fuzzing).
       db.updateScan(scanId, { status: 'scanning' });
-      const diagnostics = await runDiagnostics(scan.url, scan.authHeader, { allowActiveProbes, bolaIdentities });
+      const diagnostics = await runDiagnostics(scan.url, scan.authHeader, { allowActiveProbes, bolaIdentities, oob: oobCollaborator, scanId });
 
       // Fast (flash), cheap narration of what the sweep actually found — read
       // by the progress UI in place of scripted filler text.
