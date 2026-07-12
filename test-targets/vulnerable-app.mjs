@@ -25,6 +25,20 @@ const server = http.createServer((req, res) => {
   const u = new URL(req.url, `http://127.0.0.1:${PORT}`);
   const q = u.searchParams;
 
+  // 6. GraphQL introspection — a production endpoint with introspection left ON.
+  //    Answer any POST /graphql with a real __schema result so the introspection
+  //    probe can dump the "internal" API surface (data.__schema.types).
+  if (req.method === 'POST' && u.pathname === '/graphql') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      data: { __schema: { types: [
+        { name: 'Query' }, { name: 'Mutation' }, { name: 'User' },
+        { name: 'Order' }, { name: 'Payment' }, { name: 'AdminSecret' },
+      ] } },
+    }));
+    return;
+  }
+
   // 5. BOLA / IDOR — object-level authorization is missing: any valid token can
   //    read any order id.
   const om = u.pathname.match(/^\/api\/orders\/(\d+)$/);
