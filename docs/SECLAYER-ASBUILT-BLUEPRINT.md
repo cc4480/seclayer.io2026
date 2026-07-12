@@ -102,6 +102,8 @@ Active exploitation (RED_TEAM, API_SEC, param fuzzing) is **gated** behind proof
 
 > **STATUS `[VERIFIED ✓ — 8539ad1]`:** The active modules **fire and are proven working.** All eight (SQLi, reflected XSS, OS command-injection, reflected + **blind out-of-band** SSRF, GraphQL introspection, two-identity BOLA, discovered-parameter fuzzer) produce PROVEN evidence receipts end-to-end against `test-targets/vulnerable-app.mjs`, covered by 138 passing tests. This was the blueprint's #1 open unknown — **now closed.**
 
+> **LIVE END-TO-END SCAN `[VERIFIED ✓ — 2026-07-12]`:** Confirmed above the test harness by driving a real scan through the running HTTP API — `POST /api/mcp/scan` (API-key auth) against the vulnerable target on `127.0.0.1:4100`, with the domain attested so active probes were unlocked. **Result: HTTP 200 in ~97s, score 15/100 (critical), 1 credit deducted, 8 findings — 5 PROVEN RED_TEAM receipts** (SQLi `error-signature`, XSS `reflection`, cmd-injection + reflected SSRF `oracle`, and **blind SSRF `out-of-band`**). The blind-SSRF proof completed the full round-trip across separate processes: scanner injected a unique token URL → the target fetched it server-side (`From: 127.0.0.1`, `User-Agent: node`) → the app's `/api/oob` endpoint recorded the callback → the token appears verbatim in the receipt. The DeepSeek report named the target and its critical vulns correctly. *(GraphQL/BOLA need the dashboard `/api/scans` path, which passes `bolaIdentities`; the MCP path omits them by design.)*
+
 ---
 
 ## 5. AI layer — DeepSeek (as-built)
