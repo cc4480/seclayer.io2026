@@ -172,12 +172,12 @@ In priority order — updated to the verified state at `8539ad1`:
 
 ---
 
-## 11. Verified against commit `8539ad1` (2026-07-11)
+## 11. Verified against commit `8539ad1`, live-verified through `4938769` (2026-07-11/12)
 
-This section was the reconciliation task; it is now closed. Results:
+This section was the reconciliation task; it is now closed. Static reconciliation was done against `8539ad1`; the live end-to-end verifications in §4 were then carried out on the running app through `4938769`. Results:
 
 1. **`[VERIFY]` items walked** — seven pillars (§2) map to real modules in `server/scanner.ts` + the tested Templates pack; ownership gate (§4) and SSRF protection (§4, DNS-rebinding-hardened) confirmed; MCP `POST /api/mcp/scan` (§8) confirmed with credit deduction + SSRF pre-check; DeepSeek model IDs, local fallback, SQLite WAL, magic-link auth (§9) confirmed.
-2. **Active modules (§2 RED_TEAM/API_SEC) execute — not placeholders.** All eight produce PROVEN, replayable evidence receipts; 138 passing tests. This was the single most important unknown and is now resolved.
+2. **Active modules (§2 RED_TEAM/API_SEC) execute — not placeholders.** All eight produce PROVEN, replayable evidence receipts; 138 passing tests (re-confirmed green at `4938769`). Each module was additionally driven **live through the running HTTP API** against a real target — MCP + dashboard paths, incl. two-identity BOLA and GraphQL introspection (see §4). This was the single most important unknown and is now resolved end-to-end.
 3. **BUG 1 mitigated at display** (deterministic score on read); BUG 4 fixed; BUGS 2/3/5/6 have code-level mitigations but still need a live scan / VibeScan comparison to fully confirm.
 4. **Still open:** the §5 prose-score guard (residual), live calibration confirmation, and cross-repo scoring consolidation with VibeScan.
 
@@ -185,4 +185,4 @@ This section was the reconciliation task; it is now closed. Results:
 
 ---
 
-*Seclayer As-Built Blueprint · reconstructed July 2026 · reconciled against `8539ad1` on 2026-07-11. Companion: SECLAYER-FIXES.md, VIBESCAN-ASBUILT-BLUEPRINT.md.*
+*Seclayer As-Built Blueprint · reconstructed July 2026 · reconciled against `8539ad1` and live-verified through `4938769` on 2026-07-11/12. Companion: SECLAYER-FIXES.md, VIBESCAN-ASBUILT-BLUEPRINT.md.*
