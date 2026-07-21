@@ -8,9 +8,12 @@ interface Bucket {
 
 const buckets = new Map<string, Bucket>();
 
+// req.ip already resolves X-Forwarded-For correctly per Express's `trust proxy`
+// setting (server.ts only trusts it in production, behind our own proxy/LB) —
+// reading the header directly here would let any caller spoof a fresh IP on
+// every request (a different X-Forwarded-For value each time) and reset their
+// own rate-limit bucket at will, in both dev and prod.
 function clientIp(req: Request): string {
-  const fwd = req.headers['x-forwarded-for'];
-  if (typeof fwd === 'string' && fwd.length > 0) return fwd.split(',')[0].trim();
   return req.ip || req.socket.remoteAddress || 'unknown';
 }
 

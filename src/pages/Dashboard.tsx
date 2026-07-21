@@ -74,8 +74,8 @@ export default function Dashboard({
   }, [credits, prevCredits]);
 
   // Launch a scan in the chosen mode. `active` = red-team (real exploit probes),
-  // which first requires an authorization attestation for the target domain.
-  // `active === false` = passive recon only, allowed on any URL with no attestation.
+  // which requires the target domain to already be verified via DNS TXT record
+  // or well-known file. `active === false` = passive recon only, allowed on any URL.
   const launchScan = async (active: boolean) => {
     setErrorText('');
     const urlStr = scanUrl.trim();
@@ -96,14 +96,14 @@ export default function Dashboard({
       bolaIdentities = [a, b];
     }
 
-    // Red-team requires an authorization attestation for this domain (once per
-    // domain — it then stays unlocked). Passive needs none.
-    if (active) {
-      const authorized = await dv.attestCurrentDomain();
-      if (!authorized) {
-        if (!dv.verifyError) setErrorText(`Active red-team needs you to confirm authorization for ${dv.currentDomain || 'this domain'}.`);
-        return;
-      }
+    // Red-team requires this domain to already carry real DNS/file proof of
+    // ownership. Guide the user to that flow instead of launching (the server
+    // enforces this regardless; this just avoids a scan that silently downgrades
+    // to passive-only).
+    if (active && !dv.currentDomainVerified) {
+      setErrorText(`Active red-team needs ${dv.currentDomain || 'this domain'} verified via DNS TXT record or well-known file first — see above.`);
+      void dv.handleStartVerification();
+      return;
     }
 
     onInitiateScan(urlStr, authHeader.trim() || undefined, bolaIdentities, active);

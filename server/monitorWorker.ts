@@ -30,7 +30,10 @@ export function startMonitorWorker(processScanJob: ProcessScanJob): NodeJS.Timeo
           const user = db.getUser(target.userId);
           if (!user || user.credits < 1) continue; // retry next tick once credits exist
           await assertScanTargetSafe(target.url);
-          db.deductCredits(target.userId, 1);
+          // Re-checks the balance at the moment of deduction — the credits
+          // check above ran before the await, so it could be stale if a
+          // manual scan spent the last credit in the meantime.
+          if (!db.deductCredits(target.userId, 1)) continue; // retry next tick once credits exist
           const scan = db.createScan(target.userId, target.url);
           db.markMonitoredScanned(target.id, new Date().toISOString(), next);
           const allowActiveProbes = db.isDomainVerified(target.userId, extractDomain(target.url));

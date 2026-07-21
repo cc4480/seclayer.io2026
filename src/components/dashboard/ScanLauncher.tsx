@@ -77,12 +77,9 @@ export default function ScanLauncher(props: Props) {
               ) : (
                 <>
                   <span>
-                    Unverified target — this scan will run passive recon only (headers, TLS, DNS, exposed files). Confirm authorization for <strong>{dv.currentDomain}</strong> to unlock active exploit probes.
+                    Unverified target — this scan will run passive recon only (headers, TLS, DNS, exposed files). Verify ownership of <strong>{dv.currentDomain}</strong> via DNS TXT record or well-known file to unlock active exploit probes.
                   </span>
                   <div className="flex items-center flex-wrap gap-2 pt-0.5">
-                    <button type="button" onClick={dv.handleAcknowledgeVerification} disabled={dv.isVerifying} className="px-2 py-1 rounded bg-amber-500/10 border border-amber-500/40 text-amber-300 hover:border-amber-500/70 font-mono text-[9px] uppercase tracking-wide transition-all disabled:opacity-50 cursor-pointer">
-                      I'm Authorized — Acknowledge
-                    </button>
                     <button type="button" onClick={dv.handleStartVerification} disabled={dv.isVerifying} className="px-2 py-1 rounded bg-black border border-amber-500/30 text-amber-400 hover:border-amber-500/60 font-mono text-[9px] uppercase tracking-wide transition-all disabled:opacity-50 cursor-pointer">
                       Verify via DNS/File
                     </button>
@@ -161,7 +158,7 @@ export default function ScanLauncher(props: Props) {
             <span className="text-[10px] font-mono text-[#52525b]">Cost per scan: <strong className="text-[#22c55e]">1 credit</strong></span>
             {dv.currentDomain && (
               <span className="text-[9px] font-mono text-[#52525b]">
-                {dv.currentDomainVerified ? 'Red-team unlocked for this domain' : 'Red-team will ask you to confirm authorization'}
+                {dv.currentDomainVerified ? 'Red-team unlocked for this domain' : 'Red-team requires DNS/file verification first'}
               </span>
             )}
           </div>

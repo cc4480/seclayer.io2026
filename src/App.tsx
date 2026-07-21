@@ -90,7 +90,7 @@ export default function App() {
         {currentView === 'report' && activeScan && (
           <ReportViewer
             scan={activeScan}
-            previousScan={scans.filter(s => s.url === activeScan.url && s.id !== activeScan.id && new Date(s.createdAt).getTime() < new Date(activeScan.createdAt).getTime()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]}
+            previousScan={scans.filter(s => s.url === activeScan.url && s.id !== activeScan.id && s.status === 'complete' && new Date(s.createdAt).getTime() < new Date(activeScan.createdAt).getTime()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]}
             onBack={() => handleNavigate('dashboard')}
             onRefreshScans={() => loadUserContext()}
           />

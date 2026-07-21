@@ -8,9 +8,12 @@ interface ScanProgressProps {
   onCancel: () => void;
 }
 
+const MAX_CONSECUTIVE_POLL_ERRORS = 5;
+
 export default function ScanProgress({ scanId, onScanFinished, onCancel }: ScanProgressProps) {
   const [scan, setScan] = useState<Scan | null>(null);
   const [progressPercent, setProgressPercent] = useState(10);
+  const [pollError, setPollError] = useState<string | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const finishedRef = useRef(false);
 
@@ -18,45 +21,60 @@ export default function ScanProgress({ scanId, onScanFinished, onCancel }: ScanP
   // each real phase completes — see server.ts's processScanJob).
   useEffect(() => {
     let active = true;
+    let consecutiveErrors = 0;
 
     const fetchStatus = async () => {
       try {
         const res = await fetch(`/api/scans/${scanId}`);
-        const data = await res.json();
-
         if (!active) return;
 
-        if (data.scan) {
-          const currentScan = data.scan as Scan;
-          setScan(currentScan);
-
-          if (currentScan.status === 'complete') {
-            setProgressPercent(100);
-            if (!finishedRef.current) {
-              finishedRef.current = true;
-              setTimeout(() => {
-                if (active) onScanFinished(scanId);
-              }, 1000);
-            }
-            return;
-          }
-
-          if (currentScan.status === 'failed') {
-            setProgressPercent(100);
-            return;
-          }
-
-          // Advance progression bar corresponding to state
-          if (currentScan.status === 'queued') {
-            setProgressPercent(20);
-          } else if (currentScan.status === 'scanning') {
-            setProgressPercent(50);
-          } else if (currentScan.status === 'analyzing') {
-            setProgressPercent(80);
-          }
+        if (!res.ok) {
+          throw new Error(res.status === 404 ? 'This scan no longer exists.' : `Server returned ${res.status}.`);
         }
-      } catch (err) {
+        const data = await res.json();
+        if (!active) return;
+
+        if (!data.scan) throw new Error('Scan status is unavailable.');
+
+        consecutiveErrors = 0;
+        setPollError(null);
+        const currentScan = data.scan as Scan;
+        setScan(currentScan);
+
+        if (currentScan.status === 'complete') {
+          setProgressPercent(100);
+          clearInterval(pollTimer);
+          if (!finishedRef.current) {
+            finishedRef.current = true;
+            setTimeout(() => {
+              if (active) onScanFinished(scanId);
+            }, 1000);
+          }
+          return;
+        }
+
+        if (currentScan.status === 'failed') {
+          setProgressPercent(100);
+          clearInterval(pollTimer);
+          return;
+        }
+
+        // Advance progression bar corresponding to state
+        if (currentScan.status === 'queued') {
+          setProgressPercent(20);
+        } else if (currentScan.status === 'scanning') {
+          setProgressPercent(50);
+        } else if (currentScan.status === 'analyzing') {
+          setProgressPercent(80);
+        }
+      } catch (err: any) {
+        if (!active) return;
         console.error('Error polling scan status:', err);
+        consecutiveErrors += 1;
+        if (consecutiveErrors >= MAX_CONSECUTIVE_POLL_ERRORS) {
+          clearInterval(pollTimer);
+          setPollError(err?.message || 'Lost connection to the scan. Please return to the dashboard and try again.');
+        }
       }
     };
 
@@ -99,6 +117,28 @@ export default function ScanProgress({ scanId, onScanFinished, onCancel }: ScanP
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs.length]);
+
+  // Polling has permanently failed (server/network kept erroring) — surface it
+  // instead of leaving the spinner running with no feedback forever.
+  if (pollError) {
+    return (
+      <div className="min-h-screen bg-[#09090b] text-[#a1a1aa] py-20 px-6 flex items-center justify-center">
+        <div className="max-w-md w-full space-y-6 bg-[#0c0c0e] border border-[#f87171]/25 p-8 rounded shadow-2xl text-center">
+          <ShieldAlert className="w-10 h-10 text-[#f87171] mx-auto" />
+          <div>
+            <h1 className="text-white font-mono font-bold text-sm uppercase tracking-wider">Lost Connection</h1>
+            <p className="text-[#a1a1aa] text-xs font-mono mt-2">{pollError}</p>
+          </div>
+          <button
+            onClick={onCancel}
+            className="px-4 py-2 bg-[#18181b] border border-[#27272a] hover:border-[#3f3f46] text-white text-xs font-mono uppercase tracking-wider rounded transition-all cursor-pointer"
+          >
+            Back to Dashboard
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#09090b] text-[#a1a1aa] py-20 px-6 flex items-center justify-center">

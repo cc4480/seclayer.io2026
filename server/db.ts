@@ -151,6 +151,11 @@ class SqliteDb {
     this.addColumnIfMissing("monitored_targets", "scanMinute", "INTEGER");
     this.addColumnIfMissing("monitored_targets", "scanWeekday", "INTEGER");
     this.migrateLegacyPlaintextApiKeys();
+    // Self-attestation ('method' = 'attestation') used to grant the same active-probe
+    // access as real DNS/file proof with no technical verification. That path has been
+    // removed; revoke any domain this trusted on attestation alone so active probing
+    // requires real DNS/file proof for every user, including ones verified before this change.
+    this.db.prepare("UPDATE domain_verifications SET verified = 0 WHERE method = 'attestation'").run();
   }
 
   // One-time (idempotent, safe to re-run every boot) upgrade: earlier versions
@@ -274,7 +279,7 @@ class SqliteDb {
     return {
       id: row.id, userId: row.userId, domain: row.domain, token: row.token,
       verified: !!row.verified, createdAt: row.createdAt, verifiedAt: row.verifiedAt ?? undefined,
-      method: row.method ?? undefined, attestation: row.attestation ?? undefined,
+      method: row.method ?? undefined,
     };
   }
 
@@ -492,27 +497,6 @@ class SqliteDb {
   markDomainVerified(userId: string, domain: string, method: 'dns' | 'file' = 'dns'): void {
     this.db.prepare('UPDATE domain_verifications SET verified = 1, verifiedAt = ?, method = ? WHERE userId = ? AND domain = ?')
       .run(new Date().toISOString(), method, userId, domain);
-  }
-
-  // Records an explicit ownership/authorization ATTESTATION and marks the domain
-  // verified. Unlike DNS/file proof this trusts the user's affirmation, so the
-  // exact statement they agreed to is stored for the audit trail. Upserts so a
-  // domain with no prior pending record can still be attested in one step.
-  attestDomainOwnership(userId: string, domain: string, attestation: string): DomainVerification {
-    const now = new Date().toISOString();
-    const existing = this.getDomainVerification(userId, domain);
-    if (!existing) {
-      const id = 'dv_' + crypto.randomBytes(8).toString('hex');
-      const token = crypto.randomBytes(16).toString('hex');
-      this.db.prepare(
-        'INSERT INTO domain_verifications (id, userId, domain, token, verified, createdAt, verifiedAt, method, attestation) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)'
-      ).run(id, userId, domain, token, now, now, 'attestation', attestation);
-    } else {
-      this.db.prepare(
-        'UPDATE domain_verifications SET verified = 1, verifiedAt = ?, method = ?, attestation = ? WHERE userId = ? AND domain = ?'
-      ).run(now, 'attestation', attestation, userId, domain);
-    }
-    return this.getDomainVerification(userId, domain)!;
   }
 
   isDomainVerified(userId: string, domain: string): boolean {

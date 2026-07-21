@@ -67,8 +67,18 @@ export function registerScanRoutes(app: express.Express, ctx: RouteContext) {
       return res.status(400).json({ status: "error", message: e?.message || "Target URL cannot be scanned." });
     }
 
-    // Deduct 1 credit
-    db.deductCredits(userId, 1);
+    // Deduct 1 credit. This re-checks the balance at the moment of deduction
+    // (deductCredits is a single synchronous read-then-write, so it can't be
+    // interleaved by a concurrent request) rather than trusting the earlier
+    // check, which ran before the `await` above and so could be stale —
+    // without this, two concurrent launches sharing 1 credit could both pass
+    // the early check and both get a free scan.
+    if (!db.deductCredits(userId, 1)) {
+      return res.status(402).json({
+        status: "error",
+        message: "No credits remaining. Please purchase scan credits to continue.",
+      });
+    }
 
     // Create the scan entry in queued state
     const scan = db.createScan(userId, url, authHeader);

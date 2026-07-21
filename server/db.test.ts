@@ -119,33 +119,18 @@ test('domain verification starts pending, is idempotent, and flips to verified',
   assert.equal(db.isDomainVerified(other.id, 'owned.test'), false);
 });
 
-test('attestation verifies a domain in one step and records the exact statement', () => {
-  const u = db.getOrCreateUser('attest@test.io');
-  assert.equal(db.isDomainVerified(u.id, 'myapp.test'), false);
+test('self-attestation no longer unlocks active probes: legacy attested domains are revoked on migrate', () => {
+  const u = db.getOrCreateUser('legacy-attest@test.io');
+  db.startDomainVerification(u.id, 'legacy.test', 'sl-verify-legacy');
+  // Simulate a row left behind by the removed attestation endpoint.
+  (db as any).db
+    .prepare("UPDATE domain_verifications SET verified = 1, method = 'attestation', attestation = ? WHERE userId = ? AND domain = ?")
+    .run('I attest that I own legacy.test.', u.id, 'legacy.test');
+  assert.equal(db.isDomainVerified(u.id, 'legacy.test'), true, 'row is verified before the corrective migration runs');
 
-  const statement = 'I attest that I own myapp.test.';
-  const rec = db.attestDomainOwnership(u.id, 'myapp.test', statement);
-
-  assert.equal(rec.verified, true);
-  assert.equal(rec.method, 'attestation');
-  assert.equal(rec.attestation, statement, 'the affirmed statement is stored for the audit trail');
-  assert.ok(rec.verifiedAt, 'verifiedAt is set');
-  assert.equal(db.isDomainVerified(u.id, 'myapp.test'), true, 'active probes are now unlocked for this user');
-
-  // Still scoped per-user — one user attesting does not authorize another.
-  const other = db.getOrCreateUser('other-attest@test.io');
-  assert.equal(db.isDomainVerified(other.id, 'myapp.test'), false);
-});
-
-test('attestation upgrades an existing pending verification without losing scope', () => {
-  const u = db.getOrCreateUser('attest2@test.io');
-  db.startDomainVerification(u.id, 'pending.test', 'sl-verify-xyz');
-  assert.equal(db.isDomainVerified(u.id, 'pending.test'), false);
-
-  const rec = db.attestDomainOwnership(u.id, 'pending.test', 'authorized by owner');
-  assert.equal(rec.verified, true);
-  assert.equal(rec.method, 'attestation');
-  assert.equal(db.isDomainVerified(u.id, 'pending.test'), true);
+  // Re-running migrate() (as happens on every boot) must revoke it.
+  (db as any).migrate();
+  assert.equal(db.isDomainVerified(u.id, 'legacy.test'), false, 'attestation-only verification is revoked');
 });
 
 test('monitoring scheduler surfaces only due targets', () => {

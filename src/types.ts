@@ -37,7 +37,7 @@ export interface ExploitEvidence {
   reproduction: string;     // copy-pasteable curl to replay the attack exchange
   capturedAt: string;
   // Ownership proof this active action was gated behind, when threaded through.
-  ownership?: { verificationId?: string; method?: 'dns' | 'file' | 'attestation' };
+  ownership?: { verificationId?: string; method?: 'dns' | 'file' };
 }
 
 // A recorded out-of-band callback: the scanned target reached back to our
@@ -221,9 +221,6 @@ export interface DomainVerification {
   verified: boolean;
   createdAt: string;
   verifiedAt?: string;
-  // How ownership was established: 'dns'/'file' (cryptographic proof) or
-  // 'attestation' (the user explicitly affirmed they own or are authorized to
-  // actively test the domain). Recorded for the audit trail.
-  method?: 'dns' | 'file' | 'attestation';
-  attestation?: string; // the exact statement the user affirmed, when method === 'attestation'
+  // How ownership was established: 'dns' or 'file' (cryptographic proof).
+  method?: 'dns' | 'file';
 }

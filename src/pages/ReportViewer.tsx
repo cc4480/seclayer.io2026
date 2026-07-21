@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowLeft, Download, Share2, Clock, Check } from 'lucide-react';
+import { ArrowLeft, Download, Share2, Clock, Check, AlertTriangle } from 'lucide-react';
 import { Scan } from '../types.js';
 // Single source of truth for every risk figure/label shown here — the same
 // module the server scanner and read-model score from. No risk value or label
@@ -57,6 +57,39 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
 
   const handleDownloadPdf = () => downloadReportPdf(scan, posture, findings);
 
+  // A scan that never completed has no real findings/score to report — showing
+  // the normal report for it would misrepresent an empty findings list (from a
+  // failed/incomplete scan) as a clean "no issues found" result.
+  if (scan.status !== 'complete') {
+    return (
+      <div className="min-h-screen bg-[#09090b] text-[#a1a1aa] py-12 px-6">
+        <div className="max-w-3xl mx-auto space-y-6 animate-fade-in">
+          <button
+            onClick={onBack}
+            className="flex items-center space-x-2 text-[#a1a1aa] hover:text-white font-mono text-xs uppercase tracking-wider transition-colors cursor-pointer"
+          >
+            <ArrowLeft className="w-4 h-4 text-[#22c55e]" />
+            <span>Audit Workspace</span>
+          </button>
+          <div className="bg-[#0c0c0e] border border-[#f87171]/25 rounded p-8 flex items-start space-x-4">
+            <AlertTriangle className="w-5 h-5 text-[#f87171] shrink-0 mt-0.5" />
+            <div>
+              <h2 className="text-white font-mono font-bold text-sm uppercase tracking-wider">
+                {scan.status === 'failed' ? 'Scan Failed' : 'Scan Not Yet Complete'}
+              </h2>
+              <p className="text-[#a1a1aa] text-xs font-mono mt-2">
+                {scan.status === 'failed'
+                  ? (scan.error || 'This scan could not be completed. No report is available.')
+                  : `This scan is still ${scan.status} — its report isn't ready yet.`}
+              </p>
+              <p className="text-[#52525b] text-xs font-mono mt-3">Target: {scan.url}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#09090b] text-[#a1a1aa] py-12 px-6">
       <div className="max-w-5xl mx-auto space-y-8 animate-fade-in">
@@ -111,7 +144,7 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
             </div>
 
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 shrink-0">
-              {previousScan && (
+              {previousScan && typeof previousScan.score === 'number' && (
                 <div className="p-4 rounded border border-zinc-800 bg-black flex items-center space-x-5 h-full">
                   <div className="text-right">
                     <span className="text-[9px] font-mono text-zinc-500 uppercase block tracking-wider select-none">Score Delta</span>
@@ -121,8 +154,8 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
                   </div>
                   <div className="border-l border-zinc-800 pl-4 text-right">
                     <span className="text-[9px] font-mono text-zinc-500 uppercase block tracking-wider select-none">Findings Delta</span>
-                    <span className={`text-xl font-mono font-black block mt-1 ${findings.length < previousScan.findings!.length ? 'text-green-500' : findings.length > previousScan.findings!.length ? 'text-amber-500' : 'text-zinc-500'}`}>
-                      {findings.length > previousScan.findings!.length ? '+' : ''}{findings.length - previousScan.findings!.length}
+                    <span className={`text-xl font-mono font-black block mt-1 ${findings.length < (previousScan.findings || []).length ? 'text-green-500' : findings.length > (previousScan.findings || []).length ? 'text-amber-500' : 'text-zinc-500'}`}>
+                      {findings.length > (previousScan.findings || []).length ? '+' : ''}{findings.length - (previousScan.findings || []).length}
                     </span>
                   </div>
                 </div>
