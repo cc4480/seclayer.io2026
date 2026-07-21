@@ -176,3 +176,39 @@ test('OOB collaborator refuses a callback for a token issued more than 15 minute
   assert.equal(db.getOobEvents(tok).length, 1);
   assert.equal(db.getOobEvents(tok)[0].sourceIp, '1.2.3.4');
 });
+
+test('recoverStuckScans fails and refunds any scan left mid-flight, and leaves completed scans alone', () => {
+  const u = db.getOrCreateUser('stuck@test.io');
+  const creditsBefore = db.getUser(u.id)!.credits;
+
+  const queued = db.createScan(u.id, 'https://queued.test');
+  const scanning = db.updateScan(db.createScan(u.id, 'https://scanning.test').id, { status: 'scanning' });
+  const analyzing = db.updateScan(db.createScan(u.id, 'https://analyzing.test').id, { status: 'analyzing' });
+  const completed = db.updateScan(db.createScan(u.id, 'https://done.test').id, { status: 'complete', score: 90, severity: 'low', findings: [] });
+  // Each createScan above spent nothing (createScan doesn't touch credits —
+  // the route does), so the balance is still whatever it started at.
+  assert.equal(db.getUser(u.id)!.credits, creditsBefore);
+
+  // Other tests in this file share the same in-memory DB and may leave their
+  // own scans mid-flight, so don't assume this sweep's count is exactly 3 —
+  // only assert on this test's own scans and its own user's credit delta.
+  const recovered = db.recoverStuckScans();
+  assert.ok(recovered >= 3, `at least the three mid-flight scans created here must be recovered; got ${recovered}`);
+
+  assert.equal(db.getScan(queued.id)!.status, 'failed');
+  assert.equal(db.getScan(scanning.id)!.status, 'failed');
+  assert.equal(db.getScan(analyzing.id)!.status, 'failed');
+  assert.match(db.getScan(queued.id)!.error || '', /interrupted by a server restart/);
+
+  // The already-completed scan must be untouched.
+  assert.equal(db.getScan(completed.id)!.status, 'complete');
+
+  // One refund per recovered scan — this user owns exactly 3 of them, so
+  // their balance must move by exactly +3 regardless of what else was swept.
+  assert.equal(db.getUser(u.id)!.credits, creditsBefore + 3);
+
+  // Idempotent: nothing left to recover for this user on a second sweep, so
+  // no double-refund.
+  db.recoverStuckScans();
+  assert.equal(db.getUser(u.id)!.credits, creditsBefore + 3);
+});

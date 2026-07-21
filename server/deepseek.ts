@@ -85,6 +85,10 @@ export async function generateAiReport(
       // Reasoning + a findings-heavy JSON report share this budget — see
       // deepseekClient.ts's DeepSeekCallOptions doc for why it must be generous.
       maxTokens: 20000,
+      // High-effort thinking mode over a large token budget legitimately takes
+      // a while; generous but still bounded so a stalled call can't hang a
+      // scan in "analyzing" forever (see deepseekClient.ts).
+      timeoutMs: 90000,
     });
     if (!bodyTextRaw) {
       return { ...staticCompiled, aiSummary: compileLocalSummary(url, staticCompiled), executiveBreakdown: compileLocalBreakdown(url, staticCompiled) };

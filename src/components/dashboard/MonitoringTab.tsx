@@ -108,6 +108,9 @@ export default function MonitoringTab({ m }: { m: ReturnType<typeof useMonitorin
               <span>Add Monitor</span>
             </button>
           </div>
+          {m.monitorError && (
+            <div className="text-[#f87171] text-[10px] font-mono">{m.monitorError}</div>
+          )}
         </form>
       </div>
 

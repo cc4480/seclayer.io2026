@@ -1,5 +1,5 @@
 import { useState, useEffect, type FormEvent } from 'react';
-import { CheckCircle } from 'lucide-react';
+import { CheckCircle, Info } from 'lucide-react';
 import { Scan, ApiKey, User } from '../types.js';
 import DashboardHeader from '../components/dashboard/DashboardHeader.js';
 import { useDomainVerification } from '../hooks/useDomainVerification.js';
@@ -27,11 +27,14 @@ interface DashboardProps {
   onPurchaseCredits: (packName: 'single' | 'pack5' | 'pack20') => void;
   onViewReport: (scanId: string) => void;
   isPerformingAction: boolean;
+  checkoutNotice: 'success' | 'canceled' | null;
+  onDismissCheckoutNotice: () => void;
 }
 
 export default function Dashboard({
   user, scans, apiKeys, credits, transactions, justGeneratedKey, onDismissGeneratedKey,
   onInitiateScan, onGenerateKey, onRevokeKey, onPurchaseCredits, onViewReport, isPerformingAction,
+  checkoutNotice, onDismissCheckoutNotice,
 }: DashboardProps) {
   const [scanUrl, setScanUrl] = useState('');
   const [authHeader, setAuthHeader] = useState('');
@@ -50,28 +53,34 @@ export default function Dashboard({
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterSeverity, setFilterSeverity] = useState('all');
-  const [prevCredits, setPrevCredits] = useState(credits);
   const [showToast, setShowToast] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
+  const [toastTone, setToastTone] = useState<'success' | 'neutral'>('success');
 
   const dv = useDomainVerification(scanUrl, user.id);
   const m = useMonitoring(user, scans);
 
-  const notify = (msg: string) => {
+  const notify = (msg: string, tone: 'success' | 'neutral' = 'success') => {
     setToastMsg(msg);
+    setToastTone(tone);
     setShowToast(true);
-    setTimeout(() => setShowToast(false), 3000);
+    setTimeout(() => setShowToast(false), 4000);
   };
 
-  // Toast notifier for balance changes.
+  // Show the real Stripe Checkout outcome once, then clear it so a later
+  // remount/refresh doesn't re-show a stale notice. A credits-before-vs-after
+  // comparison doesn't work here — Checkout is a full-page redirect away and
+  // back, so this component (and any "previous credits" state) mounts fresh
+  // with credits already at their post-purchase value.
   useEffect(() => {
-    if (credits > prevCredits) {
-      setToastMsg(`Sandbox Top-up Successful! Added ${credits - prevCredits} scan credits.`);
-      setShowToast(true);
-      setTimeout(() => setShowToast(false), 4000);
+    if (checkoutNotice === 'success') {
+      notify('Payment successful — credits have been added to your balance.', 'success');
+      onDismissCheckoutNotice();
+    } else if (checkoutNotice === 'canceled') {
+      notify('Checkout was canceled — no charge was made.', 'neutral');
+      onDismissCheckoutNotice();
     }
-    setPrevCredits(credits);
-  }, [credits, prevCredits]);
+  }, [checkoutNotice]);
 
   // Launch a scan in the chosen mode. `active` = red-team (real exploit probes),
   // which requires the target domain to already be verified via DNS TXT record
@@ -200,8 +209,14 @@ export default function Dashboard({
 
       {/* Floating Status Toast Notifier */}
       {showToast && (
-        <div className="fixed bottom-6 right-6 z-50 bg-[#0c0c0e] border border-[#22c55e] text-[#22c55e] px-4 py-3 rounded shadow-2xl shadow-green-950/20 font-mono text-xs flex items-center space-x-2 animate-bounce">
-          <CheckCircle className="w-4 h-4 text-[#22c55e] shrink-0 animate-pulse" />
+        <div className={`fixed bottom-6 right-6 z-50 bg-[#0c0c0e] px-4 py-3 rounded shadow-2xl font-mono text-xs flex items-center space-x-2 animate-bounce ${
+          toastTone === 'success' ? 'border border-[#22c55e] text-[#22c55e] shadow-green-950/20' : 'border border-[#3f3f46] text-[#a1a1aa] shadow-black/20'
+        }`}>
+          {toastTone === 'success' ? (
+            <CheckCircle className="w-4 h-4 text-[#22c55e] shrink-0 animate-pulse" />
+          ) : (
+            <Info className="w-4 h-4 text-[#a1a1aa] shrink-0" />
+          )}
           <span>{toastMsg}</span>
         </div>
       )}

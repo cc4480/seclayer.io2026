@@ -21,6 +21,13 @@ export function useSeclayer() {
   const [selectedScanId, setSelectedScanId] = useState<string | null>(null);
   const [showLogin, setShowLogin] = useState(false);
   const [isPerformingAction, setIsPerformingAction] = useState(false);
+  // Set once, right after returning from Stripe Checkout, so the dashboard can
+  // show a real success/cancel message. A credits-before-vs-after comparison
+  // doesn't work here: Checkout is a full-page redirect away and back, so this
+  // whole app (and any "previous credits" state) remounts from scratch with
+  // credits already at their post-purchase value by the time anything can
+  // compare against it.
+  const [checkoutNotice, setCheckoutNotice] = useState<'success' | 'canceled' | null>(null);
 
   // Restore the session (if any) on load. Identity comes from the httpOnly
   // session cookie, so no userId is ever passed from the client.
@@ -66,11 +73,17 @@ export function useSeclayer() {
         setCredits(0);
       }
 
-      // Handle return from Stripe Checkout: land on the dashboard and clean the
-      // query string. Credits arrive via the webhook, reflected by this reload.
+      // Handle return from Stripe Checkout: land on the dashboard, show a real
+      // outcome message, and clean the query string. Credits arrive via the
+      // webhook, reflected by this reload's fetched balance.
       const params = new URLSearchParams(window.location.search);
-      if (params.has('checkout_success') || params.has('checkout_canceled')) {
+      if (params.has('checkout_success')) {
         if (userRes.ok) setCurrentView('dashboard');
+        setCheckoutNotice('success');
+        window.history.replaceState({}, '', window.location.pathname);
+      } else if (params.has('checkout_canceled')) {
+        if (userRes.ok) setCurrentView('dashboard');
+        setCheckoutNotice('canceled');
         window.history.replaceState({}, '', window.location.pathname);
       }
     } catch (err) {
@@ -225,7 +238,7 @@ export function useSeclayer() {
   return {
     user, scans, apiKeys, credits, transactions, justGeneratedKey, setJustGeneratedKey,
     currentView, setCurrentView, selectedScanId, setSelectedScanId, showLogin, setShowLogin,
-    isPerformingAction, activeScan,
+    isPerformingAction, activeScan, checkoutNotice, setCheckoutNotice,
     loadUserContext, handleNavigate, handleStartTrial, onInitiateScan,
     onGenerateKey, onRevokeKey, onPurchaseCredits, handleLogout,
   };

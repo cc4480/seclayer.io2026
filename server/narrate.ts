@@ -50,7 +50,7 @@ FACTS:
 - Active exploit probes run: ${diag.activeProbesSkipped ? 'no (unverified domain)' : 'yes'}
 - Red-team/API findings so far: ${(diag.redTeamFindings?.length || 0) + (diag.apiSecFindings?.length || 0)}`;
 
-    const { content } = await callDeepSeek(MODEL_FLASH, prompt, { thinking: 'disabled', maxTokens: 600 });
+    const { content } = await callDeepSeek(MODEL_FLASH, prompt, { thinking: 'disabled', maxTokens: 600, timeoutMs: 15000 });
     return parseLines(content) ?? localScanningNarration(diag);
   } catch (err: any) {
     console.warn(`[narrate] flash scanning narration failed, using local fallback: ${err?.message || err}`);
@@ -85,7 +85,7 @@ FACTS:
 - Overall severity: ${compiled.severity}
 - Top finding: ${compiled.findings[0]?.title || 'none'}`;
 
-    const { content } = await callDeepSeek(MODEL_FLASH, prompt, { thinking: 'disabled', maxTokens: 600 });
+    const { content } = await callDeepSeek(MODEL_FLASH, prompt, { thinking: 'disabled', maxTokens: 600, timeoutMs: 15000 });
     const modelLines = parseLines(content);
     if (!modelLines) return localAnalysisNarration(compiled);
     // Belt-and-suspenders: even though the prompt says not to, strip any line

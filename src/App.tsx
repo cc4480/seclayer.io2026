@@ -10,7 +10,7 @@ export default function App() {
   const {
     user, scans, apiKeys, credits, transactions, justGeneratedKey, setJustGeneratedKey,
     currentView, setCurrentView, selectedScanId, setSelectedScanId, showLogin, setShowLogin,
-    isPerformingAction, activeScan,
+    isPerformingAction, activeScan, checkoutNotice, setCheckoutNotice,
     loadUserContext, handleNavigate, handleStartTrial, onInitiateScan,
     onGenerateKey, onRevokeKey, onPurchaseCredits, handleLogout,
   } = useSeclayer();
@@ -69,6 +69,8 @@ export default function App() {
               }
             }}
             isPerformingAction={isPerformingAction}
+            checkoutNotice={checkoutNotice}
+            onDismissCheckoutNotice={() => setCheckoutNotice(null)}
           />
         )}
 

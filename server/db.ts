@@ -413,6 +413,33 @@ class SqliteDb {
     return this.getScan(id)!;
   }
 
+  // Resilience: the job model is in-process and fire-and-forget (see
+  // scanWorker.ts), not backed by a persisted queue, so a scan left in
+  // queued/scanning/analyzing when the process dies (crash, redeploy, OOM
+  // kill) is orphaned — no worker will ever resume it, and it would otherwise
+  // stay stuck in that status forever with no terminal state. Called once at
+  // boot to fail every such scan cleanly and refund the credit it spent,
+  // since the interruption was a platform fault, not the user's.
+  recoverStuckScans(): number {
+    const stuck = this.db.prepare(
+      "SELECT id, userId FROM scans WHERE status IN ('queued', 'scanning', 'analyzing')"
+    ).all() as Array<{ id: string; userId: string }>;
+    if (stuck.length === 0) return 0;
+    const now = new Date().toISOString();
+    const tx = this.db.transaction(() => {
+      for (const s of stuck) {
+        this.db.prepare("UPDATE scans SET status = 'failed', error = ?, completedAt = ? WHERE id = ?").run(
+          'This scan was interrupted by a server restart and could not be resumed. Your credit has been refunded — please launch a new scan.',
+          now,
+          s.id
+        );
+        this.addCredits(s.userId, 1, 'purchase');
+      }
+    });
+    tx();
+    return stuck.length;
+  }
+
   updateScan(id: string, updates: Partial<Scan>): Scan {
     const existing = this.getScan(id);
     if (!existing) throw new Error('Scan not found');

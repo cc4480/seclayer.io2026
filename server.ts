@@ -25,6 +25,13 @@ async function startServer() {
   const app = express();
   const PORT = config.port;
 
+  // Resilience: fail (and refund) any scan orphaned by a prior process's
+  // crash/redeploy before it can ever be found stuck by a user.
+  const recovered = db.recoverStuckScans();
+  if (recovered > 0) {
+    console.log(`[server] Recovered ${recovered} scan(s) left mid-flight by a prior process — marked failed and refunded.`);
+  }
+
   // Out-of-band collaborator for blind-vuln proofs. Needs a base URL the SCANNED
   // TARGET can reach back on — APP_URL in production (OOB_BASE_URL overrides it,
   // e.g. to a loopback base in local testing). When neither is set the OOB probe

@@ -27,6 +27,13 @@ export interface DeepSeekCallOptions {
   // COMBINED — a tight cap can silently truncate the response before any
   // JSON is emitted. Size it generously for thinking calls.
   maxTokens: number;
+  // Every other outbound probe in this codebase bounds itself with an
+  // AbortController; this call used to be the one exception, so a stalled
+  // DeepSeek request (or a hung proxy in front of it) could leave a scan
+  // sitting in "scanning"/"analyzing" forever with no fast-fail. Callers must
+  // size this to their own latency profile — thinking-mode calls legitimately
+  // take much longer than flash narration.
+  timeoutMs: number;
 }
 
 // Calls the DeepSeek chat completions endpoint in JSON mode and returns the
@@ -49,14 +56,27 @@ export async function callDeepSeek(model: string, prompt: string, opts: DeepSeek
   if (opts.thinking) body.thinking = { type: opts.thinking };
   if (opts.reasoningEffort) body.reasoning_effort = opts.reasoningEffort;
 
-  const response = await fetch(`${DEEPSEEK_BASE_URL}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(body),
-  });
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), opts.timeoutMs);
+  let response: Response;
+  try {
+    response = await fetch(`${DEEPSEEK_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal: ctl.signal,
+    });
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      throw new Error(`DeepSeek API call timed out after ${opts.timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (!response.ok) {
     const errBody = await response.text().catch(() => '');

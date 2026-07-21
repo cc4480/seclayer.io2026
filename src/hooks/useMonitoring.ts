@@ -12,6 +12,7 @@ export function useMonitoring(user: User, scans: Scan[]) {
   const [monitorDay, setMonitorDay] = useState('Monday');
   const [monitorTime, setMonitorTime] = useState('09:00');
   const [isAddingMonitor, setIsAddingMonitor] = useState(false);
+  const [monitorError, setMonitorError] = useState('');
 
   const [webhookUrl, setWebhookUrl] = useState(user.notifyWebhook || '');
   const [webhookSaving, setWebhookSaving] = useState(false);
@@ -70,6 +71,7 @@ export function useMonitoring(user: User, scans: Scan[]) {
     e.preventDefault();
     if (!monitorUrl.trim()) return;
     setIsAddingMonitor(true);
+    setMonitorError('');
 
     // The time input is interpreted as UTC (see the label below). Send the
     // schedule as structured fields; the server derives the human label and the
@@ -90,10 +92,16 @@ export function useMonitoring(user: User, scans: Scan[]) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
         setMonitorUrl('');
         fetchMonitoredTargets();
+      } else {
+        // The route responds with { error: "..." } rather than { message: "..." }.
+        setMonitorError(data.error || data.message || 'Could not add this monitor. Please check the URL and try again.');
       }
+    } catch {
+      setMonitorError('Could not add this monitor — check your connection and try again.');
     } finally {
       setIsAddingMonitor(false);
     }
@@ -111,7 +119,7 @@ export function useMonitoring(user: User, scans: Scan[]) {
   return {
     suppressRules, fetchSuppressRules,
     monitoredTargets, monitorUrl, setMonitorUrl, monitorFreq, setMonitorFreq,
-    monitorDay, setMonitorDay, monitorTime, setMonitorTime, isAddingMonitor,
+    monitorDay, setMonitorDay, monitorTime, setMonitorTime, isAddingMonitor, monitorError,
     handleAddMonitor, handleDeleteMonitor,
     webhookUrl, setWebhookUrl, webhookSaving, webhookSaved, saveWebhook,
   };

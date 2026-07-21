@@ -4,13 +4,25 @@
 // verified ownership of the target's domain; otherwise passive recon only.
 import express from "express";
 import { db } from "../db.js";
+import { rateLimit } from "../rateLimit.js";
 import { runDiagnostics, compileStaticFindings, compileScanEvidence, assertScanTargetSafe } from "../scanner.js";
 import { generateAiReport } from "../deepseek.js";
 import { extractDomain } from "../domainVerify.js";
 import type { RouteContext } from "./context.js";
 
 export function registerMcpRoutes(app: express.Express, ctx: RouteContext) {
-  app.post("/api/mcp/scan", async (req, res) => {
+  // Unlike /api/scans (fire-and-forget, backed by the same limiter), this
+  // endpoint runs the full diagnostic-and-AI pipeline synchronously in-process
+  // per call — with no limit here, a caller could burst enough concurrent
+  // heavy scans to exhaust the single Node process and starve every other
+  // user's scans, a real availability risk the credit cost alone doesn't stop.
+  const mcpLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 5,
+    keyPrefix: "mcp-scan",
+    message: "MCP scan rate limit reached. Please wait a moment before the next call.",
+  });
+  app.post("/api/mcp/scan", mcpLimiter, async (req, res) => {
     const { url, apiKey, authHeader } = req.body;
     if (!url || !apiKey) {
       return res.status(400).json({ error: "Missing parameters. required: url, apiKey" });
