@@ -7,6 +7,7 @@ import { TEMPLATES } from "./templates.js";
 import { detectTechTags } from "./techprofile.js";
 import { mapOwasp } from "./owasp.js";
 import { buildAgentPrompt, buildImpactFallback } from "./agentPrompt.js";
+import { isLikelyPlaceholderSecret, xssReflectionExecutes } from "./fpFilters.js";
 import { renderPage, isRenderingEnabled } from "./render.js";
 import crypto from "crypto";
 import net from "net";
@@ -709,7 +710,11 @@ export async function runDiagnostics(
       ];
 
       patterns.forEach((p) => {
-        if (p.regex.test(htmlText)) {
+        const m = p.regex.exec(htmlText);
+        // Signature match is necessary but not sufficient: skip documented
+        // example/placeholder credentials (e.g. AWS's AKIAIOSFODNN7EXAMPLE,
+        // sk_live_0000…, YOUR_API_KEY) so they never surface as false positives.
+        if (m && !isLikelyPlaceholderSecret(m[0])) {
           result.sastFindings.push({
             file: "Client-served HTML/JavaScript",
             issue: `Exposed Credential Signature (${p.name})`,
@@ -1003,7 +1008,11 @@ export async function runDiagnostics(
       const xssText = await xssRes.text();
       const marker = `<script>${uniqueTrigger}</script>`;
       const markerIdx = xssText.indexOf(marker);
-      if (markerIdx !== -1) {
+      // Reflection alone is not XSS: require an HTML response the browser will
+      // parse AND a context where the marker actually executes (not a JSON echo,
+      // an HTML comment, a <textarea>/<title>, etc.). This gate removes the
+      // dominant reflected-XSS false positive.
+      if (markerIdx !== -1 && xssReflectionExecutes(xssRes.headers.get("content-type"), xssText, markerIdx)) {
         // Receipt: the request that carried the payload and the response that
         // reflected it back verbatim (windowed so the marker survives truncation).
         const attackUrl = `${url}/?q=%3Cscript%3E${uniqueTrigger}%3C%2Fscript%3E`;
@@ -1554,7 +1563,10 @@ async function fuzzDiscoveredTargets(
         const attackUrl = buildUrl(targetUrl, param, payload);
         const { res, text } = await probe(attackUrl);
         const idx = text.indexOf(payload);
-        if (idx !== -1) {
+        // Verbatim reflection is confirmed, but still require the response to be
+        // browser-parsed HTML and the payload to land in an executing context —
+        // a non-HTML body or a comment/<textarea>/<title> reflection is inert.
+        if (idx !== -1 && xssReflectionExecutes(res.headers.get("content-type"), text, idx)) {
           reported.add(key);
           findings.push({
             testName: "Reflected XSS (discovered parameter)",
