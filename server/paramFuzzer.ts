@@ -88,7 +88,11 @@ export async function fuzzDiscoveredTargets(
         if (m) {
           reported.add(key);
           findings.push({
-            testName: "SQL Injection (discovered parameter)",
+            // Includes the param + endpoint so two distinct vulnerable
+            // endpoints never share a title — compileStaticFindings' final
+            // dedup step keys on title alone, and a fixed generic title here
+            // used to make it silently drop every SQLi finding after the first.
+            testName: `SQL Injection (discovered parameter "${param}" on ${endpointPath})`,
             payload: `${param}=${breaker}`,
             severity: "critical",
             description: `Injecting SQL metacharacters into the discovered parameter "${param}" on ${endpointPath} provoked a database error, indicating an exploitable SQL injection.`,
@@ -137,7 +141,10 @@ export async function fuzzDiscoveredTargets(
         if (idx !== -1 && xssReflectionExecutes(res.headers.get("content-type"), text, idx)) {
           reported.add(key);
           findings.push({
-            testName: "Reflected XSS (discovered parameter)",
+            // Same reasoning as the SQLi finding above: the param + endpoint
+            // must be in the title, not just the description, or two distinct
+            // reflected-XSS endpoints collide under the title-based dedup.
+            testName: `Reflected XSS (discovered parameter "${param}" on ${endpointPath})`,
             payload: `${param}=${payload}`,
             severity: "high",
             description: `The discovered parameter "${param}" on ${endpointPath} reflects unencoded HTML/JavaScript into the response, confirming a reflected Cross-Site Scripting vulnerability.`,

@@ -594,14 +594,41 @@ test('smart discovered-parameter fuzzer proves XSS + SQLi and skips an inert par
   await withServer(handler, async (port) => {
     const diag = await runDiagnostics(`http://127.0.0.1:${port}`, undefined, { allowActiveProbes: true });
     const rt = diag.redTeamFindings || [];
-    const xss = rt.find((f) => /Reflected XSS \(discovered parameter\)/i.test(f.testName));
-    const sqli = rt.find((f) => /SQL Injection \(discovered parameter\)/i.test(f.testName));
+    const xss = rt.find((f) => /Reflected XSS \(discovered parameter/i.test(f.testName));
+    const sqli = rt.find((f) => /SQL Injection \(discovered parameter/i.test(f.testName));
     assert.ok(xss && xss.evidence && isProven({ evidence: xss.evidence } as any), 'XSS on the reflecting param must be PROVEN');
     assert.match(xss!.payload, /q=/);
     assert.ok(sqli && sqli.evidence && isProven({ evidence: sqli.evidence } as any), 'SQLi on the erroring param must be PROVEN');
     // The inert /static?ref param must never be flagged.
     assert.ok(!rt.some((f) => /ref=/.test(f.payload || '')), 'the inert param must not be flagged');
     assert.ok((diag.crawl?.paramsTested || 0) >= 2, 'multiple discovered params were fuzzed');
+  });
+});
+
+test('two distinct endpoints vulnerable to the same injection class both survive the report', async () => {
+  // /alpha and /beta both leak the same SQL error signature on their own `id`
+  // param. Before the fix, paramFuzzer gave every discovered-parameter SQLi
+  // finding the same fixed title, so compileStaticFindings' title-based dedup
+  // kept only the first and silently dropped the second — a real, distinct,
+  // PROVEN vulnerability disappearing from the report.
+  const handler: http.RequestListener = (req, res) => {
+    const u = new URL(req.url || '/', 'http://127.0.0.1');
+    if (u.pathname === '/alpha' || u.pathname === '/beta') {
+      let body = '<!doctype html><html><body>page';
+      if (u.searchParams.has('id')) body += `<div>Database error: You have an error in your SQL syntax; near '${u.searchParams.get('id')}'</div>`;
+      res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(body + '</body></html>'); return;
+    }
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end('<!doctype html><html><body><h1>home</h1>'
+      + '<a href="/alpha?id=1">alpha</a><a href="/beta?id=1">beta</a>'
+      + '</body></html>');
+  };
+  await withServer(handler, async (port) => {
+    const diag = await runDiagnostics(`http://127.0.0.1:${port}`, undefined, { allowActiveProbes: true });
+    const compiled = compileStaticFindings(diag);
+    const sqliFindings = compiled.findings.filter((f) => /SQL Injection \(discovered parameter/i.test(f.title));
+    assert.equal(sqliFindings.length, 2, 'both distinct-endpoint SQLi findings must survive the report, not just the first');
+    assert.equal(new Set(sqliFindings.map((f) => f.title)).size, 2, 'titles must actually differ so the dedup step keeps both');
   });
 });
 
