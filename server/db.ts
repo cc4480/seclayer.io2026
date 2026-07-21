@@ -440,6 +440,28 @@ class SqliteDb {
     return stuck.length;
   }
 
+  // User-initiated cancellation. Only valid while the scan is still in flight
+  // (queued/scanning/analyzing) — a scan that already reached a terminal
+  // status can't be canceled after the fact. The credit is refunded since the
+  // user never got a report. Note this stops the scan from ever overwriting
+  // "canceled" with a late result (see scanWorker.ts's status guard before
+  // each write) but does not abort in-flight network probes — the pipeline
+  // has no cancellation token threaded through it, so any request already in
+  // flight still runs to completion; its result is simply never persisted.
+  cancelScan(userId: string, scanId: string): Scan | null {
+    const scan = this.getScan(scanId);
+    if (!scan || scan.userId !== userId) return null;
+    if (!['queued', 'scanning', 'analyzing'].includes(scan.status)) return null;
+    const now = new Date().toISOString();
+    const tx = this.db.transaction(() => {
+      this.db.prepare("UPDATE scans SET status = 'canceled', error = ?, completedAt = ? WHERE id = ?")
+        .run('Canceled by user.', now, scanId);
+      this.addCredits(userId, 1, 'purchase');
+    });
+    tx();
+    return this.getScan(scanId)!;
+  }
+
   updateScan(id: string, updates: Partial<Scan>): Scan {
     const existing = this.getScan(id);
     if (!existing) throw new Error('Scan not found');

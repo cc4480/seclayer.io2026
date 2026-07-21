@@ -155,6 +155,20 @@ export function useSeclayer() {
     }
   };
 
+  // Cancels an in-flight scan and refunds its credit (server-side; see
+  // db.cancelScan). Best-effort from the UI's perspective — the user is
+  // returned to the dashboard regardless of the outcome, since the scan is
+  // either now canceled or already reached a terminal state on its own.
+  const cancelScan = async (scanId: string) => {
+    try {
+      await fetch(`/api/scans/${scanId}/cancel`, { method: 'POST' });
+    } catch (err) {
+      console.error('Cancel scan error:', err);
+    } finally {
+      loadUserContext();
+    }
+  };
+
   const onGenerateKey = async () => {
     if (!user) return;
     setIsPerformingAction(true);
@@ -239,7 +253,7 @@ export function useSeclayer() {
     user, scans, apiKeys, credits, transactions, justGeneratedKey, setJustGeneratedKey,
     currentView, setCurrentView, selectedScanId, setSelectedScanId, showLogin, setShowLogin,
     isPerformingAction, activeScan, checkoutNotice, setCheckoutNotice,
-    loadUserContext, handleNavigate, handleStartTrial, onInitiateScan,
+    loadUserContext, handleNavigate, handleStartTrial, onInitiateScan, cancelScan,
     onGenerateKey, onRevokeKey, onPurchaseCredits, handleLogout,
   };
 }

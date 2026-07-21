@@ -54,7 +54,6 @@ export async function runDiagnostics(
       nameserver: "", // resolved from real DNS below
       protocol: url.startsWith("https://") ? "HTTPS" : "HTTP",
     },
-    dastInputs: [],
     redTeamFindings: [],
     activeProbesSkipped: !allowActiveProbes,
   };

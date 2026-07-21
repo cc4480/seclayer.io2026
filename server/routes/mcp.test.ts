@@ -1,9 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
+import net from 'node:net';
+import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 process.env.DB_PATH = ':memory:';
+const { db } = await import('../db.js');
 const { registerMcpRoutes } = await import('./mcp.js');
 
 async function withMcpApp(fn: (base: string) => Promise<void>) {
@@ -27,15 +30,120 @@ async function withMcpApp(fn: (base: string) => Promise<void>) {
   }
 }
 
+// A bound-then-closed ephemeral port: nothing is listening there, so a
+// connection attempt fails instantly (ECONNREFUSED) with no network-timeout
+// wait — deterministic and fast for a test.
+async function reserveClosedPort(): Promise<number> {
+  const srv = net.createServer();
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));
+  const port = (srv.address() as AddressInfo).port;
+  await new Promise((r) => srv.close(r));
+  return port;
+}
+
+// NOTE: rateLimit.ts's bucket state is a module-level singleton shared by
+// every test in this file/process, keyed by client IP + the limiter's
+// keyPrefix — so any test that burns through the "mcp-scan" limit must run
+// LAST, or it starves every test declared after it. Node's test runner runs
+// top-level test() calls in declaration order, so ordering in this file is
+// significant.
+
+test('POST /api/mcp/scan refunds the credit and records a failed scan when the pipeline throws', async () => {
+  // Regression test: this route used to deduct the credit and only ever
+  // create a scan record on the SUCCESS path — any exception from the
+  // pipeline (runPassiveScan deliberately throws on an unreachable target,
+  // per its doc comment in scanner.ts) fell into the catch block, which
+  // returned a 500 with no refund and no record of what happened to the
+  // spent credit. The credit must come back and the scan must be visible as
+  // "failed", the same guarantee the dashboard flow already has.
+  const prevEnv = process.env.NODE_ENV;
+  const prevAllow = process.env.SCAN_DEV_ALLOW_HOSTS;
+  try {
+    const closedPort = await reserveClosedPort();
+    process.env.NODE_ENV = 'development';
+    process.env.SCAN_DEV_ALLOW_HOSTS = `127.0.0.1:${closedPort}`;
+
+    const user = db.getOrCreateUser(`mcp-fail-${Date.now()}@test.io`);
+    const { rawKey } = db.generateApiKey(user.id);
+    const creditsBefore = db.getUser(user.id)!.credits;
+
+    await withMcpApp(async (base) => {
+      const res = await fetch(`${base}/api/mcp/scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: `http://127.0.0.1:${closedPort}`, apiKey: rawKey }),
+      });
+      assert.equal(res.status, 500);
+      const body = await res.json();
+      assert.equal(body.creditsRemaining, creditsBefore, 'the credit spent for this attempt must be refunded');
+    });
+
+    assert.equal(db.getUser(user.id)!.credits, creditsBefore, 'balance is back to where it started');
+    const scans = db.listScans(user.id);
+    assert.equal(scans.length, 1, 'the failed attempt must still be visible in scan history, not silently discarded');
+    assert.equal(scans[0].status, 'failed');
+  } finally {
+    if (prevEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = prevEnv;
+    if (prevAllow === undefined) delete process.env.SCAN_DEV_ALLOW_HOSTS; else process.env.SCAN_DEV_ALLOW_HOSTS = prevAllow;
+  }
+});
+
+test('POST /api/mcp/scan creates exactly one complete scan record on success, deducting exactly one credit', async () => {
+  const targetServer = http.createServer((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end('<!doctype html><html><body>hello</body></html>');
+  });
+  await new Promise<void>((r) => targetServer.listen(0, '127.0.0.1', () => r()));
+  const targetPort = (targetServer.address() as AddressInfo).port;
+
+  const prevEnv = process.env.NODE_ENV;
+  const prevAllow = process.env.SCAN_DEV_ALLOW_HOSTS;
+  try {
+    process.env.NODE_ENV = 'development';
+    process.env.SCAN_DEV_ALLOW_HOSTS = `127.0.0.1:${targetPort}`;
+
+    const user = db.getOrCreateUser(`mcp-success-${Date.now()}@test.io`);
+    const { rawKey } = db.generateApiKey(user.id);
+    const creditsBefore = db.getUser(user.id)!.credits;
+
+    await withMcpApp(async (base) => {
+      const res = await fetch(`${base}/api/mcp/scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: `http://127.0.0.1:${targetPort}`, apiKey: rawKey }),
+      });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.creditsRemaining, creditsBefore - 1);
+    });
+
+    assert.equal(db.getUser(user.id)!.credits, creditsBefore - 1);
+    const scans = db.listScans(user.id);
+    assert.equal(scans.length, 1, 'exactly one scan record — created upfront, not duplicated on success');
+    assert.equal(scans[0].status, 'complete');
+  } finally {
+    if (prevEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = prevEnv;
+    if (prevAllow === undefined) delete process.env.SCAN_DEV_ALLOW_HOSTS; else process.env.SCAN_DEV_ALLOW_HOSTS = prevAllow;
+    await new Promise((r) => targetServer.close(r));
+  }
+});
+
 test('POST /api/mcp/scan is rate-limited per caller', async () => {
   // Regression test: this endpoint used to have no rateLimit() at all, unlike
   // every other scan-launching route, so a caller could burst unlimited
   // concurrent full-pipeline scans. The limiter runs ahead of the handler, so
   // sending requests missing `url`/`apiKey` (a fast 400, no real scan work)
   // is enough to prove the middleware is wired up without needing a live target.
+  // Declared LAST in this file: it deliberately exhausts the shared
+  // rate-limit bucket (see note above), which would starve any test after it.
+  // The two earlier tests in this file already spent 2 of the bucket's 5
+  // slots (one real request each), so this doesn't assume a fresh bucket —
+  // it just sends well past the limit and checks the shape of the outcome:
+  // some requests reach the handler (400, missing params), then it locks
+  // into 429 and stays there.
   await withMcpApp(async (base) => {
     const statuses: number[] = [];
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < 10; i++) {
       const res = await fetch(`${base}/api/mcp/scan`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -43,7 +151,12 @@ test('POST /api/mcp/scan is rate-limited per caller', async () => {
       });
       statuses.push(res.status);
     }
-    assert.ok(statuses.slice(0, 5).every((s) => s === 400), `first 5 should reach the handler (400 for missing params); got ${statuses}`);
-    assert.ok(statuses.slice(5).every((s) => s === 429), `requests past the limit must be rejected by the limiter; got ${statuses}`);
+    assert.ok(statuses.every((s) => s === 400 || s === 429), `only 400/429 expected; got ${statuses}`);
+    const reached = statuses.filter((s) => s === 400).length;
+    assert.ok(reached >= 1 && reached <= 5, `expected between 1 and 5 requests to reach the handler before the limit; got ${statuses}`);
+    // Once limited, it must stay limited for the rest of the burst.
+    const firstLimitedIndex = statuses.indexOf(429);
+    assert.ok(firstLimitedIndex !== -1, `the limiter never kicked in; got ${statuses}`);
+    assert.ok(statuses.slice(firstLimitedIndex).every((s) => s === 429), `once limited, every subsequent request must stay 429; got ${statuses}`);
   });
 });

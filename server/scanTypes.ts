@@ -44,15 +44,6 @@ export interface DiagnosticResult {
     nameserver: string;
     protocol: string;
   };
-  dastInputs: Array<{
-    formAction: string;
-    method: string;
-    csrfPresent: boolean;
-    vulnerability: string;
-    severity: Severity;
-    description: string;
-    fix: string;
-  }>;
   redTeamFindings?: Array<{
     testName: string;
     payload: string;

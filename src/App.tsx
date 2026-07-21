@@ -11,7 +11,7 @@ export default function App() {
     user, scans, apiKeys, credits, transactions, justGeneratedKey, setJustGeneratedKey,
     currentView, setCurrentView, selectedScanId, setSelectedScanId, showLogin, setShowLogin,
     isPerformingAction, activeScan, checkoutNotice, setCheckoutNotice,
-    loadUserContext, handleNavigate, handleStartTrial, onInitiateScan,
+    loadUserContext, handleNavigate, handleStartTrial, onInitiateScan, cancelScan,
     onGenerateKey, onRevokeKey, onPurchaseCredits, handleLogout,
   } = useSeclayer();
 
@@ -42,7 +42,6 @@ export default function App() {
               onPurchaseCredits(pack);
               setCurrentView('dashboard');
             }}
-            userEmail={user?.email || ''}
           />
         )}
 
@@ -83,6 +82,7 @@ export default function App() {
               handleNavigate('report', scanId);
             }}
             onCancel={() => {
+              void cancelScan(selectedScanId);
               setCurrentView('dashboard');
               setSelectedScanId(null);
             }}

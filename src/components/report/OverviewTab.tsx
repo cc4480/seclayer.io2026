@@ -1,6 +1,6 @@
 import { Sparkles, ChevronDown, ChevronUp, Eye, AlertCircle, AlertTriangle } from 'lucide-react';
 import { Scan, Finding } from '../../types.js';
-import { deriveSecurityPosture, bannerForPosture } from '../../../server/scoring.js';
+import { bannerForPosture } from '../../../server/scoring.js';
 import SeverityBar from '../SeverityBar.js';
 import BrowserFrame from '../BrowserFrame.js';
 import { categoryTabLabels, getCategoryCount, getCategorySeverity, getCategoryColor, type SecCategory } from './categories.js';
@@ -8,7 +8,6 @@ import EvidencePanels from './EvidencePanels.js';
 
 interface Props {
   scan: Scan;
-  posture: ReturnType<typeof deriveSecurityPosture>;
   banner: ReturnType<typeof bannerForPosture>;
   findings: Finding[];
   showReasoning: boolean;

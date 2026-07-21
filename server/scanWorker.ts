@@ -14,6 +14,16 @@ import { notifyScanComplete } from "./notify.js";
 import type { OobCollaborator } from "./oob.js";
 import type { BolaIdentity } from "../src/types.js";
 
+// There is no cancellation token threaded through the probe pipeline (see
+// db.cancelScan's doc comment), so a canceled scan's in-flight network work
+// still runs to completion — this only stops the worker from writing a stale
+// status/result over the user's cancellation once each stage finishes, and
+// skips starting the next (most importantly, the AI report call) once a
+// cancellation is seen.
+function isCanceled(scanId: string): boolean {
+  return db.getScan(scanId)?.status === "canceled";
+}
+
 export function makeProcessScanJob(oobCollaborator?: OobCollaborator) {
   return async function processScanJob(
     scanId: string,
@@ -24,13 +34,14 @@ export function makeProcessScanJob(oobCollaborator?: OobCollaborator) {
       console.log(`[Job Worker] Starting scan ${scanId}`);
 
       const scan = db.getScan(scanId);
-      if (!scan) return;
+      if (!scan || isCanceled(scanId)) return;
 
       let narration: string[] = [];
 
       // Active diagnostics (HTTP probing, header/secret/SCA/path checks, fuzzing).
       db.updateScan(scanId, { status: "scanning" });
       const diagnostics = await runDiagnostics(scan.url, scan.authHeader, { allowActiveProbes, bolaIdentities, oob: oobCollaborator, scanId });
+      if (isCanceled(scanId)) { console.log(`[Job Worker] Scan ${scanId} was canceled mid-flight — skipping analysis.`); return; }
 
       // Fast (flash), cheap narration of what the sweep actually found — read
       // by the progress UI in place of scripted filler text.
@@ -40,6 +51,7 @@ export function makeProcessScanJob(oobCollaborator?: OobCollaborator) {
       // Compile findings and generate the analysis report.
       const staticCompiled = compileStaticFindings(diagnostics);
       const outputReport = await generateAiReport(scan.url, diagnostics, staticCompiled);
+      if (isCanceled(scanId)) { console.log(`[Job Worker] Scan ${scanId} was canceled mid-flight — discarding the finished report.`); return; }
 
       // Narrate the score the UI will actually display: every read path
       // (getScanWithSuppressedFindings) recalculates it deterministically
@@ -60,6 +72,7 @@ export function makeProcessScanJob(oobCollaborator?: OobCollaborator) {
       });
       if (shot) evidence.screenshot = shot;
 
+      if (isCanceled(scanId)) { console.log(`[Job Worker] Scan ${scanId} was canceled mid-flight — discarding the finished report.`); return; }
       const completed = db.updateScan(scanId, {
         status: "complete",
         score: outputReport.score,
@@ -84,6 +97,7 @@ export function makeProcessScanJob(oobCollaborator?: OobCollaborator) {
       notifyScanComplete(owner?.notifyWebhook, current, priorSuppressed);
     } catch (err: any) {
       console.error(`[Job Worker] FAILED scan ${scanId}:`, err?.message || err);
+      if (isCanceled(scanId)) return; // don't overwrite the user's cancellation with a failure
       db.updateScan(scanId, {
         status: "failed",
         error: err?.message || "The scan could not be completed.",

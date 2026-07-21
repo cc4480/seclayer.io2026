@@ -212,3 +212,42 @@ test('recoverStuckScans fails and refunds any scan left mid-flight, and leaves c
   db.recoverStuckScans();
   assert.equal(db.getUser(u.id)!.credits, creditsBefore + 3);
 });
+
+test('cancelScan refunds the credit and stops the scan from ever reporting a result', () => {
+  const u = db.getOrCreateUser('cancel@test.io');
+  const creditsBefore = db.getUser(u.id)!.credits;
+
+  const scan = db.createScan(u.id, 'https://cancel-me.test');
+  db.updateScan(scan.id, { status: 'scanning' });
+
+  const canceled = db.cancelScan(u.id, scan.id);
+  assert.ok(canceled);
+  assert.equal(canceled!.status, 'canceled');
+  assert.match(canceled!.error || '', /Canceled by user/);
+  assert.equal(db.getUser(u.id)!.credits, creditsBefore + 1, 'the spent credit is refunded');
+
+  // A second cancel attempt on an already-canceled scan is rejected — it's
+  // no longer "in flight", so there's nothing left to cancel or refund again.
+  assert.equal(db.cancelScan(u.id, scan.id), null);
+  assert.equal(db.getUser(u.id)!.credits, creditsBefore + 1, 'no double-refund');
+});
+
+test('cancelScan refuses to touch a scan that already reached a terminal state', () => {
+  const u = db.getOrCreateUser('cancel-terminal@test.io');
+  const completed = db.createScan(u.id, 'https://done.test');
+  db.updateScan(completed.id, { status: 'complete', score: 90, severity: 'low', findings: [] });
+  const creditsBefore = db.getUser(u.id)!.credits;
+
+  assert.equal(db.cancelScan(u.id, completed.id), null, 'a completed scan cannot be canceled');
+  assert.equal(db.getScan(completed.id)!.status, 'complete');
+  assert.equal(db.getUser(u.id)!.credits, creditsBefore, 'no refund for a scan that was never canceled');
+});
+
+test('cancelScan is scoped to the owning user', () => {
+  const owner = db.getOrCreateUser('cancel-owner@test.io');
+  const other = db.getOrCreateUser('cancel-other@test.io');
+  const scan = db.updateScan(db.createScan(owner.id, 'https://mine.test').id, { status: 'queued' });
+
+  assert.equal(db.cancelScan(other.id, scan.id), null, 'another user cannot cancel someone else\'s scan');
+  assert.equal(db.getScan(scan.id)!.status, 'queued');
+});

@@ -75,11 +75,13 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
             <AlertTriangle className="w-5 h-5 text-[#f87171] shrink-0 mt-0.5" />
             <div>
               <h2 className="text-white font-mono font-bold text-sm uppercase tracking-wider">
-                {scan.status === 'failed' ? 'Scan Failed' : 'Scan Not Yet Complete'}
+                {scan.status === 'failed' ? 'Scan Failed' : scan.status === 'canceled' ? 'Scan Canceled' : 'Scan Not Yet Complete'}
               </h2>
               <p className="text-[#a1a1aa] text-xs font-mono mt-2">
                 {scan.status === 'failed'
                   ? (scan.error || 'This scan could not be completed. No report is available.')
+                  : scan.status === 'canceled'
+                  ? 'This scan was canceled before it finished. Its credit was refunded — launch a new scan whenever you\'re ready.'
                   : `This scan is still ${scan.status} — its report isn't ready yet.`}
               </p>
               <p className="text-[#52525b] text-xs font-mono mt-3">Target: {scan.url}</p>
@@ -186,7 +188,6 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
             {activeTab === 'OVERVIEW' ? (
               <OverviewTab
                 scan={scan}
-                posture={posture}
                 banner={banner}
                 findings={findings}
                 showReasoning={showReasoning}

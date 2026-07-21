@@ -1,4 +1,4 @@
-export type ScanStatus = 'queued' | 'scanning' | 'analyzing' | 'complete' | 'failed';
+export type ScanStatus = 'queued' | 'scanning' | 'analyzing' | 'complete' | 'failed' | 'canceled';
 export type Severity = 'info' | 'low' | 'medium' | 'high' | 'critical';
 
 export interface User {

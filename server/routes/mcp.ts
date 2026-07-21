@@ -41,20 +41,27 @@ export function registerMcpRoutes(app: express.Express, ctx: RouteContext) {
       return res.status(401).json({ error: "Invalid API Key, active key required, or insufficient credits. Get credits at seclayer.io." });
     }
 
+    // Create the scan record now, before running the pipeline — not just
+    // after success. This mirrors the dashboard flow so an MCP scan is (a)
+    // visible in scan history immediately, (b) covered by db.recoverStuckScans
+    // if the process crashes mid-pipeline, and (c) refundable below if the
+    // pipeline throws, rather than the credit silently vanishing with no
+    // record of what happened to it.
+    const scan = db.createScan(user.id, url, authHeader);
+    db.updateScan(scan.id, { status: "scanning" });
+
     try {
       // Active exploit probing only runs once this key's owner has verified
       // ownership of the target's domain; otherwise passive recon only.
       const allowActiveProbes = db.isDomainVerified(user.id, extractDomain(url));
 
       // Runs scan diagnostic synchronously for MCP tools context
-      const diagnostics = await runDiagnostics(url, authHeader, { allowActiveProbes, oob: ctx.oobCollaborator });
+      const diagnostics = await runDiagnostics(url, authHeader, { allowActiveProbes, oob: ctx.oobCollaborator, scanId: scan.id });
       const staticCompiled = compileStaticFindings(diagnostics);
       const aiReport = await generateAiReport(url, diagnostics, staticCompiled);
 
-      // Save completed scan in background for dashboard history as well
-      const completedScan = db.createScan(user.id, url, authHeader);
       const evidence = compileScanEvidence(diagnostics);
-      db.updateScan(completedScan.id, {
+      db.updateScan(scan.id, {
         status: "complete",
         score: aiReport.score,
         severity: aiReport.severity,
@@ -78,7 +85,12 @@ export function registerMcpRoutes(app: express.Express, ctx: RouteContext) {
         creditsRemaining: user.credits,
       });
     } catch (err: any) {
-      res.status(500).json({ error: "Internal audit scanning failed", details: err.message });
+      const refunded = db.addCredits(user.id, 1, "purchase");
+      db.updateScan(scan.id, {
+        status: "failed",
+        error: err?.message || "The scan could not be completed.",
+      });
+      res.status(500).json({ error: "Internal audit scanning failed", details: err.message, creditsRemaining: refunded.credits });
     }
   });
 }

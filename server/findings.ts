@@ -157,19 +157,6 @@ export function compileStaticFindings(diag: DiagnosticResult): {
     });
   });
 
-  // 5. DAST (Dynamic Application Security Probes) checks
-  diag.dastInputs.forEach((dast) => {
-    findings.push({
-      id: "f_" + crypto.randomBytes(4).toString("hex"),
-      title: dast.vulnerability,
-      description: dast.description,
-      severity: dast.severity,
-      confidence: "medium",
-      fix: dast.fix,
-      category: "DAST",
-    });
-  });
-
   // Probed Paths exposures check
   const exposed = diag.probedPaths.filter((p) => p.exposed);
   exposed.forEach((exp) => {

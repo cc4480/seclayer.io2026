@@ -104,3 +104,37 @@ test('concurrent launches sharing a single credit produce exactly one scan, not 
     assert.equal(db.listScans(userId).length, 1, 'only one scan row may exist — a free scan must never be created');
   });
 });
+
+test('POST /api/scans/:id/cancel refunds the credit and marks the scan canceled', async () => {
+  await withScanApp(async (base, userId) => {
+    const launch = await fetch(`${base}/api/scans`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: SAFE_TARGET }),
+    });
+    const { scan } = await launch.json();
+    const creditsAfterLaunch = db.getUser(userId)!.credits;
+
+    const cancel = await fetch(`${base}/api/scans/${scan.id}/cancel`, { method: 'POST' });
+    assert.equal(cancel.status, 200);
+    const { scan: canceled } = await cancel.json();
+    assert.equal(canceled.status, 'canceled');
+    assert.equal(db.getUser(userId)!.credits, creditsAfterLaunch + 1, 'the credit is refunded');
+
+    // Can't cancel it again, and no double-refund.
+    const secondCancel = await fetch(`${base}/api/scans/${scan.id}/cancel`, { method: 'POST' });
+    assert.equal(secondCancel.status, 409);
+    assert.equal(db.getUser(userId)!.credits, creditsAfterLaunch + 1);
+  });
+});
+
+test('POST /api/scans/:id/cancel 409s for a scan owned by someone else, without leaking existence', async () => {
+  await withScanApp(async (base) => {
+    const otherUser = db.getOrCreateUser(`cancel-other-${Date.now()}@test.io`);
+    const otherScan = db.createScan(otherUser.id, SAFE_TARGET);
+
+    const res = await fetch(`${base}/api/scans/${otherScan.id}/cancel`, { method: 'POST' });
+    assert.equal(res.status, 409);
+    assert.equal(db.getScan(otherScan.id)!.status, 'queued', 'the other user\'s scan must be untouched');
+  });
+});

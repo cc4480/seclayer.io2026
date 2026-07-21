@@ -7,7 +7,6 @@ interface LandingProps {
   onStartTrial: (initialUrl: string) => void;
   onNavigate: (view: string, arg?: string) => void;
   onSelectPack: (packName: 'single' | 'pack5' | 'pack20') => void;
-  userEmail: string;
 }
 
 export default function Landing({ onStartTrial, onNavigate, onSelectPack }: LandingProps) {

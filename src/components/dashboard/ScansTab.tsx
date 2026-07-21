@@ -22,7 +22,7 @@ export default function ScansTab({
     if (filterStatus !== 'all') {
       if (filterStatus === 'complete' && scan.status !== 'complete') return false;
       if (filterStatus === 'failed' && scan.status !== 'failed') return false;
-      if (filterStatus === 'active' && ['complete', 'failed'].includes(scan.status)) return false;
+      if (filterStatus === 'active' && ['complete', 'failed', 'canceled'].includes(scan.status)) return false;
     }
     if (filterSeverity !== 'all') {
       if (scan.status !== 'complete' || scan.severity !== filterSeverity) return false;
@@ -109,6 +109,8 @@ export default function ScansTab({
                   statusBadge = <span className="bg-amber-950/40 border border-[#27272a] text-amber-400 font-mono text-[9px] uppercase px-2 py-0.5 rounded animate-pulse">Analyzing AI...</span>;
                 } else if (scan.status === 'failed') {
                   statusBadge = <span className="bg-[#f87171]/10 border border-[#f87171]/25 text-[#f87171] font-mono text-[9px] uppercase px-2 py-0.5 rounded">Failed</span>;
+                } else if (scan.status === 'canceled') {
+                  statusBadge = <span className="bg-black text-[#71717a] font-mono text-[9px] uppercase px-2 py-0.5 rounded border border-[#3f3f46]">Canceled</span>;
                 }
 
                 const scoreColor =

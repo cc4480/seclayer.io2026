@@ -59,6 +59,15 @@ export default function ScanProgress({ scanId, onScanFinished, onCancel }: ScanP
           return;
         }
 
+        if (currentScan.status === 'canceled') {
+          // Covers cancellation from elsewhere (another tab/session) — the
+          // same-tab "Cancel scan" button already unmounts this component
+          // immediately, so this path only fires for that case.
+          clearInterval(pollTimer);
+          if (active) onCancel();
+          return;
+        }
+
         // Advance progression bar corresponding to state
         if (currentScan.status === 'queued') {
           setProgressPercent(20);
@@ -259,7 +268,7 @@ export default function ScanProgress({ scanId, onScanFinished, onCancel }: ScanP
               <Cpu className="w-4 h-4 text-[#22c55e] shrink-0" />
               <span>Scanning using Seclayer Daemon v2</span>
             </div>
-            {scan?.status !== 'complete' && (
+            {scan && ['queued', 'scanning', 'analyzing'].includes(scan.status) ? (
               <button
                 onClick={onCancel}
                 className="text-[#52525b] hover:text-[#f87171] transition-colors cursor-pointer"
@@ -267,7 +276,15 @@ export default function ScanProgress({ scanId, onScanFinished, onCancel }: ScanP
               >
                 Cancel scan
               </button>
-            )}
+            ) : scan?.status === 'failed' ? (
+              <button
+                onClick={onCancel}
+                className="text-[#52525b] hover:text-white transition-colors cursor-pointer"
+                id="cancel-scan-btn"
+              >
+                Back to dashboard
+              </button>
+            ) : null}
           </div>
         </div>
 

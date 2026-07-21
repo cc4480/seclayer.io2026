@@ -102,6 +102,17 @@ export function registerScanRoutes(app: express.Express, ctx: RouteContext) {
     res.json({ scans: scansList });
   });
 
+  // User-initiated cancellation. Only valid while the scan is still in
+  // flight; the credit is refunded (see db.cancelScan). Does not abort
+  // in-flight network probes — see the doc comment on db.cancelScan.
+  app.post("/api/scans/:id/cancel", requireAuth, (req, res) => {
+    const scan = db.cancelScan(getUserId(req), req.params.id);
+    if (!scan) {
+      return res.status(409).json({ status: "error", message: "This scan can no longer be canceled — it may already be complete, failed, or not exist." });
+    }
+    res.json({ status: "ok", scan });
+  });
+
   app.get("/api/scans/:id", requireAuth, (req, res) => {
     let scan = db.getScan(req.params.id);
     // Enforce ownership: a scan ID alone must not grant access to another

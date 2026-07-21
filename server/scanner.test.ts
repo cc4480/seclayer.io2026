@@ -9,7 +9,7 @@ function baseDiag(overrides: any = {}): any {
     url: 'https://x.test', scannedAt: '', responseStatus: 200, sslSecure: true,
     headers: {}, missingHeaders: [], techLeaked: [], probedPaths: [], cookieIssues: [],
     sastFindings: [], scaLibraries: [], easmPerimeter: { subdomains: [], ip: '', nameserver: '', protocol: '' },
-    dastInputs: [], redTeamFindings: [], apiSecFindings: [], ...overrides,
+    redTeamFindings: [], apiSecFindings: [], ...overrides,
   };
 }
 
