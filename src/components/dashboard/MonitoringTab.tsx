@@ -1,4 +1,4 @@
-import { Clock, Globe, Plus, RefreshCw } from 'lucide-react';
+import { Clock, Globe, Plus, RefreshCw, AlertTriangle } from 'lucide-react';
 import { useMonitoring } from '../../hooks/useMonitoring.js';
 
 // Continuous-monitoring tab: the Slack-compatible alert webhook, the add-target
@@ -126,13 +126,23 @@ export default function MonitoringTab({ m }: { m: ReturnType<typeof useMonitorin
                 <div className="flex items-center space-x-2">
                   <Globe className="w-4 h-4 text-[#52525b]" />
                   <span className="text-white font-bold uppercase text-xs">{target.url}</span>
-                  <span className="bg-[#22c55e]/10 text-[#22c55e] text-[9px] px-2 py-0.5 rounded border border-[#22c55e]/30">ACTIVE</span>
+                  {target.lastError ? (
+                    <span className="bg-amber-500/10 text-amber-400 text-[9px] px-2 py-0.5 rounded border border-amber-500/30 flex items-center gap-1">
+                      <AlertTriangle className="w-2.5 h-2.5" />
+                      NEEDS ATTENTION
+                    </span>
+                  ) : (
+                    <span className="bg-[#22c55e]/10 text-[#22c55e] text-[9px] px-2 py-0.5 rounded border border-[#22c55e]/30">ACTIVE</span>
+                  )}
                 </div>
                 <div className="text-[#a1a1aa] text-[10px] flex items-center space-x-3">
                   <span>Schedule: {target.scheduleString || `Every ${target.frequencyDays} ${target.frequencyDays === 1 ? 'day' : 'days'}`}</span>
                   <span>&bull;</span>
-                  <span>Next scan: {new Date(target.nextScanAt).toLocaleDateString()}</span>
+                  <span>Next scan: {new Date(target.nextScanAt).toLocaleString()}</span>
                 </div>
+                {target.lastError && (
+                  <div className="text-amber-400/90 text-[10px]">{target.lastError}</div>
+                )}
               </div>
               <button
                 onClick={() => m.handleDeleteMonitor(target.id)}

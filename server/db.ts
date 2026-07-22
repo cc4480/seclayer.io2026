@@ -150,6 +150,7 @@ class SqliteDb {
     this.addColumnIfMissing("monitored_targets", "scanHour", "INTEGER");
     this.addColumnIfMissing("monitored_targets", "scanMinute", "INTEGER");
     this.addColumnIfMissing("monitored_targets", "scanWeekday", "INTEGER");
+    this.addColumnIfMissing("monitored_targets", "lastError", "TEXT");
     this.migrateLegacyPlaintextApiKeys();
     // Self-attestation ('method' = 'attestation') used to grant the same active-probe
     // access as real DNS/file proof with no technical verification. That path has been
@@ -602,9 +603,28 @@ class SqliteDb {
     ).all(nowIso) as MonitoredTarget[];
   }
 
+  // A scan attempt was successfully launched for this tick — clears any
+  // lingering error from a previous tick so the UI stops warning about a
+  // target that has since recovered.
   markMonitoredScanned(id: string, lastScannedAt: string, nextScanAt: string): void {
-    this.db.prepare('UPDATE monitored_targets SET lastScannedAt = ?, nextScanAt = ? WHERE id = ?')
+    this.db.prepare('UPDATE monitored_targets SET lastScannedAt = ?, nextScanAt = ?, lastError = NULL WHERE id = ?')
       .run(lastScannedAt, nextScanAt, id);
+  }
+
+  // The target itself is invalid/unsafe (fails the SSRF guard) — deferred to
+  // its next real cadence rather than retried every tick, with the reason
+  // recorded so the dashboard can show why this monitor keeps producing no
+  // scans instead of silently doing nothing forever.
+  markMonitoredSkipped(id: string, nextScanAt: string, error: string): void {
+    this.db.prepare('UPDATE monitored_targets SET nextScanAt = ?, lastError = ? WHERE id = ?')
+      .run(nextScanAt, error, id);
+  }
+
+  // The target itself is fine but this tick couldn't spend a credit (none
+  // available) — scheduling is untouched so it's retried next tick, but the
+  // reason is still recorded for visibility.
+  markMonitoredError(id: string, error: string): void {
+    this.db.prepare('UPDATE monitored_targets SET lastError = ? WHERE id = ?').run(error, id);
   }
 
   // Read-model: returns a scan with suppression rules applied and the score

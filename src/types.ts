@@ -146,6 +146,11 @@ export interface MonitoredTarget {
   lastScannedAt?: string;
   nextScanAt?: string;
   createdAt: string;
+  // Set when the most recent tick couldn't launch a scan for this target
+  // (invalid/unsafe URL, or insufficient credits); cleared the next time a
+  // scan is successfully launched. Surfaced in the dashboard so a monitor
+  // that's silently never scanning anything doesn't just show "Active".
+  lastError?: string;
 }
 
 export interface ApiKey {

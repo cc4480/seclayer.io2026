@@ -1,7 +1,7 @@
 // Account-scoped routes: continuous-monitoring targets, the Slack-compatible
 // alert webhook, credit balance + Stripe checkout, and developer API keys.
 import express from "express";
-import { db } from "../db.js";
+import { db, cleanUrl } from "../db.js";
 import { config } from "../config.js";
 import { assertScanTargetSafe } from "../scanner.js";
 import { createCheckoutSession, isStripeConfigured } from "../stripe.js";
@@ -15,12 +15,31 @@ export function registerAccountRoutes(app: express.Express, ctx: RouteContext) {
     res.json({ monitoredTargets: db.listMonitoredTargets(getUserId(req)) });
   });
 
-  app.post("/api/monitoring", requireAuth, (req, res) => {
+  app.post("/api/monitoring", requireAuth, async (req, res) => {
     const { url, frequencyDays = 7, hour, minute, weekday } = req.body || {};
-    if (!url) {
+    if (!url || typeof url !== "string") {
       return res.status(400).json({ error: "url is required" });
     }
-    const target = db.addMonitoredTarget(getUserId(req), url, {
+
+    // Reject SSRF/malformed targets up front — every other endpoint that
+    // accepts a URL (scans, MCP, domain verification, the alert webhook)
+    // validates at the moment it's supplied, not only once a scan attempt
+    // eventually happens. Without this, a bad or unsafe target was silently
+    // accepted and would just fail forever on every tick with only a
+    // server-side log line, no feedback to the user.
+    try {
+      await assertScanTargetSafe(url);
+    } catch (e: any) {
+      return res.status(400).json({ error: e?.message || "Target URL cannot be monitored." });
+    }
+
+    const userId = getUserId(req);
+    const normalized = cleanUrl(url);
+    if (db.listMonitoredTargets(userId).some((t) => cleanUrl(t.url) === normalized)) {
+      return res.status(409).json({ error: "This URL is already being monitored." });
+    }
+
+    const target = db.addMonitoredTarget(userId, url, {
       frequencyDays: Number(frequencyDays) || 7,
       hour: hour == null || hour === "" ? null : Number(hour),
       minute: minute == null || minute === "" ? null : Number(minute),

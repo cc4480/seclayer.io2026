@@ -9,48 +9,60 @@ import { assertScanTargetSafe } from "./scanner.js";
 import { extractDomain } from "./domainVerify.js";
 import type { ProcessScanJob } from "./routes/context.js";
 
-export function startMonitorWorker(processScanJob: ProcessScanJob): NodeJS.Timeout {
-  let monitorTickRunning = false;
+let monitorTickRunning = false;
 
-  async function runDueMonitoredScans() {
-    if (monitorTickRunning) return;
-    monitorTickRunning = true;
-    try {
-      const due = db.listDueMonitoredTargets(new Date().toISOString());
-      for (const target of due) {
-        // Reschedule on the target's real cadence (weekday + time-of-day), not a
-        // fixed now+N days, so the next run lands when the user actually chose.
-        const next = computeNextRun(new Date(), {
-          frequencyDays: target.frequencyDays,
-          hour: target.scanHour,
-          minute: target.scanMinute,
-          weekday: target.scanWeekday,
-        }).toISOString();
-        try {
-          const user = db.getUser(target.userId);
-          if (!user || user.credits < 1) continue; // retry next tick once credits exist
-          await assertScanTargetSafe(target.url);
-          // Re-checks the balance at the moment of deduction — the credits
-          // check above ran before the await, so it could be stale if a
-          // manual scan spent the last credit in the meantime.
-          if (!db.deductCredits(target.userId, 1)) continue; // retry next tick once credits exist
-          const scan = db.createScan(target.userId, target.url);
-          db.markMonitoredScanned(target.id, new Date().toISOString(), next);
-          const allowActiveProbes = db.isDomainVerified(target.userId, extractDomain(target.url));
-          processScanJob(scan.id, allowActiveProbes);
-        } catch (err: any) {
-          // Invalid/unsafe target: defer instead of retrying every tick.
-          db.markMonitoredScanned(target.id, target.lastScannedAt || new Date().toISOString(), next);
-          console.warn(`[monitor] Skipped ${target.url}: ${err?.message || err}`);
+// Exported (rather than trapped in the setInterval closure below) so tests
+// can drive a single tick directly instead of waiting on a real 60s timer.
+export async function runDueMonitoredScans(processScanJob: ProcessScanJob): Promise<void> {
+  if (monitorTickRunning) return;
+  monitorTickRunning = true;
+  try {
+    const due = db.listDueMonitoredTargets(new Date().toISOString());
+    for (const target of due) {
+      // Reschedule on the target's real cadence (weekday + time-of-day), not a
+      // fixed now+N days, so the next run lands when the user actually chose.
+      const next = computeNextRun(new Date(), {
+        frequencyDays: target.frequencyDays,
+        hour: target.scanHour,
+        minute: target.scanMinute,
+        weekday: target.scanWeekday,
+      }).toISOString();
+      try {
+        const user = db.getUser(target.userId);
+        if (!user || user.credits < 1) {
+          // Retry next tick once credits exist — scheduling is untouched,
+          // but the reason is recorded so the dashboard doesn't just show
+          // a silent "ACTIVE" monitor that never actually scans anything.
+          db.markMonitoredError(target.id, "Skipped: insufficient credits. Will retry automatically once the balance is topped up.");
+          continue;
         }
+        await assertScanTargetSafe(target.url);
+        // Re-checks the balance at the moment of deduction — the credits
+        // check above ran before the await, so it could be stale if a
+        // manual scan spent the last credit in the meantime.
+        if (!db.deductCredits(target.userId, 1)) {
+          db.markMonitoredError(target.id, "Skipped: insufficient credits. Will retry automatically once the balance is topped up.");
+          continue;
+        }
+        const scan = db.createScan(target.userId, target.url);
+        db.markMonitoredScanned(target.id, new Date().toISOString(), next);
+        const allowActiveProbes = db.isDomainVerified(target.userId, extractDomain(target.url));
+        processScanJob(scan.id, allowActiveProbes);
+      } catch (err: any) {
+        // Invalid/unsafe target: defer instead of retrying every tick.
+        const message = err?.message || "This target could not be scanned (invalid or unsafe URL).";
+        db.markMonitoredSkipped(target.id, next, message);
+        console.warn(`[monitor] Skipped ${target.url}: ${message}`);
       }
-    } finally {
-      monitorTickRunning = false;
     }
+  } finally {
+    monitorTickRunning = false;
   }
+}
 
+export function startMonitorWorker(processScanJob: ProcessScanJob): NodeJS.Timeout {
   const monitorInterval = setInterval(() => {
-    runDueMonitoredScans().catch((e) => console.error("[monitor] tick error:", e));
+    runDueMonitoredScans(processScanJob).catch((e) => console.error("[monitor] tick error:", e));
   }, 60 * 1000);
   monitorInterval.unref();
   return monitorInterval;
