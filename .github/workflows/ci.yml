@@ -28,3 +28,12 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Typecheck MCP server
+        run: npm run lint -w @seclayer/mcp
+
+      - name: Test MCP server
+        run: npm test -w @seclayer/mcp
+
+      - name: Build MCP server
+        run: npm run build -w @seclayer/mcp

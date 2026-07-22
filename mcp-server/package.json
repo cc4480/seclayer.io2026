@@ -1,0 +1,45 @@
+{
+  "name": "@seclayer/mcp",
+  "version": "0.1.0",
+  "description": "Model Context Protocol stdio server for Seclayer — run live security pen-tests from Claude Code, Cursor, and Windsurf via the seclayer_scan tool.",
+  "type": "module",
+  "bin": {
+    "seclayer-mcp": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc",
+    "lint": "tsc --noEmit",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "tsx": "^4.21.0",
+    "typescript": "~5.8.2"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "security",
+    "pentest",
+    "seclayer",
+    "claude",
+    "cursor"
+  ],
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -82,7 +82,7 @@ export default function McpSection({ onNavigate }: { onNavigate: (view: string, 
               <div className="space-y-2 text-[#a1a1aa]">
                 <p className="text-[#52525b]">{"# Add the seclayer MCP tool to your active agent environment"}</p>
                 <p className="text-zinc-300">
-                  <span className="text-rose-400">claude</span> mcp add seclayer -- apiKey="<span className="text-[#22c55e]">YOUR_SECLAYER_API_KEY</span>"
+                  <span className="text-rose-400">claude</span> mcp add seclayer -- npx -y @seclayer/mcp --key <span className="text-[#22c55e]">YOUR_SECLAYER_API_KEY</span>
                 </p>
                 <p className="text-[#52525b] mt-4">{"# Once activated, ask Claude Code directly:"}</p>
                 <p className="text-zinc-200">
@@ -107,11 +107,11 @@ export default function McpSection({ onNavigate }: { onNavigate: (view: string, 
 
             {activeMcpTab === 'manual' && (
               <div className="space-y-2 text-[#a1a1aa]">
-                <p className="text-[#52525b]">{"// Raw integration request block syntax"}</p>
-                <p className="text-[#22c55e]">toolSeclayerScan({' {'}</p>
-                <p className="pl-4">url: <span className="text-amber-500">"https://dev-payments.corp.sh"</span>,</p>
-                <p className="pl-4">apiKey: <span className="text-amber-500">"sl_live_83b19fc9c011e..."</span></p>
+                <p className="text-[#52525b]">{"// How your agent calls the tool once the server is configured"}</p>
+                <p className="text-[#22c55e]">seclayer_scan({' {'}</p>
+                <p className="pl-4">url: <span className="text-amber-500">"https://dev-payments.corp.sh"</span></p>
                 <p className="text-[#22c55e]">{'}'})</p>
+                <p className="text-[#52525b] mt-2">{"// The API key is set once at server startup (--key), never per call."}</p>
               </div>
             )}
           </div>
