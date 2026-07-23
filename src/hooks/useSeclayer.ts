@@ -29,69 +29,78 @@ export function useSeclayer() {
   // compare against it.
   const [checkoutNotice, setCheckoutNotice] = useState<'success' | 'canceled' | null>(null);
 
+  // Wraps an async action in the shared busy flag + error logging every handler
+  // otherwise repeated verbatim: flip isPerformingAction on, run the body,
+  // always flip it off, and log (never throw) on failure. Per-handler guards
+  // (e.g. "no user -> prompt login") stay at each call site so their early
+  // returns keep their original semantics.
+  const runAction = async (label: string, fn: () => Promise<void>) => {
+    setIsPerformingAction(true);
+    try {
+      await fn();
+    } catch (err) {
+      console.error(label, err);
+    } finally {
+      setIsPerformingAction(false);
+    }
+  };
+
   // Restore the session (if any) on load. Identity comes from the httpOnly
   // session cookie, so no userId is ever passed from the client.
   useEffect(() => {
     loadUserContext();
   }, []);
 
-  const loadUserContext = async () => {
-    setIsPerformingAction(true);
-    try {
-      // 1. Fetch user profile from the session cookie.
-      const userRes = await fetch('/api/auth/me');
-      if (userRes.ok) {
-        const userData = await userRes.json();
-        setUser(userData.user);
-        setCredits(userData.user.credits);
+  const loadUserContext = () => runAction('Error loading user dashboard metrics:', async () => {
+    // 1. Fetch user profile from the session cookie.
+    const userRes = await fetch('/api/auth/me');
+    if (userRes.ok) {
+      const userData = await userRes.json();
+      setUser(userData.user);
+      setCredits(userData.user.credits);
 
-        // 2. Fetch user's scans list
-        const scansRes = await fetch('/api/scans');
-        if (scansRes.ok) {
-          const scansData = await scansRes.json();
-          setScans(scansData.scans);
-        }
-
-        // 3. Fetch user's developer keys
-        const keysRes = await fetch('/api/keys');
-        if (keysRes.ok) {
-          const keysData = await keysRes.json();
-          setApiKeys(keysData.keys);
-        }
-
-        // 4. Fetch user credit transactions
-        const creditsRes = await fetch('/api/credits');
-        if (creditsRes.ok) {
-          const creditsData = await creditsRes.json();
-          setTransactions(creditsData.transactions || []);
-        }
-      } else {
-        // No valid session — present the app in a logged-out state.
-        setUser(null);
-        setScans([]);
-        setApiKeys([]);
-        setCredits(0);
+      // 2. Fetch user's scans list
+      const scansRes = await fetch('/api/scans');
+      if (scansRes.ok) {
+        const scansData = await scansRes.json();
+        setScans(scansData.scans);
       }
 
-      // Handle return from Stripe Checkout: land on the dashboard, show a real
-      // outcome message, and clean the query string. Credits arrive via the
-      // webhook, reflected by this reload's fetched balance.
-      const params = new URLSearchParams(window.location.search);
-      if (params.has('checkout_success')) {
-        if (userRes.ok) setCurrentView('dashboard');
-        setCheckoutNotice('success');
-        window.history.replaceState({}, '', window.location.pathname);
-      } else if (params.has('checkout_canceled')) {
-        if (userRes.ok) setCurrentView('dashboard');
-        setCheckoutNotice('canceled');
-        window.history.replaceState({}, '', window.location.pathname);
+      // 3. Fetch user's developer keys
+      const keysRes = await fetch('/api/keys');
+      if (keysRes.ok) {
+        const keysData = await keysRes.json();
+        setApiKeys(keysData.keys);
       }
-    } catch (err) {
-      console.error('Error loading user dashboard metrics:', err);
-    } finally {
-      setIsPerformingAction(false);
+
+      // 4. Fetch user credit transactions
+      const creditsRes = await fetch('/api/credits');
+      if (creditsRes.ok) {
+        const creditsData = await creditsRes.json();
+        setTransactions(creditsData.transactions || []);
+      }
+    } else {
+      // No valid session — present the app in a logged-out state.
+      setUser(null);
+      setScans([]);
+      setApiKeys([]);
+      setCredits(0);
     }
-  };
+
+    // Handle return from Stripe Checkout: land on the dashboard, show a real
+    // outcome message, and clean the query string. Credits arrive via the
+    // webhook, reflected by this reload's fetched balance.
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('checkout_success')) {
+      if (userRes.ok) setCurrentView('dashboard');
+      setCheckoutNotice('success');
+      window.history.replaceState({}, '', window.location.pathname);
+    } else if (params.has('checkout_canceled')) {
+      if (userRes.ok) setCurrentView('dashboard');
+      setCheckoutNotice('canceled');
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  });
 
   const handleNavigate = (view: string, arg?: string) => {
     if (view === 'report' && arg) {
@@ -124,8 +133,7 @@ export function useSeclayer() {
       return;
     }
 
-    setIsPerformingAction(true);
-    try {
+    await runAction('Core scan launch err:', async () => {
       const res = await fetch('/api/scans', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -148,11 +156,7 @@ export function useSeclayer() {
         const errData = await res.json();
         alert(errData.message || 'Scanning initiation failed');
       }
-    } catch (err) {
-      console.error('Core scan launch err:', err);
-    } finally {
-      setIsPerformingAction(false);
-    }
+    });
   };
 
   // Cancels an in-flight scan and refunds its credit (server-side; see
@@ -171,8 +175,7 @@ export function useSeclayer() {
 
   const onGenerateKey = async () => {
     if (!user) return;
-    setIsPerformingAction(true);
-    try {
+    await runAction('Key generation error:', async () => {
       const res = await fetch('/api/keys', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
@@ -184,29 +187,22 @@ export function useSeclayer() {
         setJustGeneratedKey({ id: data.key.id, rawKey: data.rawKey });
         loadUserContext();
       }
-    } catch (err) {
-      console.error('Key generation error:', err);
-    } finally {
-      setIsPerformingAction(false);
-    }
+    });
   };
 
   const onRevokeKey = async (keyId: string) => {
     if (!user) return;
-    setIsPerformingAction(true);
-    try {
+    await runAction('Key revoking error:', async () => {
       const res = await fetch(`/api/keys/${keyId}`, { method: 'DELETE' });
       if (res.ok) {
         // Reload keys listing
         loadUserContext();
       }
-    } catch (err) {
-      console.error('Key revoking error:', err);
-    } finally {
-      setIsPerformingAction(false);
-    }
+    });
   };
 
+  // Kept explicit (not via runAction) because its network-failure path shows a
+  // distinct alert, unlike the log-only error handling every other action uses.
   const onPurchaseCredits = async (packName: 'single' | 'pack5' | 'pack20') => {
     if (!user) {
       setShowLogin(true);
