@@ -3,6 +3,7 @@
 import express from "express";
 import { db, cleanUrl } from "../db.js";
 import { config } from "../config.js";
+import { deepseekKeyStatus } from "./deepseekKeyStatus.js";
 import { assertScanTargetSafe } from "../scanner.js";
 import { computeNextRun } from "../schedule.js";
 import { extractDomain } from "../domainVerify.js";
@@ -156,6 +157,24 @@ export function registerAccountRoutes(app: express.Express, ctx: RouteContext) {
     }
     const user = db.setUserWebhook(getUserId(req), url ? url.trim() : null);
     res.json({ status: "ok", notifyWebhook: user?.notifyWebhook ?? null });
+  });
+
+  // --- Personal DeepSeek API key (bring-your-own-key) ---
+  // Lets a user supply their own DeepSeek key so their scans get full AI reports
+  // even when the server has no global key (e.g. free mode). Send an empty/null
+  // key to clear it. The raw key is never returned — only a set/preview status.
+  app.put("/api/user/deepseek-key", requireAuth, (req, res) => {
+    const { key } = req.body || {};
+    if (key != null && typeof key !== "string") {
+      return res.status(400).json({ status: "error", message: "key must be a string, or empty to remove." });
+    }
+    const trimmed = typeof key === "string" ? key.trim() : "";
+    if (trimmed && (trimmed.length < 20 || /\s/.test(trimmed))) {
+      return res.status(400).json({ status: "error", message: "That doesn't look like a valid DeepSeek API key (it should start with 'sk-' and contain no spaces)." });
+    }
+    const userId = getUserId(req);
+    db.setUserDeepseekKey(userId, trimmed || null);
+    res.json({ status: "ok", ...deepseekKeyStatus(db.getUserDeepseekKey(userId)) });
   });
 
   // --- Credits ---

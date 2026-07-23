@@ -6,6 +6,7 @@ import { useDomainVerification } from '../hooks/useDomainVerification.js';
 import { useMonitoring } from '../hooks/useMonitoring.js';
 import ScanLauncher from '../components/dashboard/ScanLauncher.js';
 import CreditPacks from '../components/dashboard/CreditPacks.js';
+import DeepSeekKeyCard from '../components/dashboard/DeepSeekKeyCard.js';
 import ApiKeysPanel from '../components/dashboard/ApiKeysPanel.js';
 import ScansTab from '../components/dashboard/ScansTab.js';
 import MonitoringTab from '../components/dashboard/MonitoringTab.js';
@@ -23,6 +24,9 @@ interface DashboardProps {
   onDismissGeneratedKey: () => void;
   refreshData: () => void;
   freeMode: boolean;
+  deepseekKeySet: boolean;
+  deepseekKeyPreview: string | null;
+  saveDeepseekKey: (key: string) => Promise<{ ok: boolean; message?: string }>;
   onInitiateScan: (url: string, authHeader?: string, bolaIdentities?: any, activeProbes?: boolean) => void;
   onGenerateKey: () => void;
   onRevokeKey: (keyId: string) => void;
@@ -35,6 +39,7 @@ interface DashboardProps {
 
 export default function Dashboard({
   user, scans, apiKeys, credits, transactions, justGeneratedKey, onDismissGeneratedKey, refreshData, freeMode,
+  deepseekKeySet, deepseekKeyPreview, saveDeepseekKey,
   onInitiateScan, onGenerateKey, onRevokeKey, onPurchaseCredits, onViewReport, isPerformingAction,
   checkoutNotice, onDismissCheckoutNotice,
 }: DashboardProps) {
@@ -172,7 +177,9 @@ export default function Dashboard({
               errorText={errorText} isPerformingAction={isPerformingAction}
               launchScan={launchScan} handleScanSubmit={handleScanSubmit} dv={dv} freeMode={freeMode}
             />
-            {!freeMode && (
+            {freeMode ? (
+              <DeepSeekKeyCard deepseekKeySet={deepseekKeySet} deepseekKeyPreview={deepseekKeyPreview} saveDeepseekKey={saveDeepseekKey} />
+            ) : (
               <CreditPacks buyPack={buyPack} setBuyPack={setBuyPack} isBuying={isBuying} isPerformingAction={isPerformingAction} handleBuyCredits={handleBuyCredits} />
             )}
           </div>

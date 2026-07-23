@@ -3,6 +3,7 @@
 import express from "express";
 import { db } from "../db.js";
 import { config } from "../config.js";
+import { deepseekKeyStatus } from "./deepseekKeyStatus.js";
 import { rateLimit } from "../rateLimit.js";
 import { sendEmail, buildMagicLinkEmail, isEmailConfigured } from "../email.js";
 import type { RouteContext } from "./context.js";
@@ -94,7 +95,9 @@ export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
       return res.status(404).json({ status: "error", message: "User profile not found" });
     }
     // freeMode lets the client hide the paywall and credit gating when scans
-    // are free (payments not configured / FREE_MODE on).
-    res.json({ user, freeMode: config.freeMode });
+    // are free (payments not configured / FREE_MODE on). The DeepSeek status
+    // lets the client render the bring-your-own-key card without ever seeing
+    // the raw key.
+    res.json({ user, freeMode: config.freeMode, ...deepseekKeyStatus(db.getUserDeepseekKey(user.id)) });
   });
 }

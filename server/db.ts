@@ -86,6 +86,18 @@ class SqliteDb {
     return this.getUser(userId);
   }
 
+  // Per-user "bring your own key" DeepSeek credential. Stored so the scan
+  // pipeline can use the user's own AI budget; deliberately NOT surfaced via
+  // rowToUser/the User type, so it never leaks to the client. Pass null to clear.
+  setUserDeepseekKey(userId: string, key: string | null): void {
+    this.db.prepare("UPDATE users SET deepseekApiKey = ? WHERE id = ?").run(key && key.trim() ? key.trim() : null, userId);
+  }
+
+  getUserDeepseekKey(userId: string): string | null {
+    const row = this.db.prepare("SELECT deepseekApiKey FROM users WHERE id = ?").get(userId) as { deepseekApiKey?: string } | undefined;
+    return row?.deepseekApiKey ?? null;
+  }
+
   // --- Users ---
   getUser(id: string): User | undefined {
     return rowToUser(this.db.prepare('SELECT * FROM users WHERE id = ?').get(id));

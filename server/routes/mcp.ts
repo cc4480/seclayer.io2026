@@ -64,7 +64,8 @@ export function registerMcpRoutes(app: express.Express, ctx: RouteContext) {
       // Runs scan diagnostic synchronously for MCP tools context
       const diagnostics = await runDiagnostics(url, authHeader, { allowActiveProbes, oob: ctx.oobCollaborator, scanId: scan.id });
       const staticCompiled = compileStaticFindings(diagnostics);
-      const aiReport = await generateAiReport(url, diagnostics, staticCompiled);
+      // Use the key owner's personal DeepSeek key (BYOK) when set.
+      const aiReport = await generateAiReport(url, diagnostics, staticCompiled, db.getUserDeepseekKey(user.id));
 
       const evidence = compileScanEvidence(diagnostics);
       db.updateScan(scan.id, {

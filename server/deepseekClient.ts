@@ -13,6 +13,16 @@ export function getApiKey(): string | null {
   return apiKey;
 }
 
+// The effective key for a call: a per-user "bring your own key" override wins
+// over the server-wide env key, so a user with their own DeepSeek key gets full
+// AI reports even when the operator hasn't configured a global key (e.g. free
+// mode). Falls back to the env key, then null (local-summary generation).
+export function resolveApiKey(override?: string | null): string | null {
+  const t = override?.trim();
+  if (t) return t;
+  return getApiKey();
+}
+
 export interface DeepSeekResult {
   content: string | null;
   reasoningContent?: string;
@@ -40,8 +50,8 @@ export interface DeepSeekCallOptions {
 // model's final answer plus its chain-of-thought (when thinking mode produced
 // one). Returns { content: null } when no API key is configured so callers
 // can gracefully fall back to local generation.
-export async function callDeepSeek(model: string, prompt: string, opts: DeepSeekCallOptions): Promise<DeepSeekResult> {
-  const apiKey = getApiKey();
+export async function callDeepSeek(model: string, prompt: string, opts: DeepSeekCallOptions, apiKeyOverride?: string | null): Promise<DeepSeekResult> {
+  const apiKey = resolveApiKey(apiKeyOverride);
   if (!apiKey) return { content: null };
 
   const body: Record<string, unknown> = {

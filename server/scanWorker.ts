@@ -36,6 +36,11 @@ export function makeProcessScanJob(oobCollaborator?: OobCollaborator) {
       const scan = db.getScan(scanId);
       if (!scan || isCanceled(scanId)) return;
 
+      // The scan owner's personal DeepSeek key (BYOK), when set — used for AI
+      // report generation and narration so a user can bring their own AI budget.
+      // Falls back to the server-wide key, then local summaries (see resolveApiKey).
+      const userDeepseekKey = db.getUserDeepseekKey(scan.userId);
+
       let narration: string[] = [];
 
       // Active diagnostics (HTTP probing, header/secret/SCA/path checks, fuzzing).
@@ -45,12 +50,12 @@ export function makeProcessScanJob(oobCollaborator?: OobCollaborator) {
 
       // Fast (flash), cheap narration of what the sweep actually found — read
       // by the progress UI in place of scripted filler text.
-      narration = narration.concat(await narrateScanning(diagnostics, scan.url));
+      narration = narration.concat(await narrateScanning(diagnostics, scan.url, userDeepseekKey));
       db.updateScan(scanId, { status: "analyzing", narrationLog: narration });
 
       // Compile findings and generate the analysis report.
       const staticCompiled = compileStaticFindings(diagnostics);
-      const outputReport = await generateAiReport(scan.url, diagnostics, staticCompiled);
+      const outputReport = await generateAiReport(scan.url, diagnostics, staticCompiled, userDeepseekKey);
       if (isCanceled(scanId)) { console.log(`[Job Worker] Scan ${scanId} was canceled mid-flight — discarding the finished report.`); return; }
 
       // Narrate the score the UI will actually display: every read path
@@ -59,7 +64,7 @@ export function makeProcessScanJob(oobCollaborator?: OobCollaborator) {
       // subjective adjustedScore stored below — narrating the raw AI figure
       // would show the user a number that contradicts the report they open next.
       const { score: displayScore, severity: displaySeverity } = recalculateScore(outputReport.findings);
-      narration = narration.concat(await narrateAnalysis({ score: displayScore, severity: displaySeverity, findings: outputReport.findings }, scan.url));
+      narration = narration.concat(await narrateAnalysis({ score: displayScore, severity: displaySeverity, findings: outputReport.findings }, scan.url, userDeepseekKey));
 
       // Best-effort visual capture of the target's landing page (opt-in via
       // ENABLE_TARGET_SCREENSHOT). Returns null — never throws — when disabled,

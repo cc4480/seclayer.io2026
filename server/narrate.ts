@@ -1,6 +1,6 @@
 import { Finding, Severity } from "../src/types.js";
 import { DiagnosticResult } from "./scanner.js";
-import { callDeepSeek, getApiKey } from "./deepseekClient.js";
+import { callDeepSeek, resolveApiKey } from "./deepseekClient.js";
 
 // Fast, cheap narration of scan progress for the live progress UI — distinct
 // from server/deepseek.ts's pro-tier report generation. Flash runs with
@@ -27,8 +27,9 @@ function parseLines(content: string | null): string[] | null {
 
 // Narrates what the diagnostic sweep (headers, secrets, libraries,
 // subdomains, sensitive paths, crawl + active probes) actually found.
-export async function narrateScanning(diag: DiagnosticResult, url: string): Promise<string[]> {
-  if (!getApiKey()) return localScanningNarration(diag);
+export async function narrateScanning(diag: DiagnosticResult, url: string, apiKey?: string | null): Promise<string[]> {
+  const effectiveKey = resolveApiKey(apiKey);
+  if (!effectiveKey) return localScanningNarration(diag);
 
   try {
     const prompt = `You narrate a security scanner's progress for a live terminal-style progress feed a
@@ -50,7 +51,7 @@ FACTS:
 - Active exploit probes run: ${diag.activeProbesSkipped ? 'no (unverified domain)' : 'yes'}
 - Red-team/API findings so far: ${(diag.redTeamFindings?.length || 0) + (diag.apiSecFindings?.length || 0)}`;
 
-    const { content } = await callDeepSeek(MODEL_FLASH, prompt, { thinking: 'disabled', maxTokens: 600, timeoutMs: 15000 });
+    const { content } = await callDeepSeek(MODEL_FLASH, prompt, { thinking: 'disabled', maxTokens: 600, timeoutMs: 15000 }, effectiveKey);
     return parseLines(content) ?? localScanningNarration(diag);
   } catch (err: any) {
     console.warn(`[narrate] flash scanning narration failed, using local fallback: ${err?.message || err}`);
@@ -67,9 +68,11 @@ const SCORE_LINE_PATTERN = /\b\d{1,3}\s*\/\s*100\b/;
 export async function narrateAnalysis(
   compiled: { score: number; severity: Severity; findings: Finding[] },
   url: string,
+  apiKey?: string | null,
 ): Promise<string[]> {
   const scoreLine = `Posture score: ${compiled.score}/100 (${compiled.severity.toUpperCase()}).`;
-  if (!getApiKey()) return localAnalysisNarration(compiled);
+  const effectiveKey = resolveApiKey(apiKey);
+  if (!effectiveKey) return localAnalysisNarration(compiled);
 
   try {
     const bySeverity = countBySeverity(compiled.findings);
@@ -85,7 +88,7 @@ FACTS:
 - Overall severity: ${compiled.severity}
 - Top finding: ${compiled.findings[0]?.title || 'none'}`;
 
-    const { content } = await callDeepSeek(MODEL_FLASH, prompt, { thinking: 'disabled', maxTokens: 600, timeoutMs: 15000 });
+    const { content } = await callDeepSeek(MODEL_FLASH, prompt, { thinking: 'disabled', maxTokens: 600, timeoutMs: 15000 }, effectiveKey);
     const modelLines = parseLines(content);
     if (!modelLines) return localAnalysisNarration(compiled);
     // Belt-and-suspenders: even though the prompt says not to, strip any line

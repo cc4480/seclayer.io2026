@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { Finding, Severity, ExecutiveBreakdown } from '../src/types.js';
 import { mapOwasp } from './owasp.js';
 import { buildAgentPrompt, buildImpactFallback } from './agentPrompt.js';
-import { callDeepSeek, getApiKey } from './deepseekClient.js';
+import { callDeepSeek, resolveApiKey } from './deepseekClient.js';
 import { buildReportPrompt } from './reportPrompt.js';
 import { compileLocalSummary, compileLocalBreakdown, sanitizeBreakdown } from './localReport.js';
 
@@ -62,11 +62,14 @@ export function refineCategory(aiCategory: string, title: string): string {
 export async function generateAiReport(
   url: string,
   diagnostics: any,
-  staticCompiled: { score: number; severity: Severity; findings: Finding[] }
+  staticCompiled: { score: number; severity: Severity; findings: Finding[] },
+  // Optional per-user "bring your own key" override (see resolveApiKey).
+  apiKey?: string | null,
 ): Promise<{ score: number; severity: Severity; findings: Finding[]; aiSummary: string; aiReasoning?: string; executiveBreakdown: ExecutiveBreakdown }> {
 
-  if (!getApiKey()) {
-    console.log("No valid DEEPSEEK_API_KEY set. Generating elegant local-mode executive summary.");
+  const effectiveKey = resolveApiKey(apiKey);
+  if (!effectiveKey) {
+    console.log("No DeepSeek API key available. Generating elegant local-mode executive summary.");
     const defaultSecSummary = compileLocalSummary(url, staticCompiled);
     return {
       ...staticCompiled,
@@ -89,7 +92,7 @@ export async function generateAiReport(
       // a while; generous but still bounded so a stalled call can't hang a
       // scan in "analyzing" forever (see deepseekClient.ts).
       timeoutMs: 90000,
-    });
+    }, effectiveKey);
     if (!bodyTextRaw) {
       return { ...staticCompiled, aiSummary: compileLocalSummary(url, staticCompiled), executiveBreakdown: compileLocalBreakdown(url, staticCompiled) };
     }
