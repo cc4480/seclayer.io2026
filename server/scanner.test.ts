@@ -270,13 +270,16 @@ test('active XSS probe against a reflecting target yields a PROVEN finding with 
 });
 
 test('active SQLi probe against a DB-erroring target yields a PROVEN finding quoting the DB error', async () => {
-  // Target that leaks a MySQL error when `id` is present — what the SQLi probe hunts.
+  // Target that leaks a MySQL error only when the `id` value carries a SQL
+  // metacharacter — a genuinely injectable endpoint. (A benign id=1 stays clean,
+  // so the probe's differential baseline confirms our payload caused the error.)
   const server = http.createServer((req, res) => {
     const u = new URL(req.url || '/', 'http://127.0.0.1');
     let body = '<!doctype html><html><body><h1>store</h1>';
-    if (u.searchParams.has('id')) {
+    const id = u.searchParams.get('id');
+    if (id && /['"]/.test(id)) {
       body += `<div class="err">Database error: You have an error in your SQL syntax; `
-        + `check the manual near '${u.searchParams.get('id')}' at line 1</div>`;
+        + `check the manual near '${id}' at line 1</div>`;
     }
     body += '</body></html>';
     res.writeHead(200, { 'Content-Type': 'text/html' });
@@ -580,7 +583,7 @@ test('smart discovered-parameter fuzzer proves XSS + SQLi and skips an inert par
     }
     if (u.pathname === '/item') {
       let body = '<!doctype html><html><body>item';
-      if (u.searchParams.has('id')) body += `<div>Database error: You have an error in your SQL syntax; near '${u.searchParams.get('id')}'</div>`;
+      { const id = u.searchParams.get('id'); if (id && /['"]/.test(id)) body += `<div>Database error: You have an error in your SQL syntax; near '${id}'</div>`; }
       res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(body + '</body></html>'); return;
     }
     if (u.pathname === '/static') {
@@ -615,7 +618,7 @@ test('two distinct endpoints vulnerable to the same injection class both survive
     const u = new URL(req.url || '/', 'http://127.0.0.1');
     if (u.pathname === '/alpha' || u.pathname === '/beta') {
       let body = '<!doctype html><html><body>page';
-      if (u.searchParams.has('id')) body += `<div>Database error: You have an error in your SQL syntax; near '${u.searchParams.get('id')}'</div>`;
+      { const id = u.searchParams.get('id'); if (id && /['"]/.test(id)) body += `<div>Database error: You have an error in your SQL syntax; near '${id}'</div>`; }
       res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(body + '</body></html>'); return;
     }
     res.writeHead(200, { 'Content-Type': 'text/html' });
@@ -654,7 +657,7 @@ test('passive mode stays passive: a would-be-vulnerable target is crawled but ne
     }
     if (u.pathname === '/item') {
       let body = '<!doctype html><html><body>item';
-      if (u.searchParams.has('id')) body += `<div>Database error: You have an error in your SQL syntax; near '${u.searchParams.get('id')}'</div>`;
+      { const id = u.searchParams.get('id'); if (id && /['"]/.test(id)) body += `<div>Database error: You have an error in your SQL syntax; near '${id}'</div>`; }
       res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(body + '</body></html>'); return;
     }
     res.writeHead(200, { 'Content-Type': 'text/html' });

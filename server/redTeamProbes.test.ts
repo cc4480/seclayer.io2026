@@ -36,11 +36,15 @@ function ctxFor(port: number): ProbeContext {
 }
 
 test('probeSqlInjection returns a PROVEN finding against a DB-erroring target', async () => {
+  // Realistic injectable endpoint: it only emits a DB error when the value
+  // carries a SQL metacharacter (a quote), not for a benign value — so the
+  // differential baseline (id=1) stays clean and the finding fires.
   await withServer((req, res) => {
     const u = new URL(req.url || '/', 'http://127.0.0.1');
     let body = '<!doctype html><html><body>store';
-    if (u.searchParams.has('id')) {
-      body += `<div>You have an error in your SQL syntax; near '${u.searchParams.get('id')}'</div>`;
+    const id = u.searchParams.get('id');
+    if (id && /['"]/.test(id)) {
+      body += `<div>You have an error in your SQL syntax; near '${id}'</div>`;
     }
     res.writeHead(200, { 'Content-Type': 'text/html' });
     res.end(body + '</body></html>');
@@ -60,6 +64,21 @@ test('probeSqlInjection returns null against a benign target (no false positive)
     res.end('<!doctype html><html><body>all good, no errors here</body></html>');
   }, async (port) => {
     assert.equal(await probeSqlInjection(ctxFor(port)), null);
+  });
+});
+
+test('probeSqlInjection suppresses a page that ALWAYS shows a SQL error (differential baseline, no false positive)', async () => {
+  // A page whose normal content contains a DB-error string on every response
+  // (e.g. documentation, a cached error page, a WAF notice). The injected
+  // payload "matches", but so does the benign baseline — so it must NOT be
+  // reported as an injection.
+  await withServer((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    // Contains a signature that genuinely matches SQL_ERROR_SIGNATURE ("SQL
+    // syntax;") on EVERY response, injected payload or not.
+    res.end('<!doctype html><html><body>FAQ: the message "You have an error in your SQL syntax; check the manual" means your query is malformed.</body></html>');
+  }, async (port) => {
+    assert.equal(await probeSqlInjection(ctxFor(port)), null, 'inherent SQL-error text must not be reported as injection');
   });
 });
 

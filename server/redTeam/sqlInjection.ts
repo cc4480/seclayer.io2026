@@ -18,6 +18,15 @@ export async function probeSqlInjection(ctx: ProbeContext): Promise<RedTeamFindi
   const match = SQL_ERROR_SIGNATURE.exec(body);
   if (!match) return null;
 
+  // Differential guard against false positives: a database-error signature only
+  // proves injection when it appears BECAUSE of our metacharacters. If a benign
+  // request (id=1, no metacharacters) already returns the same error, it's
+  // inherent page content — documentation, a cached error page, a WAF notice —
+  // not an injection, so suppress it. This extra request runs only on a match
+  // (rare), so the common no-vuln path stays a single request.
+  const baselineBody = await probeFetch(`${ctx.url}/?id=1`, ctx.fuzzHeaders).then((r) => r.text()).catch(() => "");
+  if (SQL_ERROR_SIGNATURE.test(baselineBody)) return null;
+
   // Receipt: the injected request plus the exact database-error text the engine
   // emitted — quoted verbatim so the proof can be seen, not asserted.
   return {

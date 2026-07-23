@@ -86,6 +86,13 @@ export async function fuzzDiscoveredTargets(
         const { res, text } = await probe(attackUrl);
         const m = sqlErrorSig.exec(text);
         if (m) {
+          // Differential guard against false positives: confirm a benign value
+          // for this parameter doesn't already produce the same DB error. If it
+          // does, the error is inherent page content, not injection — suppress.
+          // Only runs on a match (rare), so it doesn't inflate the request budget.
+          budget--;
+          const baseText = await probe(buildUrl(targetUrl, param, "seclayer1")).then((p) => p.text).catch(() => "");
+          if (sqlErrorSig.test(baseText)) return; // inherent error → not a finding
           reported.add(key);
           findings.push({
             // Includes the param + endpoint so two distinct vulnerable
