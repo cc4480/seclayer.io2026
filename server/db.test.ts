@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 // Use an isolated in-memory database. Set before importing the db singleton.
 process.env.DB_PATH = ':memory:';
 const { db } = await import('./db.js');
+const { runMigrations } = await import('./dbSchema.js');
 
 test('a new user receives signup credits; no API key is auto-provisioned', () => {
   const u = db.getOrCreateUser('t1@test.io');
@@ -128,8 +129,8 @@ test('self-attestation no longer unlocks active probes: legacy attested domains 
     .run('I attest that I own legacy.test.', u.id, 'legacy.test');
   assert.equal(db.isDomainVerified(u.id, 'legacy.test'), true, 'row is verified before the corrective migration runs');
 
-  // Re-running migrate() (as happens on every boot) must revoke it.
-  (db as any).migrate();
+  // Re-running the migrations (as happens on every boot) must revoke it.
+  runMigrations((db as any).db);
   assert.equal(db.isDomainVerified(u.id, 'legacy.test'), false, 'attestation-only verification is revoked');
 });
 

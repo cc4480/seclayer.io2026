@@ -1,9 +1,12 @@
 import path from 'path';
 import crypto from 'crypto';
 import Database from 'better-sqlite3';
-import { User, Scan, CreditTransaction, ApiKey, Finding, SuppressionRule, MonitoredTarget, DomainVerification, ExecutiveBreakdown, OobEvent } from '../src/types.js';
+import { User, Scan, CreditTransaction, ApiKey, Finding, SuppressionRule, MonitoredTarget, DomainVerification, OobEvent } from '../src/types.js';
 import { scoreFindings } from './scoring.js';
 import { MonitorSchedule, computeNextRun, describeSchedule } from './schedule.js';
+import { runMigrations } from './dbSchema.js';
+import { rowToUser, rowToScan, rowToApiKey, rowToDomainVerification } from './dbMappers.js';
+import { hashToken, maskKey } from './dbCrypto.js';
 
 const DB_FILE = process.env.DB_PATH || path.join(process.cwd(), 'data.sqlite');
 
@@ -16,14 +19,6 @@ export function cleanUrl(urlStr: string): string {
   }
 }
 
-// A safe-to-display fragment of a secret (prefix + last 4 chars). Never
-// reversible back to the real value; used only for listing existing keys.
-function maskKey(raw: string): string {
-  return raw.length <= 16 ? raw : `${raw.slice(0, 12)}…${raw.slice(-4)}`;
-}
-
-const LEGACY_RAW_KEY_PATTERN = /^sl_live_[0-9a-f]{32}$/;
-
 // Re-exported for callers/tests that recompute a score from a finding set.
 export const recalculateScore = scoreFindings;
 
@@ -34,158 +29,12 @@ class SqliteDb {
     this.db = new Database(DB_FILE);
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('foreign_keys = ON');
-    this.migrate();
-  }
-
-  private migrate() {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS users (
-        id TEXT PRIMARY KEY,
-        email TEXT UNIQUE NOT NULL,
-        credits INTEGER NOT NULL DEFAULT 0,
-        createdAt TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS scans (
-        id TEXT PRIMARY KEY,
-        userId TEXT NOT NULL,
-        url TEXT NOT NULL,
-        authHeader TEXT,
-        status TEXT NOT NULL,
-        score INTEGER,
-        severity TEXT,
-        findings TEXT,
-        aiSummary TEXT,
-        error TEXT,
-        createdAt TEXT NOT NULL,
-        completedAt TEXT
-      );
-      CREATE INDEX IF NOT EXISTS idx_scans_user ON scans(userId);
-      CREATE TABLE IF NOT EXISTS transactions (
-        id TEXT PRIMARY KEY,
-        userId TEXT NOT NULL,
-        amount INTEGER NOT NULL,
-        type TEXT NOT NULL,
-        stripeSessionId TEXT,
-        createdAt TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_tx_user ON transactions(userId);
-      CREATE TABLE IF NOT EXISTS api_keys (
-        id TEXT PRIMARY KEY,
-        userId TEXT NOT NULL,
-        key TEXT UNIQUE NOT NULL,
-        credits INTEGER NOT NULL DEFAULT 0,
-        active INTEGER NOT NULL DEFAULT 1,
-        createdAt TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS domain_verifications (
-        id TEXT PRIMARY KEY,
-        userId TEXT NOT NULL,
-        domain TEXT NOT NULL,
-        token TEXT NOT NULL,
-        verified INTEGER NOT NULL DEFAULT 0,
-        createdAt TEXT NOT NULL,
-        verifiedAt TEXT
-      );
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_domain_verif_user_domain ON domain_verifications(userId, domain);
-      CREATE INDEX IF NOT EXISTS idx_keys_user ON api_keys(userId);
-      CREATE TABLE IF NOT EXISTS suppressions (
-        id TEXT PRIMARY KEY,
-        userId TEXT NOT NULL,
-        targetUrl TEXT NOT NULL,
-        findingTitle TEXT NOT NULL,
-        reason TEXT,
-        createdAt TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_supp_user ON suppressions(userId);
-      CREATE TABLE IF NOT EXISTS monitored_targets (
-        id TEXT PRIMARY KEY,
-        userId TEXT NOT NULL,
-        url TEXT NOT NULL,
-        frequencyDays INTEGER NOT NULL,
-        scheduleString TEXT,
-        lastScannedAt TEXT,
-        nextScanAt TEXT,
-        createdAt TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_mon_user ON monitored_targets(userId);
-      CREATE TABLE IF NOT EXISTS login_tokens (
-        tokenHash TEXT PRIMARY KEY,
-        email TEXT NOT NULL,
-        expiresAt TEXT NOT NULL,
-        consumedAt TEXT,
-        createdAt TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS sessions (
-        tokenHash TEXT PRIMARY KEY,
-        userId TEXT NOT NULL,
-        expiresAt TEXT NOT NULL,
-        createdAt TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(userId);
-      CREATE TABLE IF NOT EXISTS oob_tokens (
-        token TEXT PRIMARY KEY,
-        scanId TEXT,
-        createdAt TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS oob_events (
-        id TEXT PRIMARY KEY,
-        token TEXT NOT NULL,
-        method TEXT NOT NULL,
-        sourceIp TEXT NOT NULL,
-        path TEXT NOT NULL,
-        userAgent TEXT,
-        receivedAt TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_oob_events_token ON oob_events(token);
-    `);
-    // Additive column migrations (safe across existing databases).
-    this.addColumnIfMissing("users", "notifyWebhook", "TEXT");
-    this.addColumnIfMissing("api_keys", "keyPreview", "TEXT");
-    this.addColumnIfMissing("scans", "aiReasoning", "TEXT");
-    this.addColumnIfMissing("scans", "narrationLog", "TEXT");
-    this.addColumnIfMissing("scans", "executiveBreakdown", "TEXT");
-    this.addColumnIfMissing("scans", "evidence", "TEXT");
-    this.addColumnIfMissing("domain_verifications", "method", "TEXT");
-    this.addColumnIfMissing("domain_verifications", "attestation", "TEXT");
-    this.addColumnIfMissing("monitored_targets", "scanHour", "INTEGER");
-    this.addColumnIfMissing("monitored_targets", "scanMinute", "INTEGER");
-    this.addColumnIfMissing("monitored_targets", "scanWeekday", "INTEGER");
-    this.addColumnIfMissing("monitored_targets", "lastError", "TEXT");
-    this.migrateLegacyPlaintextApiKeys();
-    // Self-attestation ('method' = 'attestation') used to grant the same active-probe
-    // access as real DNS/file proof with no technical verification. That path has been
-    // removed; revoke any domain this trusted on attestation alone so active probing
-    // requires real DNS/file proof for every user, including ones verified before this change.
-    this.db.prepare("UPDATE domain_verifications SET verified = 0 WHERE method = 'attestation'").run();
-  }
-
-  // One-time (idempotent, safe to re-run every boot) upgrade: earlier versions
-  // stored API keys in plaintext in api_keys.key. Rewrite any row still in the
-  // raw "sl_live_<32 hex>" format to store only its SHA-256 hash, plus a
-  // display-safe preview, so a database read alone can never yield a usable key.
-  private migrateLegacyPlaintextApiKeys() {
-    const rows = this.db.prepare('SELECT id, key FROM api_keys').all() as Array<{ id: string; key: string }>;
-    for (const row of rows) {
-      if (LEGACY_RAW_KEY_PATTERN.test(row.key)) {
-        this.db.prepare('UPDATE api_keys SET key = ?, keyPreview = ? WHERE id = ?')
-          .run(this.hashToken(row.key), maskKey(row.key), row.id);
-      }
-    }
-  }
-
-  private addColumnIfMissing(table: string, column: string, decl: string) {
-    const cols = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
-    if (!cols.some((c) => c.name === column)) {
-      this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${decl}`);
-    }
+    runMigrations(this.db);
   }
 
   // --- Magic-link auth + sessions ---
-  // Tokens are random secrets; only their SHA-256 hash is persisted so a DB
-  // read cannot reveal a usable login link or session token.
-  private hashToken(raw: string): string {
-    return crypto.createHash('sha256').update(raw).digest('hex');
-  }
+  // Tokens are random secrets; only their SHA-256 hash is persisted (see
+  // dbCrypto.hashToken) so a DB read cannot reveal a usable login/session token.
 
   // Issues a single-use magic-link token (default 15 min TTL). Returns the raw
   // token to embed in the emailed link; only its hash is stored.
@@ -193,13 +42,13 @@ class SqliteDb {
     const raw = crypto.randomBytes(32).toString('hex');
     const now = Date.now();
     this.db.prepare('INSERT INTO login_tokens (tokenHash, email, expiresAt, createdAt) VALUES (?, ?, ?, ?)')
-      .run(this.hashToken(raw), email.toLowerCase().trim(), new Date(now + ttlMs).toISOString(), new Date(now).toISOString());
+      .run(hashToken(raw), email.toLowerCase().trim(), new Date(now + ttlMs).toISOString(), new Date(now).toISOString());
     return raw;
   }
 
   // Validates and burns a magic-link token, returning the associated email.
   consumeLoginToken(raw: string): string | null {
-    const hash = this.hashToken(raw);
+    const hash = hashToken(raw);
     const row: any = this.db.prepare('SELECT * FROM login_tokens WHERE tokenHash = ?').get(hash);
     if (!row || row.consumedAt) return null;
     if (new Date(row.expiresAt).getTime() < Date.now()) return null;
@@ -213,13 +62,13 @@ class SqliteDb {
     const raw = crypto.randomBytes(32).toString('hex');
     const now = Date.now();
     this.db.prepare('INSERT INTO sessions (tokenHash, userId, expiresAt, createdAt) VALUES (?, ?, ?, ?)')
-      .run(this.hashToken(raw), userId, new Date(now + ttlMs).toISOString(), new Date(now).toISOString());
+      .run(hashToken(raw), userId, new Date(now + ttlMs).toISOString(), new Date(now).toISOString());
     return raw;
   }
 
   // Resolves a session cookie to a userId, or null if missing/expired.
   getSessionUserId(raw: string): string | null {
-    const row: any = this.db.prepare('SELECT * FROM sessions WHERE tokenHash = ?').get(this.hashToken(raw));
+    const row: any = this.db.prepare('SELECT * FROM sessions WHERE tokenHash = ?').get(hashToken(raw));
     if (!row) return null;
     if (new Date(row.expiresAt).getTime() < Date.now()) {
       this.db.prepare('DELETE FROM sessions WHERE tokenHash = ?').run(row.tokenHash);
@@ -229,16 +78,7 @@ class SqliteDb {
   }
 
   deleteSession(raw: string): void {
-    this.db.prepare('DELETE FROM sessions WHERE tokenHash = ?').run(this.hashToken(raw));
-  }
-
-  // --- Row mappers ---
-  private rowToUser(row: any): User | undefined {
-    if (!row) return undefined;
-    return {
-      id: row.id, email: row.email, credits: row.credits,
-      notifyWebhook: row.notifyWebhook ?? undefined, createdAt: row.createdAt,
-    };
+    this.db.prepare('DELETE FROM sessions WHERE tokenHash = ?').run(hashToken(raw));
   }
 
   setUserWebhook(userId: string, url: string | null): User | undefined {
@@ -246,51 +86,13 @@ class SqliteDb {
     return this.getUser(userId);
   }
 
-  private rowToScan(row: any): Scan | undefined {
-    if (!row) return undefined;
-    return {
-      id: row.id,
-      userId: row.userId,
-      url: row.url,
-      authHeader: row.authHeader ?? undefined,
-      status: row.status,
-      score: row.score ?? undefined,
-      severity: row.severity ?? undefined,
-      findings: row.findings ? JSON.parse(row.findings) : undefined,
-      aiSummary: row.aiSummary ?? undefined,
-      aiReasoning: row.aiReasoning ?? undefined,
-      narrationLog: row.narrationLog ? JSON.parse(row.narrationLog) : undefined,
-      executiveBreakdown: row.executiveBreakdown ? JSON.parse(row.executiveBreakdown) : undefined,
-      evidence: row.evidence ? JSON.parse(row.evidence) : undefined,
-      error: row.error ?? undefined,
-      createdAt: row.createdAt,
-      completedAt: row.completedAt ?? undefined,
-    };
-  }
-
-  private rowToApiKey(row: any): ApiKey {
-    return {
-      id: row.id, userId: row.userId, keyPreview: row.keyPreview,
-      credits: row.credits, active: !!row.active, createdAt: row.createdAt,
-    };
-  }
-
-  private rowToDomainVerification(row: any): DomainVerification | undefined {
-    if (!row) return undefined;
-    return {
-      id: row.id, userId: row.userId, domain: row.domain, token: row.token,
-      verified: !!row.verified, createdAt: row.createdAt, verifiedAt: row.verifiedAt ?? undefined,
-      method: row.method ?? undefined,
-    };
-  }
-
   // --- Users ---
   getUser(id: string): User | undefined {
-    return this.rowToUser(this.db.prepare('SELECT * FROM users WHERE id = ?').get(id));
+    return rowToUser(this.db.prepare('SELECT * FROM users WHERE id = ?').get(id));
   }
 
   getUserByEmail(email: string): User | undefined {
-    return this.rowToUser(
+    return rowToUser(
       this.db.prepare('SELECT * FROM users WHERE email = ?').get(email.toLowerCase().trim())
     );
   }
@@ -352,18 +154,18 @@ class SqliteDb {
   // --- Scans ---
   listScans(userId: string): Scan[] {
     const rows = this.db.prepare('SELECT * FROM scans WHERE userId = ? ORDER BY createdAt DESC').all(userId);
-    return rows.map(r => this.rowToScan(r)!).filter(Boolean);
+    return rows.map(r => rowToScan(r)!).filter(Boolean);
   }
 
   getScan(id: string): Scan | undefined {
-    return this.rowToScan(this.db.prepare('SELECT * FROM scans WHERE id = ?').get(id));
+    return rowToScan(this.db.prepare('SELECT * FROM scans WHERE id = ?').get(id));
   }
 
   // The most recent *completed* scan of the same target for this user, other
   // than `excludeScanId` — the baseline a fresh scan is compared against for
   // monitoring regression detection.
   getPreviousCompletedScan(userId: string, url: string, excludeScanId: string): Scan | undefined {
-    return this.rowToScan(this.db.prepare(
+    return rowToScan(this.db.prepare(
       "SELECT * FROM scans WHERE userId = ? AND url = ? AND status = 'complete' AND id != ? ORDER BY createdAt DESC LIMIT 1"
     ).get(userId, url, excludeScanId));
   }
@@ -489,7 +291,7 @@ class SqliteDb {
 
   // --- API Keys ---
   listApiKeys(userId: string): ApiKey[] {
-    return (this.db.prepare('SELECT * FROM api_keys WHERE userId = ?').all(userId) as any[]).map(r => this.rowToApiKey(r));
+    return (this.db.prepare('SELECT * FROM api_keys WHERE userId = ?').all(userId) as any[]).map(r => rowToApiKey(r));
   }
 
   // Returns the new key row (safe to persist/display forever) alongside the
@@ -501,8 +303,8 @@ class SqliteDb {
     const id = 'key_' + crypto.randomBytes(8).toString('hex');
     const rawKey = 'sl_live_' + crypto.randomBytes(16).toString('hex');
     this.db.prepare('INSERT INTO api_keys (id, userId, key, keyPreview, credits, active, createdAt) VALUES (?, ?, ?, ?, ?, 1, ?)')
-      .run(id, userId, this.hashToken(rawKey), maskKey(rawKey), user.credits, new Date().toISOString());
-    const apiKey = this.rowToApiKey(this.db.prepare('SELECT * FROM api_keys WHERE id = ?').get(id));
+      .run(id, userId, hashToken(rawKey), maskKey(rawKey), user.credits, new Date().toISOString());
+    const apiKey = rowToApiKey(this.db.prepare('SELECT * FROM api_keys WHERE id = ?').get(id));
     return { apiKey, rawKey };
   }
 
@@ -512,7 +314,7 @@ class SqliteDb {
   }
 
   validateApiKeyAndDeduct(apiKeyString: string, quantity: number = 1): User | null {
-    const keyRow: any = this.db.prepare('SELECT * FROM api_keys WHERE key = ?').get(this.hashToken(apiKeyString));
+    const keyRow: any = this.db.prepare('SELECT * FROM api_keys WHERE key = ?').get(hashToken(apiKeyString));
     if (!keyRow || !keyRow.active) return null;
     const user = this.getUser(keyRow.userId);
     if (!user || user.credits < quantity) return null;
@@ -524,11 +326,11 @@ class SqliteDb {
   // them (see server/domainVerify.ts + scanner.ts's allowActiveProbes option).
   listDomainVerifications(userId: string): DomainVerification[] {
     return (this.db.prepare('SELECT * FROM domain_verifications WHERE userId = ? ORDER BY createdAt DESC').all(userId) as any[])
-      .map((r) => this.rowToDomainVerification(r)!);
+      .map((r) => rowToDomainVerification(r)!);
   }
 
   getDomainVerification(userId: string, domain: string): DomainVerification | undefined {
-    return this.rowToDomainVerification(
+    return rowToDomainVerification(
       this.db.prepare('SELECT * FROM domain_verifications WHERE userId = ? AND domain = ?').get(userId, domain)
     );
   }
