@@ -1,0 +1,43 @@
+// SQL injection active probe. Injects an escaped SQL boundary into the "id"
+// parameter and looks for a raw database-engine error in the response — a
+// signature a benign value never produces, so its appearance proves input is
+// reaching the SQL engine unescaped.
+import { buildProbeEvidence } from "../evidence.js";
+import { probeFetch } from "./probeHttp.js";
+import type { ProbeContext, RedTeamFinding } from "./types.js";
+
+// Match specific database error signatures only — never bare "syntax error",
+// which appears in unrelated content and causes false positives.
+const SQL_ERROR_SIGNATURE =
+  /(SQL syntax;|valid MySQL result|mysqli?_fetch|ORA-\d{4,5}|PLS-\d{4,5}|PostgreSQL.*?ERROR|PG::\w*Error|SQLSTATE\[|SQLite3?::|SQLiteException|Unclosed quotation mark after the character string|quoted string not properly terminated|Microsoft OLE DB Provider for SQL Server|ODBC SQL Server Driver|Npgsql\.)/i;
+
+export async function probeSqlInjection(ctx: ProbeContext): Promise<RedTeamFinding | null> {
+  const attackUrl = `${ctx.url}/?id=%27%20OR%201%3D1--`;
+  const res = await probeFetch(attackUrl, ctx.fuzzHeaders);
+  const body = await res.text();
+  const match = SQL_ERROR_SIGNATURE.exec(body);
+  if (!match) return null;
+
+  // Receipt: the injected request plus the exact database-error text the engine
+  // emitted — quoted verbatim so the proof can be seen, not asserted.
+  return {
+    testName: "Active SQL Injection Probe",
+    payload: "' OR 1=1--",
+    severity: "critical",
+    description:
+      "Active Red Team scanning detected database syntax errors reflected in the HTTP response when injecting escaped SQL boundary characters. This indicates an exploitable database injection vulnerability.",
+    fix: "Implement parameterized database queries and prepared statements exclusively. Eliminate dynamic string concatenation for SQL logic.",
+    evidence: buildProbeEvidence({
+      method: "error-signature",
+      attackUrl,
+      requestHeaders: ctx.fuzzHeaders,
+      res,
+      body,
+      matchIndex: match.index,
+      quote: match[0],
+      why: "This is a raw database-engine error, emitted only when our injected quote breaks the SQL query's syntax. A benign value does not produce it — so request input is reaching the database unescaped.",
+      demonstration:
+        'We injected the SQL boundary payload "\' OR 1=1--" into the "id" parameter and the server responded with a raw database error. That error is proof the input reaches the SQL engine unescaped — the hallmark of an exploitable injection.',
+    }),
+  };
+}

@@ -4,6 +4,18 @@
 import type { Finding, Severity, ExploitEvidence, BolaIdentity } from "../src/types.js";
 import type { OobCollaborator } from "./oob.js";
 
+// A confirmed exploit result from an active red-team probe (see server/redTeam/).
+// evidence, when present, is a captured receipt that promotes the finding to
+// PROVEN (isProven checks the quoted signal is a literal substring of it).
+export interface RedTeamFinding {
+  testName: string;
+  payload: string;
+  severity: Severity;
+  description: string;
+  fix: string;
+  evidence?: ExploitEvidence;
+}
+
 export interface DiagnosticResult {
   url: string;
   scannedAt: string;
@@ -44,14 +56,7 @@ export interface DiagnosticResult {
     nameserver: string;
     protocol: string;
   };
-  redTeamFindings?: Array<{
-    testName: string;
-    payload: string;
-    severity: Severity;
-    description: string;
-    fix: string;
-    evidence?: ExploitEvidence; // stored exploit receipt (promotes to PROVEN)
-  }>;
+  redTeamFindings?: RedTeamFinding[];
   crawl?: {
     pagesVisited: number;
     endpointsDiscovered: number;
