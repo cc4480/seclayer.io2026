@@ -2,6 +2,7 @@
 // suppression rules.
 import express from "express";
 import { db } from "../db.js";
+import { config } from "../config.js";
 import { rateLimit } from "../rateLimit.js";
 import { assertScanTargetSafe } from "../scanner.js";
 import { extractDomain } from "../domainVerify.js";
@@ -53,7 +54,8 @@ export function registerScanRoutes(app: express.Express, ctx: RouteContext) {
       return res.status(404).json({ status: "error", message: "User profile not found" });
     }
 
-    if (user.credits < 1) {
+    // In free mode scans cost nothing; the credit gate is skipped entirely.
+    if (!config.freeMode && user.credits < 1) {
       return res.status(402).json({
         status: "error",
         message: "No credits remaining. Please purchase scan credits to continue.",
@@ -72,8 +74,8 @@ export function registerScanRoutes(app: express.Express, ctx: RouteContext) {
     // interleaved by a concurrent request) rather than trusting the earlier
     // check, which ran before the `await` above and so could be stale —
     // without this, two concurrent launches sharing 1 credit could both pass
-    // the early check and both get a free scan.
-    if (!db.deductCredits(userId, 1)) {
+    // the early check and both get a free scan. Skipped in free mode.
+    if (!config.freeMode && !db.deductCredits(userId, 1)) {
       return res.status(402).json({
         status: "error",
         message: "No credits remaining. Please purchase scan credits to continue.",

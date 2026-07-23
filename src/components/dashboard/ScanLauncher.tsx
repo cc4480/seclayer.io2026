@@ -22,6 +22,7 @@ interface Props {
   launchScan: (active: boolean) => void;
   handleScanSubmit: (e: FormEvent) => void;
   dv: ReturnType<typeof useDomainVerification>;
+  freeMode?: boolean;
 }
 
 // The primary "trigger a pen-test" form: target URL, domain-verification prompt,
@@ -31,7 +32,7 @@ export default function ScanLauncher(props: Props) {
   const {
     scanUrl, setScanUrl, authHeader, setAuthHeader, showAdvanced, setShowAdvanced,
     bolaEnabled, setBolaEnabled, bolaA, setBolaA, bolaB, setBolaB,
-    errorText, isPerformingAction, launchScan, handleScanSubmit, dv,
+    errorText, isPerformingAction, launchScan, handleScanSubmit, dv, freeMode,
   } = props;
 
   return (
@@ -155,7 +156,7 @@ export default function ScanLauncher(props: Props) {
 
         <div className="flex flex-col gap-2 pt-2">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-mono text-[#52525b]">Cost per scan: <strong className="text-[#22c55e]">1 credit</strong></span>
+            <span className="text-[10px] font-mono text-[#52525b]">Cost per scan: <strong className="text-[#22c55e]">{freeMode ? 'Free during beta' : '1 credit'}</strong></span>
             {dv.currentDomain && (
               <span className="text-[9px] font-mono text-[#52525b]">
                 {dv.currentDomainVerified ? 'Red-team unlocked for this domain' : 'Red-team requires DNS/file verification first'}

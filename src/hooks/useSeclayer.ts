@@ -11,6 +11,9 @@ export function useSeclayer() {
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [credits, setCredits] = useState(0);
   const [transactions, setTransactions] = useState<any[]>([]);
+  // Free public-testing mode (server-controlled): scans cost no credits, so the
+  // UI hides the paywall and credit gating. Sourced from /api/auth/me.
+  const [freeMode, setFreeMode] = useState(false);
   // The raw secret of a just-generated API key. The server only ever returns
   // it once (in the POST /api/keys response), so it lives in memory only —
   // never persisted, never re-fetchable, cleared on dismiss or reload.
@@ -58,6 +61,7 @@ export function useSeclayer() {
       const userData = await userRes.json();
       setUser(userData.user);
       setCredits(userData.user.credits);
+      setFreeMode(!!userData.freeMode);
 
       // 2. Fetch user's scans list
       const scansRes = await fetch('/api/scans');
@@ -142,8 +146,9 @@ export function useSeclayer() {
 
       if (res.ok) {
         const data = await res.json();
-        // Optimistically deduct credit locally & add scan to list
-        setCredits(prev => Math.max(0, prev - 1));
+        // Optimistically deduct a credit locally (skipped in free mode, where
+        // the server deducts nothing) & add the scan to the list.
+        if (!freeMode) setCredits(prev => Math.max(0, prev - 1));
         setScans(prev => [data.scan, ...prev]);
 
         // Open scanning terminal screen
@@ -246,7 +251,7 @@ export function useSeclayer() {
   const activeScan = scans.find(s => s.id === selectedScanId);
 
   return {
-    user, scans, apiKeys, credits, transactions, justGeneratedKey, setJustGeneratedKey,
+    user, scans, apiKeys, credits, transactions, freeMode, justGeneratedKey, setJustGeneratedKey,
     currentView, setCurrentView, selectedScanId, setSelectedScanId, showLogin, setShowLogin,
     isPerformingAction, activeScan, checkoutNotice, setCheckoutNotice,
     loadUserContext, handleNavigate, handleStartTrial, onInitiateScan, cancelScan,

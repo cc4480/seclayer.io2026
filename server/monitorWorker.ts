@@ -4,6 +4,7 @@
 // credit, and launches the same pipeline as a manual scan — rescheduling on the
 // target's real cadence (weekday + time-of-day). Returns the interval handle.
 import { db } from "./db.js";
+import { config } from "./config.js";
 import { computeNextRun } from "./schedule.js";
 import { assertScanTargetSafe } from "./scanner.js";
 import { extractDomain } from "./domainVerify.js";
@@ -29,7 +30,12 @@ export async function runDueMonitoredScans(processScanJob: ProcessScanJob): Prom
       }).toISOString();
       try {
         const user = db.getUser(target.userId);
-        if (!user || user.credits < 1) {
+        if (!user) {
+          db.markMonitoredError(target.id, "Skipped: the owning account no longer exists.");
+          continue;
+        }
+        // In free mode scans cost nothing; the credit gate is skipped entirely.
+        if (!config.freeMode && user.credits < 1) {
           // Retry next tick once credits exist — scheduling is untouched,
           // but the reason is recorded so the dashboard doesn't just show
           // a silent "ACTIVE" monitor that never actually scans anything.
@@ -39,8 +45,8 @@ export async function runDueMonitoredScans(processScanJob: ProcessScanJob): Prom
         await assertScanTargetSafe(target.url);
         // Re-checks the balance at the moment of deduction — the credits
         // check above ran before the await, so it could be stale if a
-        // manual scan spent the last credit in the meantime.
-        if (!db.deductCredits(target.userId, 1)) {
+        // manual scan spent the last credit in the meantime. Skipped in free mode.
+        if (!config.freeMode && !db.deductCredits(target.userId, 1)) {
           db.markMonitoredError(target.id, "Skipped: insufficient credits. Will retry automatically once the balance is topped up.");
           continue;
         }

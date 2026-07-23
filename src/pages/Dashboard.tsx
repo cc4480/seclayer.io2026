@@ -22,6 +22,7 @@ interface DashboardProps {
   justGeneratedKey: { id: string; rawKey: string } | null;
   onDismissGeneratedKey: () => void;
   refreshData: () => void;
+  freeMode: boolean;
   onInitiateScan: (url: string, authHeader?: string, bolaIdentities?: any, activeProbes?: boolean) => void;
   onGenerateKey: () => void;
   onRevokeKey: (keyId: string) => void;
@@ -33,7 +34,7 @@ interface DashboardProps {
 }
 
 export default function Dashboard({
-  user, scans, apiKeys, credits, transactions, justGeneratedKey, onDismissGeneratedKey, refreshData,
+  user, scans, apiKeys, credits, transactions, justGeneratedKey, onDismissGeneratedKey, refreshData, freeMode,
   onInitiateScan, onGenerateKey, onRevokeKey, onPurchaseCredits, onViewReport, isPerformingAction,
   checkoutNotice, onDismissCheckoutNotice,
 }: DashboardProps) {
@@ -90,7 +91,8 @@ export default function Dashboard({
     setErrorText('');
     const urlStr = scanUrl.trim();
     if (!urlStr) return;
-    if (credits < 1) {
+    // In free mode scans cost nothing, so the credit gate is skipped.
+    if (!freeMode && credits < 1) {
       setErrorText('Insufficient balances available. Please top-up credits to run a scan.');
       return;
     }
@@ -156,7 +158,7 @@ export default function Dashboard({
       <div className="max-w-7xl mx-auto space-y-10">
 
         {/* Row 1: Header / Status banner */}
-        <DashboardHeader email={user.email} credits={credits} />
+        <DashboardHeader email={user.email} credits={credits} freeMode={freeMode} />
 
         {/* Bento Grid Layer */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -168,15 +170,18 @@ export default function Dashboard({
               bolaEnabled={bolaEnabled} setBolaEnabled={setBolaEnabled}
               bolaA={bolaA} setBolaA={setBolaA} bolaB={bolaB} setBolaB={setBolaB}
               errorText={errorText} isPerformingAction={isPerformingAction}
-              launchScan={launchScan} handleScanSubmit={handleScanSubmit} dv={dv}
+              launchScan={launchScan} handleScanSubmit={handleScanSubmit} dv={dv} freeMode={freeMode}
             />
-            <CreditPacks buyPack={buyPack} setBuyPack={setBuyPack} isBuying={isBuying} isPerformingAction={isPerformingAction} handleBuyCredits={handleBuyCredits} />
+            {!freeMode && (
+              <CreditPacks buyPack={buyPack} setBuyPack={setBuyPack} isBuying={isBuying} isPerformingAction={isPerformingAction} handleBuyCredits={handleBuyCredits} />
+            )}
           </div>
 
           <div className="lg:col-span-5 space-y-8">
             <ApiKeysPanel
               apiKeys={apiKeys} justGeneratedKey={justGeneratedKey} onDismissGeneratedKey={onDismissGeneratedKey}
               onGenerateKey={onGenerateKey} onRevokeKey={onRevokeKey} copiedKeyId={copiedKeyId} handleCopyKey={handleCopyKey}
+              freeMode={freeMode}
             />
           </div>
         </div>

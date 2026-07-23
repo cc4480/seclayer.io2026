@@ -329,6 +329,15 @@ class SqliteDb {
     return this.addCredits(user.id, -quantity, 'scan_debit');
   }
 
+  // Resolve an active API key to its owner WITHOUT touching credits — used by
+  // the MCP endpoint in free mode, where scans cost nothing but the key must
+  // still be valid and active.
+  validateApiKey(apiKeyString: string): User | null {
+    const keyRow: any = this.db.prepare('SELECT * FROM api_keys WHERE key = ?').get(hashToken(apiKeyString));
+    if (!keyRow || !keyRow.active) return null;
+    return this.getUser(keyRow.userId) ?? null;
+  }
+
   // --- Domain Ownership Verification ---
   // Gates the scanner's active exploit probes: only a verified domain unlocks
   // them (see server/domainVerify.ts + scanner.ts's allowActiveProbes option).

@@ -9,13 +9,23 @@ function clean(v: string | undefined, placeholder?: string): string | undefined 
   return t;
 }
 
+const stripeConfigured = !!clean(process.env.STRIPE_SECRET_KEY) && !!clean(process.env.STRIPE_WEBHOOK_SECRET);
+
+// Free testing mode: scans require no credits and no purchase. FREE_MODE=true|false
+// overrides; otherwise it defaults ON whenever payments aren't configured, so the
+// app is usable for free out of the box and automatically switches to paid once
+// Stripe is wired up.
+const freeModeEnv = clean(process.env.FREE_MODE);
+const freeMode = freeModeEnv === 'true' ? true : freeModeEnv === 'false' ? false : !stripeConfigured;
+
 export const config = {
   port: Number(process.env.PORT) || 3000,
   isProd: process.env.NODE_ENV === 'production',
   appUrl: clean(process.env.APP_URL, 'MY_APP_URL')?.replace(/\/+$/, ''),
   deepseekConfigured: !!clean(process.env.DEEPSEEK_API_KEY, 'MY_DEEPSEEK_API_KEY'),
   emailConfigured: !!clean(process.env.RESEND_API_KEY, 'MY_RESEND_API_KEY'),
-  stripeConfigured: !!clean(process.env.STRIPE_SECRET_KEY) && !!clean(process.env.STRIPE_WEBHOOK_SECRET),
+  stripeConfigured,
+  freeMode,
   // Dev convenience: auto-authenticate every request as a fixed local user, so
   // the magic-link sign-in flow can be skipped while building locally. The
   // `process.env.NODE_ENV !== 'production'` half of this check is redundant
@@ -39,6 +49,9 @@ export function validateConfigOnBoot(): boolean {
   }
   if (!config.stripeConfigured) {
     warnings.push('STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET not set — credit purchases are disabled.');
+  }
+  if (config.freeMode) {
+    warnings.push('FREE_MODE is on — scans require no credits (free public testing). Set FREE_MODE=false once payments are configured.');
   }
 
   if (config.isProd) {

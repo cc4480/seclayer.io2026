@@ -8,7 +8,7 @@ import { useSeclayer } from './hooks/useSeclayer.js';
 
 export default function App() {
   const {
-    user, scans, apiKeys, credits, transactions, justGeneratedKey, setJustGeneratedKey,
+    user, scans, apiKeys, credits, transactions, freeMode, justGeneratedKey, setJustGeneratedKey,
     currentView, setCurrentView, selectedScanId, setSelectedScanId, showLogin, setShowLogin,
     isPerformingAction, activeScan, checkoutNotice, setCheckoutNotice,
     loadUserContext, handleNavigate, handleStartTrial, onInitiateScan, cancelScan,
@@ -24,6 +24,7 @@ export default function App() {
         onNavigate={handleNavigate}
         userEmail={user?.email || ''}
         credits={credits}
+        freeMode={freeMode}
         onLogout={handleLogout}
         onLoginClick={() => setShowLogin(true)}
       />
@@ -55,6 +56,7 @@ export default function App() {
             justGeneratedKey={justGeneratedKey}
             onDismissGeneratedKey={() => setJustGeneratedKey(null)}
             refreshData={loadUserContext}
+            freeMode={freeMode}
             onInitiateScan={onInitiateScan}
             onGenerateKey={onGenerateKey}
             onRevokeKey={onRevokeKey}

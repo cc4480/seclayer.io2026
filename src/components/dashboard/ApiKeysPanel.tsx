@@ -11,10 +11,11 @@ interface Props {
   onRevokeKey: (keyId: string) => void;
   copiedKeyId: string | null;
   handleCopyKey: (keyText: string, keyId: string) => void;
+  freeMode?: boolean;
 }
 
 export default function ApiKeysPanel({
-  apiKeys, justGeneratedKey, onDismissGeneratedKey, onGenerateKey, onRevokeKey, copiedKeyId, handleCopyKey,
+  apiKeys, justGeneratedKey, onDismissGeneratedKey, onGenerateKey, onRevokeKey, copiedKeyId, handleCopyKey, freeMode,
 }: Props) {
   return (
     <>
@@ -32,7 +33,7 @@ export default function ApiKeysPanel({
           </button>
         </div>
         <p className="text-[#a1a1aa] text-xs font-mono mb-6">
-          Generate API key headers for your AI agents (Cursor, Claude Code, Windsurf) to query the MCP tool. Consumes credits from your main balance.
+          Generate API key headers for your AI agents (Cursor, Claude Code, Windsurf) to query the MCP tool. {freeMode ? 'Scans are free during the beta.' : 'Consumes credits from your main balance.'}
         </p>
 
         {justGeneratedKey && (

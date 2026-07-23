@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Key, Coins, LogOut, ArrowRight, User } from 'lucide-react';
+import { Shield, Key, Coins, Gift, LogOut, ArrowRight, User } from 'lucide-react';
 import { motion } from 'motion/react';
 
 interface NavbarProps {
@@ -7,6 +7,7 @@ interface NavbarProps {
   onNavigate: (view: string, arg?: string) => void;
   userEmail: string;
   credits: number;
+  freeMode?: boolean;
   onLogout: () => void;
   onLoginClick: () => void;
 }
@@ -16,6 +17,7 @@ export default function Navbar({
   onNavigate,
   userEmail,
   credits,
+  freeMode,
   onLogout,
   onLoginClick
 }: NavbarProps) {
@@ -94,10 +96,17 @@ export default function Navbar({
                 className="flex items-center space-x-2 bg-[#0c0c0e] border border-[#27272a] hover:border-[#22c55e]/45 rounded-md px-3 py-1.5 transition-all text-[#a1a1aa] cursor-pointer text-xs font-mono"
                 id="navbar-credits-pill"
               >
-                <Coins className="w-3.5 h-3.5 text-[#22c55e]" />
-                <span>
-                  Credits: <strong className="text-[#22c55e]">{credits}</strong>
-                </span>
+                {freeMode ? (
+                  <>
+                    <Gift className="w-3.5 h-3.5 text-[#22c55e]" />
+                    <span>Free <strong className="text-[#22c55e]">beta</strong></span>
+                  </>
+                ) : (
+                  <>
+                    <Coins className="w-3.5 h-3.5 text-[#22c55e]" />
+                    <span>Credits: <strong className="text-[#22c55e]">{credits}</strong></span>
+                  </>
+                )}
               </div>
 
               {/* User Email Info / Sign Out */}

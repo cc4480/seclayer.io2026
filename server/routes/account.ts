@@ -104,7 +104,11 @@ export function registerAccountRoutes(app: express.Express, ctx: RouteContext) {
     }
 
     const user = db.getUser(userId);
-    if (!user || user.credits < 1) {
+    if (!user) {
+      return res.status(404).json({ error: "User profile not found" });
+    }
+    // In free mode scans cost nothing; the credit gate is skipped entirely.
+    if (!config.freeMode && user.credits < 1) {
       return res.status(402).json({ error: "No credits remaining. Please purchase scan credits to run a scan." });
     }
 
@@ -115,8 +119,9 @@ export function registerAccountRoutes(app: express.Express, ctx: RouteContext) {
     }
 
     // Re-check the balance at the moment of deduction (single synchronous
-    // read-then-write) so a concurrent launch can't share one credit.
-    if (!db.deductCredits(userId, 1)) {
+    // read-then-write) so a concurrent launch can't share one credit. Skipped
+    // in free mode.
+    if (!config.freeMode && !db.deductCredits(userId, 1)) {
       return res.status(402).json({ error: "No credits remaining. Please purchase scan credits to run a scan." });
     }
 

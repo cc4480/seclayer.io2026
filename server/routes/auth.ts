@@ -93,6 +93,8 @@ export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
     if (!user) {
       return res.status(404).json({ status: "error", message: "User profile not found" });
     }
-    res.json({ user });
+    // freeMode lets the client hide the paywall and credit gating when scans
+    // are free (payments not configured / FREE_MODE on).
+    res.json({ user, freeMode: config.freeMode });
   });
 }

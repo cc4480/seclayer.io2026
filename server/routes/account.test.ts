@@ -4,6 +4,7 @@ import express from 'express';
 import type { AddressInfo } from 'node:net';
 
 process.env.DB_PATH = ':memory:';
+process.env.FREE_MODE = 'false'; // these suites exercise the paid credit flow
 const { db } = await import('../db.js');
 const { registerAccountRoutes } = await import('./account.js');
 

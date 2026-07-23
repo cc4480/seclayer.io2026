@@ -4,6 +4,7 @@
 // verified ownership of the target's domain; otherwise passive recon only.
 import express from "express";
 import { db } from "../db.js";
+import { config } from "../config.js";
 import { rateLimit } from "../rateLimit.js";
 import { runDiagnostics, compileStaticFindings, compileScanEvidence, assertScanTargetSafe } from "../scanner.js";
 import { generateAiReport } from "../deepseek.js";
@@ -35,10 +36,15 @@ export function registerMcpRoutes(app: express.Express, ctx: RouteContext) {
       return res.status(400).json({ error: e?.message || "Target URL cannot be scanned." });
     }
 
-    // Verify key and deduct 1 credit
-    const user = db.validateApiKeyAndDeduct(apiKey, 1);
+    // Verify the key. In free mode scans cost nothing, so we validate the key
+    // without deducting; otherwise we deduct 1 credit as part of validation.
+    const user = config.freeMode ? db.validateApiKey(apiKey) : db.validateApiKeyAndDeduct(apiKey, 1);
     if (!user) {
-      return res.status(401).json({ error: "Invalid API Key, active key required, or insufficient credits. Get credits at seclayer.io." });
+      return res.status(401).json({
+        error: config.freeMode
+          ? "Invalid API Key — an active key is required."
+          : "Invalid API Key, active key required, or insufficient credits. Get credits at seclayer.io.",
+      });
     }
 
     // Create the scan record now, before running the pipeline — not just
@@ -85,12 +91,14 @@ export function registerMcpRoutes(app: express.Express, ctx: RouteContext) {
         creditsRemaining: user.credits,
       });
     } catch (err: any) {
-      const refunded = db.addCredits(user.id, 1, "purchase");
+      // Refund the credit spent on a failed scan — except in free mode, where
+      // none was spent, so the balance is reported unchanged.
+      const creditsRemaining = config.freeMode ? user.credits : db.addCredits(user.id, 1, "purchase").credits;
       db.updateScan(scan.id, {
         status: "failed",
         error: err?.message || "The scan could not be completed.",
       });
-      res.status(500).json({ error: "Internal audit scanning failed", details: err.message, creditsRemaining: refunded.credits });
+      res.status(500).json({ error: "Internal audit scanning failed", details: err.message, creditsRemaining });
     }
   });
 }
