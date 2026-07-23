@@ -23,6 +23,7 @@ async function startServer() {
   }
 
   const app = express();
+  app.disable('x-powered-by');
   const PORT = config.port;
 
   // Resilience: fail (and refund) any scan orphaned by a prior process's
