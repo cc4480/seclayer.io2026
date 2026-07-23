@@ -4,15 +4,46 @@ import express from "express";
 import { db, cleanUrl } from "../db.js";
 import { config } from "../config.js";
 import { assertScanTargetSafe } from "../scanner.js";
+import { computeNextRun } from "../schedule.js";
+import { extractDomain } from "../domainVerify.js";
 import { createCheckoutSession, isStripeConfigured } from "../stripe.js";
 import type { RouteContext } from "./context.js";
 
 export function registerAccountRoutes(app: express.Express, ctx: RouteContext) {
-  const { requireAuth, getUserId } = ctx;
+  const { requireAuth, getUserId, processScanJob } = ctx;
+
+  // The next automated run for a target, from its own cadence — used by
+  // "scan now" to reset the countdown after a manual run.
+  const nextRunFor = (t: { frequencyDays: number; scanHour?: number | null; scanMinute?: number | null; scanWeekday?: number | null }) =>
+    computeNextRun(new Date(), {
+      frequencyDays: t.frequencyDays,
+      hour: t.scanHour,
+      minute: t.scanMinute,
+      weekday: t.scanWeekday,
+    }).toISOString();
 
   // --- Continuous Monitoring ---
+  // Each target is enriched with its most recent scan (any status) so the
+  // dashboard can show the last result and link straight to that report.
   app.get("/api/monitoring", requireAuth, (req, res) => {
-    res.json({ monitoredTargets: db.listMonitoredTargets(getUserId(req)) });
+    const userId = getUserId(req);
+    const monitoredTargets = db.listMonitoredTargets(userId).map((t) => {
+      const last = db.getLatestScanForUrl(userId, t.url);
+      return {
+        ...t,
+        lastScan: last
+          ? {
+              id: last.id,
+              status: last.status,
+              score: last.score,
+              severity: last.severity,
+              createdAt: last.createdAt,
+              completedAt: last.completedAt,
+            }
+          : null,
+      };
+    });
+    res.json({ monitoredTargets });
   });
 
   app.post("/api/monitoring", requireAuth, async (req, res) => {
@@ -46,6 +77,54 @@ export function registerAccountRoutes(app: express.Express, ctx: RouteContext) {
       weekday: weekday == null || weekday === "" ? null : Number(weekday),
     });
     res.json({ status: "ok", target });
+  });
+
+  // Pause/resume a monitor. Paused targets keep their configuration but are
+  // never picked up by the worker (see db.listDueMonitoredTargets).
+  app.patch("/api/monitoring/:id", requireAuth, (req, res) => {
+    const { paused } = req.body || {};
+    if (typeof paused !== "boolean") {
+      return res.status(400).json({ error: "paused (boolean) is required" });
+    }
+    if (!db.setMonitoredPaused(getUserId(req), req.params.id, paused)) {
+      return res.status(404).json({ error: "Monitored target not found" });
+    }
+    res.json({ status: "ok", paused });
+  });
+
+  // Run a monitored target's scan immediately, on demand — the same launch path
+  // the worker uses (credit check + deduct, SSRF re-validation, active-probe
+  // gating), then reset the countdown to the next automated run so an on-demand
+  // scan doesn't cause an immediate duplicate on the next tick.
+  app.post("/api/monitoring/:id/scan-now", requireAuth, async (req, res) => {
+    const userId = getUserId(req);
+    const target = db.getMonitoredTarget(userId, req.params.id);
+    if (!target) {
+      return res.status(404).json({ error: "Monitored target not found" });
+    }
+
+    const user = db.getUser(userId);
+    if (!user || user.credits < 1) {
+      return res.status(402).json({ error: "No credits remaining. Please purchase scan credits to run a scan." });
+    }
+
+    try {
+      await assertScanTargetSafe(target.url);
+    } catch (e: any) {
+      return res.status(400).json({ error: e?.message || "This target cannot be scanned." });
+    }
+
+    // Re-check the balance at the moment of deduction (single synchronous
+    // read-then-write) so a concurrent launch can't share one credit.
+    if (!db.deductCredits(userId, 1)) {
+      return res.status(402).json({ error: "No credits remaining. Please purchase scan credits to run a scan." });
+    }
+
+    const scan = db.createScan(userId, target.url);
+    db.markMonitoredScanned(target.id, new Date().toISOString(), nextRunFor(target));
+    const allowActiveProbes = db.isDomainVerified(userId, extractDomain(target.url));
+    processScanJob(scan.id, allowActiveProbes);
+    res.json({ status: "ok", scan });
   });
 
   app.delete("/api/monitoring/:id", requireAuth, (req, res) => {

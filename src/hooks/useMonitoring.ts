@@ -3,8 +3,10 @@ import { User, Scan } from '../types.js';
 
 // Account-tab data: continuous-monitoring targets (+ the add form), the
 // Slack-compatible alert webhook, and the false-positive suppression rules.
-// Refetched when the user or their scan list changes.
-export function useMonitoring(user: User, scans: Scan[]) {
+// Refetched when the user or their scan list changes. onDataChanged (when
+// provided) refreshes the app's authoritative scan list — used after "scan now"
+// so the launched scan appears in history and its report becomes viewable.
+export function useMonitoring(user: User, scans: Scan[], onDataChanged?: () => void) {
   const [suppressRules, setSuppressRules] = useState<any[]>([]);
   const [monitoredTargets, setMonitoredTargets] = useState<any[]>([]);
   const [monitorUrl, setMonitorUrl] = useState('');
@@ -13,6 +15,10 @@ export function useMonitoring(user: User, scans: Scan[]) {
   const [monitorTime, setMonitorTime] = useState('09:00');
   const [isAddingMonitor, setIsAddingMonitor] = useState(false);
   const [monitorError, setMonitorError] = useState('');
+  // The target currently being acted on (pause/resume/scan-now), so its row
+  // buttons can show a busy state, plus a per-row notice for the outcome.
+  const [busyTargetId, setBusyTargetId] = useState<string | null>(null);
+  const [rowNotice, setRowNotice] = useState<{ id: string; message: string; tone: 'ok' | 'error' } | null>(null);
 
   const [webhookUrl, setWebhookUrl] = useState(user.notifyWebhook || '');
   const [webhookSaving, setWebhookSaving] = useState(false);
@@ -116,11 +122,56 @@ export function useMonitoring(user: User, scans: Scan[]) {
     }
   };
 
+  // Pause or resume a monitor (keeps its configuration; the worker skips paused
+  // targets). `paused` is the desired new state.
+  const togglePause = async (id: string, paused: boolean) => {
+    setBusyTargetId(id);
+    setRowNotice(null);
+    try {
+      const res = await fetch(`/api/monitoring/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paused }),
+      });
+      if (res.ok) await fetchMonitoredTargets();
+    } catch (err) {
+      console.error('Error toggling monitor pause:', err);
+    } finally {
+      setBusyTargetId(null);
+    }
+  };
+
+  // Run a monitor's scan immediately. The row's last-scan result then updates
+  // as the scan progresses; a few delayed refetches catch its completion
+  // without the user leaving the tab.
+  const scanNow = async (id: string) => {
+    setBusyTargetId(id);
+    setRowNotice(null);
+    try {
+      const res = await fetch(`/api/monitoring/${id}/scan-now`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setRowNotice({ id, message: 'Scan started — the result will appear here shortly.', tone: 'ok' });
+        // Refresh the monitor rows AND the app's scan list, so the new scan
+        // shows up in history and its report is viewable once complete.
+        const refresh = () => { fetchMonitoredTargets(); onDataChanged?.(); };
+        refresh();
+        [4000, 10000, 20000].forEach((ms) => setTimeout(refresh, ms));
+      } else {
+        setRowNotice({ id, message: data.error || 'Could not start the scan.', tone: 'error' });
+      }
+    } catch {
+      setRowNotice({ id, message: 'Could not start the scan — check your connection and try again.', tone: 'error' });
+    } finally {
+      setBusyTargetId(null);
+    }
+  };
+
   return {
     suppressRules, fetchSuppressRules,
     monitoredTargets, monitorUrl, setMonitorUrl, monitorFreq, setMonitorFreq,
     monitorDay, setMonitorDay, monitorTime, setMonitorTime, isAddingMonitor, monitorError,
-    handleAddMonitor, handleDeleteMonitor,
+    handleAddMonitor, handleDeleteMonitor, togglePause, scanNow, busyTargetId, rowNotice,
     webhookUrl, setWebhookUrl, webhookSaving, webhookSaved, saveWebhook,
   };
 }

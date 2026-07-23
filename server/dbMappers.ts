@@ -1,7 +1,7 @@
 // Row → domain-object mappers for the database layer. These are pure functions
 // of a raw SQLite row (they never touch the connection), extracted from db.ts so
 // the persistence class holds queries + business logic, not field plumbing.
-import type { User, Scan, ApiKey, DomainVerification } from "../src/types.js";
+import type { User, Scan, ApiKey, DomainVerification, MonitoredTarget } from "../src/types.js";
 
 export function rowToUser(row: any): User | undefined {
   if (!row) return undefined;
@@ -46,5 +46,24 @@ export function rowToDomainVerification(row: any): DomainVerification | undefine
     id: row.id, userId: row.userId, domain: row.domain, token: row.token,
     verified: !!row.verified, createdAt: row.createdAt, verifiedAt: row.verifiedAt ?? undefined,
     method: row.method ?? undefined,
+  };
+}
+
+export function rowToMonitoredTarget(row: any): MonitoredTarget {
+  return {
+    id: row.id,
+    userId: row.userId,
+    url: row.url,
+    frequencyDays: row.frequencyDays,
+    scheduleString: row.scheduleString ?? undefined,
+    scanHour: row.scanHour ?? null,
+    scanMinute: row.scanMinute ?? null,
+    scanWeekday: row.scanWeekday ?? null,
+    lastScannedAt: row.lastScannedAt ?? undefined,
+    nextScanAt: row.nextScanAt ?? undefined,
+    createdAt: row.createdAt,
+    lastError: row.lastError ?? undefined,
+    // Stored as 0/1 in SQLite; surfaced as a real boolean.
+    paused: !!row.paused,
   };
 }

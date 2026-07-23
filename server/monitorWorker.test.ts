@@ -34,7 +34,7 @@ test('a due target with credits and a safe URL launches a scan and deducts one c
   const updated = db.listMonitoredTargets(u.id).find((t) => t.id === target.id)!;
   assert.ok(updated.lastScannedAt, 'lastScannedAt must be set after a successful launch');
   assert.ok(new Date(updated.nextScanAt!).getTime() > Date.now(), 'nextScanAt must be rescheduled into the future');
-  assert.equal(updated.lastError, null, 'no lastError after a successful launch');
+  assert.ok(!updated.lastError, 'no lastError after a successful launch');
 });
 
 test('a target not yet due is left completely untouched', async () => {
@@ -49,7 +49,7 @@ test('a target not yet due is left completely untouched', async () => {
   assert.equal(db.getUser(u.id)!.credits, creditsBefore);
   assert.equal(db.listScans(u.id).length, 0);
   const unchanged = db.listMonitoredTargets(u.id).find((t) => t.id === target.id)!;
-  assert.equal(unchanged.lastScannedAt, null);
+  assert.ok(!unchanged.lastScannedAt);
 });
 
 test('a due target with no credits is skipped, retried next tick, and records why', async () => {
@@ -97,7 +97,22 @@ test('a successful launch clears a lingering lastError from a previous failed ti
   await runDueMonitoredScans(() => {});
 
   const updated = db.listMonitoredTargets(u.id).find((t) => t.id === target.id)!;
-  assert.equal(updated.lastError, null, 'a subsequent successful launch must clear the old error');
+  assert.ok(!updated.lastError, 'a subsequent successful launch must clear the old error');
+});
+
+test('a paused target is never scanned even when its next run is due', async () => {
+  const u = db.getOrCreateUser(`mw-paused-${Date.now()}@test.io`);
+  const target = db.addMonitoredTarget(u.id, SAFE_TARGET, 7);
+  backdateToDue(target.id); // would be due
+  db.setMonitoredPaused(u.id, target.id, true);
+  const creditsBefore = db.getUser(u.id)!.credits;
+
+  let launched = false;
+  await runDueMonitoredScans(() => { launched = true; });
+
+  assert.equal(launched, false, 'a paused target must not launch a scan');
+  assert.equal(db.getUser(u.id)!.credits, creditsBefore, 'no credit spent on a paused target');
+  assert.equal(db.listScans(u.id).length, 0);
 });
 
 test('overlapping ticks do not double-process the same due target', async () => {

@@ -1,9 +1,35 @@
-import { Clock, Globe, Plus, RefreshCw, AlertTriangle } from 'lucide-react';
+import { Clock, Globe, Plus, RefreshCw, AlertTriangle, Play, Pause, Zap } from 'lucide-react';
 import { useMonitoring } from '../../hooks/useMonitoring.js';
+
+// Human-readable last-scan result for a monitor row, linking completed scans to
+// their report. In-flight/failed/never-run states are shown as plain text.
+function LastScanResult({ lastScan, onViewReport }: { lastScan: any; onViewReport: (scanId: string) => void }) {
+  if (!lastScan) return <span className="text-[#52525b]">No scans run yet</span>;
+
+  if (lastScan.status === 'complete') {
+    const sev = String(lastScan.severity || '').toLowerCase();
+    const sevColor =
+      sev === 'critical' || sev === 'high' ? 'text-[#f87171]'
+        : sev === 'medium' ? 'text-amber-400'
+        : 'text-[#22c55e]';
+    return (
+      <button
+        onClick={() => onViewReport(lastScan.id)}
+        className="text-[#a1a1aa] hover:text-white transition-colors cursor-pointer underline decoration-dotted underline-offset-2"
+      >
+        Last scan: score <span className={`font-bold ${sevColor}`}>{lastScan.score ?? 'N/A'}/100</span>
+        {sev ? <span className={`uppercase ${sevColor}`}> · {sev}</span> : null} → View report
+      </button>
+    );
+  }
+  if (lastScan.status === 'failed') return <span className="text-[#f87171]">Last scan failed</span>;
+  if (lastScan.status === 'canceled') return <span className="text-[#52525b]">Last scan canceled</span>;
+  return <span className="text-purple-400">Scanning now…</span>;
+}
 
 // Continuous-monitoring tab: the Slack-compatible alert webhook, the add-target
 // form (cadence + weekday + UTC time), and the list of active monitors.
-export default function MonitoringTab({ m }: { m: ReturnType<typeof useMonitoring> }) {
+export default function MonitoringTab({ m, onViewReport }: { m: ReturnType<typeof useMonitoring>; onViewReport: (scanId: string) => void }) {
   return (
     <div className="space-y-6 animate-fade-in text-xs font-mono">
       <div className="bg-[#18181b]/35 border border-[#27272a] rounded p-4 flex items-start space-x-3.5">
@@ -120,13 +146,21 @@ export default function MonitoringTab({ m }: { m: ReturnType<typeof useMonitorin
             <span className="text-xs text-[#52525b] font-mono">No active monitoring targets configured</span>
           </div>
         ) : (
-          m.monitoredTargets.map((target) => (
+          m.monitoredTargets.map((target) => {
+            const busy = m.busyTargetId === target.id;
+            const notice = m.rowNotice && m.rowNotice.id === target.id ? m.rowNotice : null;
+            return (
             <div key={target.id} className="p-4 bg-black border border-[#27272a] rounded flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="space-y-1.5">
                 <div className="flex items-center space-x-2">
                   <Globe className="w-4 h-4 text-[#52525b]" />
                   <span className="text-white font-bold uppercase text-xs">{target.url}</span>
-                  {target.lastError ? (
+                  {target.paused ? (
+                    <span className="bg-[#52525b]/15 text-[#a1a1aa] text-[9px] px-2 py-0.5 rounded border border-[#52525b]/40 flex items-center gap-1">
+                      <Pause className="w-2.5 h-2.5" />
+                      PAUSED
+                    </span>
+                  ) : target.lastError ? (
                     <span className="bg-amber-500/10 text-amber-400 text-[9px] px-2 py-0.5 rounded border border-amber-500/30 flex items-center gap-1">
                       <AlertTriangle className="w-2.5 h-2.5" />
                       NEEDS ATTENTION
@@ -135,23 +169,54 @@ export default function MonitoringTab({ m }: { m: ReturnType<typeof useMonitorin
                     <span className="bg-[#22c55e]/10 text-[#22c55e] text-[9px] px-2 py-0.5 rounded border border-[#22c55e]/30">ACTIVE</span>
                   )}
                 </div>
-                <div className="text-[#a1a1aa] text-[10px] flex items-center space-x-3">
+                <div className="text-[#a1a1aa] text-[10px] flex flex-wrap items-center gap-x-3 gap-y-1">
                   <span>Schedule: {target.scheduleString || `Every ${target.frequencyDays} ${target.frequencyDays === 1 ? 'day' : 'days'}`}</span>
                   <span>&bull;</span>
-                  <span>Next scan: {new Date(target.nextScanAt).toLocaleString()}</span>
+                  <span>{target.paused ? 'Paused — next scan on resume' : `Next scan: ${new Date(target.nextScanAt).toLocaleString()}`}</span>
+                  {target.lastScannedAt && (
+                    <>
+                      <span>&bull;</span>
+                      <span>Last run: {new Date(target.lastScannedAt).toLocaleString()}</span>
+                    </>
+                  )}
+                </div>
+                <div className="text-[10px]">
+                  <LastScanResult lastScan={(target as any).lastScan} onViewReport={onViewReport} />
                 </div>
                 {target.lastError && (
                   <div className="text-amber-400/90 text-[10px]">{target.lastError}</div>
                 )}
+                {notice && (
+                  <div className={`text-[10px] ${notice.tone === 'error' ? 'text-[#f87171]' : 'text-[#22c55e]'}`}>{notice.message}</div>
+                )}
               </div>
-              <button
-                onClick={() => m.handleDeleteMonitor(target.id)}
-                className="px-3 py-1.5 bg-[#18181b] border border-[#27272a] hover:bg-[#f87171] hover:text-white text-[#f87171] rounded text-[10px] uppercase font-bold tracking-wider transition-all cursor-pointer w-fit"
-              >
-                Remove
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => m.scanNow(target.id)}
+                  disabled={busy}
+                  className="px-3 py-1.5 bg-[#18181b] border border-[#27272a] hover:border-[#22c55e]/40 hover:text-[#22c55e] text-[#a1a1aa] rounded text-[10px] uppercase font-bold tracking-wider transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                  id={`scan-now-${target.id}`}
+                >
+                  {busy ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+                  Scan now
+                </button>
+                <button
+                  onClick={() => m.togglePause(target.id, !target.paused)}
+                  disabled={busy}
+                  className="px-3 py-1.5 bg-[#18181b] border border-[#27272a] hover:border-[#3f3f46] hover:text-white text-[#a1a1aa] rounded text-[10px] uppercase font-bold tracking-wider transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                >
+                  {target.paused ? <><Play className="w-3 h-3" />Resume</> : <><Pause className="w-3 h-3" />Pause</>}
+                </button>
+                <button
+                  onClick={() => m.handleDeleteMonitor(target.id)}
+                  className="px-3 py-1.5 bg-[#18181b] border border-[#27272a] hover:bg-[#f87171] hover:text-white text-[#f87171] rounded text-[10px] uppercase font-bold tracking-wider transition-all cursor-pointer"
+                >
+                  Remove
+                </button>
+              </div>
             </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>

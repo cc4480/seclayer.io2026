@@ -21,6 +21,7 @@ interface DashboardProps {
   transactions: any[];
   justGeneratedKey: { id: string; rawKey: string } | null;
   onDismissGeneratedKey: () => void;
+  refreshData: () => void;
   onInitiateScan: (url: string, authHeader?: string, bolaIdentities?: any, activeProbes?: boolean) => void;
   onGenerateKey: () => void;
   onRevokeKey: (keyId: string) => void;
@@ -32,7 +33,7 @@ interface DashboardProps {
 }
 
 export default function Dashboard({
-  user, scans, apiKeys, credits, transactions, justGeneratedKey, onDismissGeneratedKey,
+  user, scans, apiKeys, credits, transactions, justGeneratedKey, onDismissGeneratedKey, refreshData,
   onInitiateScan, onGenerateKey, onRevokeKey, onPurchaseCredits, onViewReport, isPerformingAction,
   checkoutNotice, onDismissCheckoutNotice,
 }: DashboardProps) {
@@ -58,7 +59,7 @@ export default function Dashboard({
   const [toastTone, setToastTone] = useState<'success' | 'neutral'>('success');
 
   const dv = useDomainVerification(scanUrl, user.id);
-  const m = useMonitoring(user, scans);
+  const m = useMonitoring(user, scans, refreshData);
 
   const notify = (msg: string, tone: 'success' | 'neutral' = 'success') => {
     setToastMsg(msg);
@@ -199,7 +200,7 @@ export default function Dashboard({
               onViewReport={onViewReport}
             />
           )}
-          {activeTab === 'monitoring' && <MonitoringTab m={m} />}
+          {activeTab === 'monitoring' && <MonitoringTab m={m} onViewReport={onViewReport} />}
           {activeTab === 'exclusions' && <ExclusionsTab suppressRules={m.suppressRules} fetchSuppressRules={m.fetchSuppressRules} />}
           {activeTab === 'billing' && <BillingTab transactions={transactions} />}
           {activeTab === 'api-docs' && <ApiDocsTab notify={notify} />}

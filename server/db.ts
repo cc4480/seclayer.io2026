@@ -5,7 +5,7 @@ import { User, Scan, CreditTransaction, ApiKey, Finding, SuppressionRule, Monito
 import { scoreFindings } from './scoring.js';
 import { MonitorSchedule, computeNextRun, describeSchedule } from './schedule.js';
 import { runMigrations } from './dbSchema.js';
-import { rowToUser, rowToScan, rowToApiKey, rowToDomainVerification } from './dbMappers.js';
+import { rowToUser, rowToScan, rowToApiKey, rowToDomainVerification, rowToMonitoredTarget } from './dbMappers.js';
 import { hashToken, maskKey } from './dbCrypto.js';
 
 const DB_FILE = process.env.DB_PATH || path.join(process.cwd(), 'data.sqlite');
@@ -168,6 +168,14 @@ class SqliteDb {
     return rowToScan(this.db.prepare(
       "SELECT * FROM scans WHERE userId = ? AND url = ? AND status = 'complete' AND id != ? ORDER BY createdAt DESC LIMIT 1"
     ).get(userId, url, excludeScanId));
+  }
+
+  // The most recent scan of this target for this user, in ANY status — the
+  // "last result" a monitor row surfaces (in-flight, complete, or failed).
+  getLatestScanForUrl(userId: string, url: string): Scan | undefined {
+    return rowToScan(this.db.prepare(
+      "SELECT * FROM scans WHERE userId = ? AND url = ? ORDER BY createdAt DESC LIMIT 1"
+    ).get(userId, url));
   }
 
   // --- Out-of-band collaborator (blind SSRF/RCE proof) ---
@@ -377,7 +385,13 @@ class SqliteDb {
 
   // --- Monitored Targets ---
   listMonitoredTargets(userId: string): MonitoredTarget[] {
-    return this.db.prepare('SELECT * FROM monitored_targets WHERE userId = ?').all(userId) as MonitoredTarget[];
+    return (this.db.prepare('SELECT * FROM monitored_targets WHERE userId = ?').all(userId) as any[])
+      .map(rowToMonitoredTarget);
+  }
+
+  getMonitoredTarget(userId: string, id: string): MonitoredTarget | undefined {
+    const row = this.db.prepare('SELECT * FROM monitored_targets WHERE id = ? AND userId = ?').get(id, userId);
+    return row ? rowToMonitoredTarget(row) : undefined;
   }
 
   // Accepts either a full schedule (daily/weekly/monthly + time-of-day) or a
@@ -390,7 +404,7 @@ class SqliteDb {
     const nextScanAt = computeNextRun(new Date(), s).toISOString();
     this.db.prepare('INSERT INTO monitored_targets (id, userId, url, frequencyDays, scheduleString, scanHour, scanMinute, scanWeekday, nextScanAt, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(id, userId, url, s.frequencyDays, describeSchedule(s), s.hour ?? null, s.minute ?? null, s.weekday ?? null, nextScanAt, now);
-    return this.db.prepare('SELECT * FROM monitored_targets WHERE id = ?').get(id) as MonitoredTarget;
+    return rowToMonitoredTarget(this.db.prepare('SELECT * FROM monitored_targets WHERE id = ?').get(id));
   }
 
   removeMonitoredTarget(userId: string, id: string): boolean {
@@ -398,11 +412,21 @@ class SqliteDb {
     return res.changes > 0;
   }
 
+  // Pause/resume a monitor without losing its configuration. A paused target is
+  // excluded from listDueMonitoredTargets, so the worker never scans it until it
+  // is resumed. Returns false when the target doesn't belong to this user.
+  setMonitoredPaused(userId: string, id: string, paused: boolean): boolean {
+    const res = this.db.prepare('UPDATE monitored_targets SET paused = ? WHERE id = ? AND userId = ?')
+      .run(paused ? 1 : 0, id, userId);
+    return res.changes > 0;
+  }
+
   // Targets whose next scheduled scan is due (used by the monitoring worker).
+  // Paused targets are never returned, so pausing a monitor cleanly stops it.
   listDueMonitoredTargets(nowIso: string): MonitoredTarget[] {
-    return this.db.prepare(
-      'SELECT * FROM monitored_targets WHERE nextScanAt IS NOT NULL AND nextScanAt <= ?'
-    ).all(nowIso) as MonitoredTarget[];
+    return (this.db.prepare(
+      'SELECT * FROM monitored_targets WHERE nextScanAt IS NOT NULL AND nextScanAt <= ? AND (paused IS NULL OR paused = 0)'
+    ).all(nowIso) as any[]).map(rowToMonitoredTarget);
   }
 
   // A scan attempt was successfully launched for this tick — clears any

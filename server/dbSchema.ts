@@ -142,6 +142,7 @@ export function runMigrations(db: Database.Database): void {
   addColumnIfMissing(db, "monitored_targets", "scanMinute", "INTEGER");
   addColumnIfMissing(db, "monitored_targets", "scanWeekday", "INTEGER");
   addColumnIfMissing(db, "monitored_targets", "lastError", "TEXT");
+  addColumnIfMissing(db, "monitored_targets", "paused", "INTEGER NOT NULL DEFAULT 0");
   migrateLegacyPlaintextApiKeys(db);
 
   // Self-attestation ('method' = 'attestation') used to grant the same active-probe

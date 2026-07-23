@@ -151,6 +151,9 @@ export interface MonitoredTarget {
   // scan is successfully launched. Surfaced in the dashboard so a monitor
   // that's silently never scanning anything doesn't just show "Active".
   lastError?: string;
+  // When true the monitor is paused: it keeps its configuration but the worker
+  // never scans it until it is resumed.
+  paused?: boolean;
 }
 
 export interface ApiKey {

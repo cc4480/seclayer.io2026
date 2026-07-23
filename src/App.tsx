@@ -54,6 +54,7 @@ export default function App() {
             transactions={transactions}
             justGeneratedKey={justGeneratedKey}
             onDismissGeneratedKey={() => setJustGeneratedKey(null)}
+            refreshData={loadUserContext}
             onInitiateScan={onInitiateScan}
             onGenerateKey={onGenerateKey}
             onRevokeKey={onRevokeKey}
