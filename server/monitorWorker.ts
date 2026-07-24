@@ -52,7 +52,8 @@ export async function runDueMonitoredScans(processScanJob: ProcessScanJob): Prom
         }
         const scan = db.createScan(target.userId, target.url);
         db.markMonitoredScanned(target.id, new Date().toISOString(), next);
-        const allowActiveProbes = db.isDomainVerified(target.userId, extractDomain(target.url));
+        const allowActiveProbes =
+          config.devSkipDomainVerification || db.isDomainVerified(target.userId, extractDomain(target.url));
         processScanJob(scan.id, allowActiveProbes);
       } catch (err: any) {
         // Invalid/unsafe target: defer instead of retrying every tick.

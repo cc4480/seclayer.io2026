@@ -7,6 +7,7 @@ import { safeFetch, assertTargetIsScannable } from "./ssrf.js";
 import { parseAuthHeader } from "./evidence.js";
 import { fuzzDiscoveredTargets } from "./paramFuzzer.js";
 import { runRedTeamProbes } from "./redTeamProbes.js";
+import { runAggressiveProbes } from "./aggressiveProbes.js";
 import { runApiSecProbes } from "./apiProbes.js";
 import { runPassiveScan } from "./passiveScan.js";
 import type { DiagnosticResult, ScanOptions } from "./scanTypes.js";
@@ -24,6 +25,9 @@ export async function runDiagnostics(
   opts: ScanOptions = {},
 ): Promise<DiagnosticResult> {
   const allowActiveProbes = !!opts.allowActiveProbes;
+  // The aggressive tier is more invasive, so it requires BOTH the active-probe
+  // gate (verified ownership) AND an explicit per-scan opt-in.
+  const allowAggressiveProbes = allowActiveProbes && !!opts.allowAggressiveProbes;
   let url = targetUrl.trim();
   if (!/^https?:\/\//i.test(url)) {
     url = "https://" + url;
@@ -99,6 +103,15 @@ export async function runDiagnostics(
     ? await runApiSecProbes(url, host, headers, { bolaIdentities: opts.bolaIdentities })
     : [];
 
+  // AGGRESSIVE tier (opt-in, more invasive): SSTI, LFI/path-traversal, open
+  // redirect, CRLF, CORS, out-of-band XXE, NoSQL injection. Non-destructive and
+  // signature/OOB-proven. Appended to the red-team findings so they share the
+  // RED_TEAM category, PROVEN-receipt scoring, and the report/fix-prompt pipeline.
+  if (allowAggressiveProbes) {
+    const aggressive = await runAggressiveProbes(url, headers, { oob: opts.oob, scanId: opts.scanId });
+    result.redTeamFindings = [...(result.redTeamFindings || []), ...aggressive];
+  }
+
   // --- CRAWL + DISCOVERED-PARAMETER FUZZING ---
   // Map the real attack surface (links, forms, JS-referenced endpoints) and aim
   // the injection probes at the parameters the application actually uses, rather
@@ -134,7 +147,7 @@ export async function runDiagnostics(
       let fuzz = { findings: [] as any[], paramsTested: 0 };
       if (allowActiveProbes) {
         const getTargets = allTargets.filter((t) => t.method === "GET" && t.params.length > 0);
-        fuzz = await fuzzDiscoveredTargets(getTargets, { ...headers, "Cache-Control": "no-cache" });
+        fuzz = await fuzzDiscoveredTargets(getTargets, { ...headers, "Cache-Control": "no-cache" }, { aggressive: allowAggressiveProbes });
         result.redTeamFindings = [...(result.redTeamFindings || []), ...fuzz.findings];
       }
 

@@ -91,10 +91,17 @@ export function registerScanRoutes(app: express.Express, ctx: RouteContext) {
     // Either false → passive recon only. This lets an owner run a passive-only
     // sweep of a domain they've already verified.
     const requestedActive = req.body.activeProbes !== false;
-    const allowActiveProbes = requestedActive && db.isDomainVerified(userId, extractDomain(url));
+    // The dev-only DEV_SKIP_DOMAIN_VERIFICATION flag unlocks the active probes
+    // without DNS/file proof (local testing only; hard-disabled in production).
+    const allowActiveProbes =
+      requestedActive && (config.devSkipDomainVerification || db.isDomainVerified(userId, extractDomain(url)));
+
+    // Aggressive tier is a separate opt-in (more invasive) that only takes effect
+    // when active probing is already unlocked for this target.
+    const allowAggressiveProbes = allowActiveProbes && req.body.aggressiveProbes === true;
 
     // Trigger asynchronous background worker flow mimicking the pg-boss worker pipeline
-    processScanJob(scan.id, allowActiveProbes, bolaIdentities);
+    processScanJob(scan.id, allowActiveProbes, bolaIdentities, allowAggressiveProbes);
 
     res.json({ status: "ok", scan });
   });

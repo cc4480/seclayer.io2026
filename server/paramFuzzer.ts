@@ -8,17 +8,22 @@
 // receipt (substring-verifiable signal).
 import crypto from "crypto";
 import { InjectableTarget } from "./crawler.js";
-import { safeFetch } from "./ssrf.js";
+import { guardedFetch, safeFetch } from "./ssrf.js";
 import { buildProbeEvidence } from "./evidence.js";
+import { buildHeaderEvidence } from "./aggressive/aggHttp.js";
 import { xssReflectionExecutes } from "./fpFilters.js";
 
 export async function fuzzDiscoveredTargets(
   targets: InjectableTarget[],
   fuzzHeaders: Record<string, string>,
+  opts: { aggressive?: boolean } = {},
 ): Promise<{ findings: any[]; paramsTested: number }> {
-  const MAX_REQUESTS = 64;
+  // The aggressive tier adds four more injection classes per parameter, so it
+  // gets a larger request budget and a longer wall-clock cap.
+  const aggressive = !!opts.aggressive;
+  const MAX_REQUESTS = aggressive ? 160 : 64;
   const MAX_PARAMS_PER_TARGET = 6;
-  const DEADLINE = Date.now() + 20000; // wall-clock self-cap for slow targets
+  const DEADLINE = Date.now() + (aggressive ? 30000 : 20000); // wall-clock self-cap for slow targets
   const findings: any[] = [];
   const reported = new Set<string>(); // dedupe by testName+endpoint+param
   let budget = MAX_REQUESTS;
@@ -39,6 +44,18 @@ export async function fuzzDiscoveredTargets(
     try {
       const res = await safeFetch(target, { headers: fuzzHeaders, signal: ctl.signal });
       return { res, text: await res.text() };
+    } finally {
+      clearTimeout(id);
+    }
+  };
+  // Raw request that does NOT follow redirects, so a 3xx and its headers are
+  // returned intact — needed for the open-redirect and CRLF header proofs (see
+  // aggressive/aggHttp.aggFetchRaw for the same reasoning).
+  const probeRaw = async (target: string): Promise<Response> => {
+    const ctl = new AbortController();
+    const id = setTimeout(() => ctl.abort(), 4000);
+    try {
+      return await guardedFetch(target, { headers: fuzzHeaders, redirect: "manual", signal: ctl.signal });
     } finally {
       clearTimeout(id);
     }
@@ -169,6 +186,153 @@ export async function fuzzDiscoveredTargets(
     }
   };
 
+  // --- AGGRESSIVE-tier per-parameter probes (opt-in) ---
+  const PASSWD_SIG = /root:[^:\n]*:0:0:/;
+  const REDIRECT_MARKER = "seclayer-openredirect-probe.example";
+
+  // SSTI: arithmetic oracle. The product only appears if the engine evaluated
+  // our expression; the literal payload never contains it.
+  const trySsti = async (targetUrl: string, param: string, endpointPath: string): Promise<void> => {
+    const key = `ssti:${endpointPath}:${param}`;
+    if (reported.has(key)) return;
+    const a = 1000 + crypto.randomInt(8999), b = 1000 + crypto.randomInt(8999);
+    const product = String(a * b);
+    for (const expr of [`{{${a}*${b}}}`, `\${${a}*${b}}`, `#{${a}*${b}}`, `<%= ${a}*${b} %>`]) {
+      if (!canSpend()) return;
+      budget--;
+      try {
+        const attackUrl = buildUrl(targetUrl, param, expr);
+        const { res, text } = await probe(attackUrl);
+        const idx = text.indexOf(product);
+        if (idx !== -1 && !text.includes(expr)) {
+          reported.add(key);
+          findings.push({
+            testName: `Server-Side Template Injection (discovered parameter "${param}" on ${endpointPath})`,
+            payload: `${param}=${expr}`,
+            severity: "critical",
+            description: `The discovered parameter "${param}" on ${endpointPath} is evaluated by a server-side template engine: injecting "${expr}" returned its computed result. SSTI frequently escalates to remote code execution.`,
+            fix: "Never render user input as a template. Pass untrusted values only as data to a pre-compiled/sandboxed template for this parameter.",
+            evidence: buildProbeEvidence({
+              method: "oracle", attackUrl, requestHeaders: fuzzHeaders, res, body: text,
+              matchIndex: idx, quote: product,
+              why: `We injected the template expression "${expr}"; the response contained ${product}, the exact product of ${a}×${b}, which the literal payload never contains — so the "${param}" value was evaluated as a template.`,
+              demonstration: `We placed "${expr}" in the "${param}" parameter on ${endpointPath} and the server rendered ${product} — proof the backend evaluated our expression (SSTI).`,
+            }),
+          });
+          return;
+        }
+      } catch { /* probe failed */ }
+    }
+  };
+
+  // Path traversal / LFI: retrieve /etc/passwd via a discovered parameter.
+  const tryLfi = async (targetUrl: string, param: string, endpointPath: string): Promise<void> => {
+    const key = `lfi:${endpointPath}:${param}`;
+    if (reported.has(key)) return;
+    for (const payload of ["../../../../../../../../etc/passwd", "....//....//....//....//....//etc/passwd", "/etc/passwd"]) {
+      if (!canSpend()) return;
+      budget--;
+      try {
+        const attackUrl = buildUrl(targetUrl, param, payload);
+        const { res, text } = await probe(attackUrl);
+        const m = PASSWD_SIG.exec(text);
+        if (m) {
+          reported.add(key);
+          findings.push({
+            testName: `Path Traversal / Local File Inclusion (discovered parameter "${param}" on ${endpointPath})`,
+            payload: `${param}=${payload}`,
+            severity: "critical",
+            description: `The discovered parameter "${param}" on ${endpointPath} reads an attacker-supplied filesystem path: a traversal payload returned the contents of /etc/passwd. An attacker can read arbitrary files the app can access.`,
+            fix: "Resolve the path and confirm it stays within an allowed base directory (canonicalize then prefix-check), or map inputs to an allow-list; reject path separators/traversal for this parameter.",
+            evidence: buildProbeEvidence({
+              method: "error-signature", attackUrl, requestHeaders: fuzzHeaders, res, body: text,
+              matchIndex: m.index, quote: m[0],
+              why: `This "root" line from /etc/passwd is outside the web root and only appears because our traversal payload in "${param}" reached the filesystem.`,
+              demonstration: `We requested "${payload}" via the "${param}" parameter on ${endpointPath} and the server returned /etc/passwd contents ("${m[0]}") — arbitrary file read.`,
+            }),
+          });
+          return;
+        }
+      } catch { /* probe failed */ }
+    }
+  };
+
+  // Open redirect: a discovered parameter used as an unvalidated redirect target.
+  const tryOpenRedirect = async (targetUrl: string, param: string, endpointPath: string): Promise<void> => {
+    const key = `redirect:${endpointPath}:${param}`;
+    if (reported.has(key)) return;
+    for (const payload of [`https://${REDIRECT_MARKER}/`, `//${REDIRECT_MARKER}/`]) {
+      if (!canSpend()) return;
+      budget--;
+      try {
+        const attackUrl = buildUrl(targetUrl, param, payload);
+        const res = await probeRaw(attackUrl);
+        const location = res.headers.get("location") || "";
+        let offsite = false;
+        if (res.status >= 300 && res.status < 400 && location) {
+          try { offsite = new URL(location, targetUrl).host === REDIRECT_MARKER; } catch { offsite = location.includes(REDIRECT_MARKER); }
+        }
+        if (offsite) {
+          reported.add(key);
+          findings.push({
+            testName: `Open Redirect (discovered parameter "${param}" on ${endpointPath})`,
+            payload: `${param}=${payload}`,
+            severity: "medium",
+            description: `The discovered parameter "${param}" on ${endpointPath} is an unvalidated redirect target: the app issued an HTTP redirect to an attacker-controlled external host. Used for phishing and OAuth token theft.`,
+            fix: "Redirect only to an allow-list of paths/hosts, or force a relative path; reject absolute/protocol-relative targets that aren't your origin.",
+            evidence: buildHeaderEvidence({
+              method: "reflection", reqMethod: "GET", attackUrl, requestHeaders: fuzzHeaders, res,
+              proofHeaders: [`Location: ${location}`], quote: REDIRECT_MARKER,
+              why: `The server answered with an HTTP ${res.status} redirect whose Location points at "${REDIRECT_MARKER}", supplied via "${param}".`,
+              demonstration: `We set "${param}" to "${payload}" on ${endpointPath} and the server redirected to ${location} — an external host we control.`,
+            }),
+          });
+          return;
+        }
+      } catch { /* probe failed */ }
+    }
+  };
+
+  // CRLF / response-header injection via a discovered parameter. The %0d%0a must
+  // stay percent-encoded in the URL, so this builds the query manually (buildUrl
+  // would re-encode the '%').
+  const tryCrlf = async (targetUrl: string, param: string, endpointPath: string): Promise<void> => {
+    const key = `crlf:${endpointPath}:${param}`;
+    if (reported.has(key)) return;
+    const marker = `x-seclayer-crlf-${crypto.randomBytes(4).toString("hex")}`;
+    let base: string;
+    try {
+      const u = new URL(targetUrl);
+      u.searchParams.delete(param);
+      base = u.toString();
+    } catch { return; }
+    for (const seq of [`probe%0d%0a${marker}%3a%20injected`, `probe%0a${marker}%3a%20injected`]) {
+      if (!canSpend()) return;
+      budget--;
+      try {
+        const attackUrl = `${base}${base.includes("?") ? "&" : "?"}${param}=${seq}`;
+        const res = await probeRaw(attackUrl);
+        if (res.headers.has(marker)) {
+          reported.add(key);
+          findings.push({
+            testName: `CRLF / HTTP Response Header Injection (discovered parameter "${param}" on ${endpointPath})`,
+            payload: `${param}=probe\\r\\n${marker}: injected`,
+            severity: "high",
+            description: `The discovered parameter "${param}" on ${endpointPath} is written into a response header unsanitized: an injected CRLF added an attacker-defined header. Enables response splitting, cookie injection, and cache poisoning.`,
+            fix: "Strip CR/LF from any input that reaches a response header for this endpoint; use framework APIs that encode header values.",
+            evidence: buildHeaderEvidence({
+              method: "reflection", reqMethod: "GET", attackUrl, requestHeaders: fuzzHeaders, res,
+              proofHeaders: [`${marker}: ${res.headers.get(marker)}`], quote: marker,
+              why: `We injected an encoded newline plus "${marker}" into "${param}" and the server emitted "${marker}" as a real response header.`,
+              demonstration: `A CRLF sequence in the "${param}" parameter on ${endpointPath} made the server add our own header "${marker}" to its response.`,
+            }),
+          });
+          return;
+        }
+      } catch { /* probe failed */ }
+    }
+  };
+
   for (const t of targets) {
     if (!canSpend()) break;
     let endpointPath = t.url;
@@ -186,6 +350,16 @@ export async function fuzzDiscoveredTargets(
       // Run the higher-leaning class first so a tight budget hits likely wins.
       if (s.sqli >= s.xss) { await trySqli(t.url, param, endpointPath); await tryXss(t.url, param, endpointPath); }
       else { await tryXss(t.url, param, endpointPath); await trySqli(t.url, param, endpointPath); }
+
+      // Aggressive tier: the four param-injection classes, on the same discovered
+      // parameter. Endpoint/header classes (CORS, XXE, NoSQL) run at the root +
+      // candidate-path level in server/aggressiveProbes.ts, not per-GET-param.
+      if (aggressive) {
+        await trySsti(t.url, param, endpointPath);
+        await tryLfi(t.url, param, endpointPath);
+        await tryOpenRedirect(t.url, param, endpointPath);
+        await tryCrlf(t.url, param, endpointPath);
+      }
     }
   }
 

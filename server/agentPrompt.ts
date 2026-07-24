@@ -1,35 +1,114 @@
 import { Finding, Severity } from "../src/types.js";
 
-// Builds the "hand this to your AI coding agent" prompt for a finding. Shared
-// by the static compiler (server/scanner.ts, used whenever DeepSeek is not
-// configured or a given finding doesn't come back with its own prompt) and
-// the DeepSeek report generator (server/deepseek.ts, which asks the model to
-// write a sharper one but falls back to this if it omits it). Deliberately
-// generic/agent-actionable — the scanner is black-box and never sees the
-// user's actual source, so the prompt describes what to search for and how
-// to verify the fix rather than naming a specific file.
-export function buildAgentPrompt(
-  finding: Pick<Finding, "title" | "description" | "fix" | "category" | "owasp"> & { endpoint?: string },
-  targetUrl: string,
-): string {
-  const lines = [
-    `Fix this security finding from a Seclayer scan of ${targetUrl}: "${finding.title}"`,
+// Builds the "hand this to your AI coding agent" prompt for a finding — a single,
+// structured, agent-agnostic MASTER PROMPT that behaves the same in Claude Code,
+// Codex, Replit Agent, Cursor, or Windsurf. Shared by the static compiler
+// (server/findings.ts, used whenever DeepSeek is not configured or a given
+// finding doesn't come back with its own prompt) and the DeepSeek report
+// generator (server/deepseek.ts, which asks the model to write a sharper,
+// finding-specific body but falls back to this).
+//
+// The scanner is black-box and never sees the user's source, so the prompt drives
+// the agent from OBSERVED BEHAVIOR — what to search for, how to confirm the flaw
+// is real, and how to verify the fix — rather than naming a file it cannot know.
+// When a finding carries a replayable exploit receipt (evidence), that proof is
+// folded in so the agent can reproduce the issue before touching code.
+type AgentPromptInput = Pick<Finding, "title" | "description" | "fix" | "category" | "owasp"> &
+  Partial<Pick<Finding, "severity" | "confidence" | "impact" | "endpoint" | "evidence">>;
+
+export function buildAgentPrompt(finding: AgentPromptInput, targetUrl: string): string {
+  const lines: string[] = [];
+
+  // --- Role + task framing (kept provider-neutral so it ports across agents) ---
+  lines.push(
+    `# Security Fix Task — ${finding.title}`,
     "",
-    `Category: ${finding.category}${finding.owasp ? ` (OWASP ${finding.owasp})` : ""}`,
-  ];
-  if (finding.endpoint) lines.push(`Affected endpoint: ${finding.endpoint}`);
+    "You are a senior application security engineer with full write access to this",
+    "repository. Resolve ONE confirmed security issue end-to-end: find it, fix the",
+    "root cause, and prove it's gone — without regressions or weakening any other",
+    "control. This prompt is self-contained and portable: it works the same in",
+    "Claude Code, Codex, Replit Agent, Cursor, or Windsurf.",
+    "",
+  );
+
+  // --- The issue: title, classification, where, and why it matters ---
+  lines.push("## The issue", "", `- Finding: ${finding.title}`);
+  const sevConf = [
+    finding.severity ? `Severity: ${finding.severity.toUpperCase()}` : "",
+    finding.confidence ? `confidence: ${finding.confidence}` : "",
+  ].filter(Boolean).join(" · ");
+  if (sevConf) lines.push(`- ${sevConf}`);
+  const classification = [finding.category, finding.owasp ? `OWASP ${finding.owasp}` : ""]
+    .filter(Boolean)
+    .join(" · ");
+  if (classification) lines.push(`- Classification: ${classification}`);
+  lines.push(`- Scanned target (black-box): ${targetUrl}`);
+  if (finding.endpoint) lines.push(`- Affected endpoint: ${finding.endpoint}`);
+  lines.push("", finding.description);
+  if (finding.impact) lines.push("", `Impact if left unfixed: ${finding.impact}`);
+
+  // --- Proof (only when a real, replayable exploit receipt exists) ---
+  const ev = finding.evidence;
+  if (ev) {
+    lines.push("", "## Proof this is real (not theoretical)", "");
+    if (ev.demonstration) lines.push(ev.demonstration, "");
+    if (ev.reproduction) {
+      lines.push("Reproduce it yourself:", "", "```", ev.reproduction, "```");
+    }
+    if (ev.signal?.quote) {
+      lines.push(
+        "",
+        `Observed signal that confirms it: ${JSON.stringify(ev.signal.quote)}`,
+      );
+      if (ev.signal.why) lines.push(`Why that proves it: ${ev.signal.why}`);
+    }
+  }
+
+  // --- The recommended fix ---
+  lines.push("", "## Recommended fix", "", finding.fix);
+
+  // --- The workflow: a strict, verifiable order every agent can follow ---
   lines.push(
     "",
-    "What was found:",
-    finding.description,
-    "",
-    "Do the following:",
-    "1. Search the codebase for the code path handling this behavior/endpoint.",
-    "2. Confirm the finding actually applies here (rule out a false positive).",
-    `3. Apply this fix: ${finding.fix}`,
-    "4. Add or update a regression test that would catch this issue if it reappears.",
-    "5. Re-run the affected request (or re-run the Seclayer scan) to confirm it's resolved.",
+    "## Work it in this order",
+    "1. Locate — this scan is black-box and never read your source, so start from",
+    "   the behavior/endpoint above and search the codebase for the route, handler,",
+    "   or config that produces it. State the file(s) you believe are responsible.",
+    "2. Confirm — reproduce the issue locally before changing anything. If it does",
+    "   NOT actually apply here, stop and report it as a likely false positive with",
+    "   your reasoning. Never invent a change just to satisfy this prompt.",
+    "3. Fix the root cause — apply the recommended fix using this project's existing",
+    "   stack, libraries, and conventions. Make the smallest change that fully closes",
+    "   the issue, and if the same flaw pattern repeats elsewhere, fix every instance.",
+    "4. Add a regression test — one that FAILS on the vulnerable code and PASSES",
+    "   after the fix, in the project's existing test framework and layout.",
+    "5. Verify — run the full test suite and re-exercise the affected request.",
+    "   Confirm the issue is resolved and nothing else broke.",
   );
+
+  // --- Guardrails: what NOT to do ---
+  lines.push(
+    "",
+    "## Guardrails",
+    "- Do not disable, bypass, or loosen any other security control (auth, CORS,",
+    "  CSP, input validation) to make this pass.",
+    "- Keep the diff minimal and reviewable; do not refactor unrelated code.",
+    "- Never hardcode secrets or credentials. If a dependency upgrade is required,",
+    "  pin the patched version and call out any breaking changes.",
+    "- If a safe fix isn't possible without broader changes, stop and explain",
+    "  rather than guessing.",
+  );
+
+  // --- Definition of done: an explicit, checkable acceptance list ---
+  lines.push(
+    "",
+    "## Done when",
+    "- [ ] Root cause fixed (not just this one symptom/endpoint if the pattern repeats).",
+    "- [ ] Regression test added and passing.",
+    "- [ ] Full test suite still green.",
+    "- [ ] You've summarized what changed, which files, and how you verified it.",
+  );
+
   return lines.join("\n");
 }
 

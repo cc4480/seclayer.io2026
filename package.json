@@ -43,5 +43,11 @@
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.3"
+  },
+  "allowScripts": {
+    "better-sqlite3@12.10.0": true,
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.1": true,
+    "core-js@3.49.0": true
   }
 }

@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { ArrowLeft, Download, Share2, Clock, Check, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Download, Share2, Clock, Check, AlertTriangle, Sparkles } from 'lucide-react';
 import { Scan } from '../types.js';
+import { buildScanFixPrompt, actionableFindings } from '../lib/scanFixPrompt.js';
 // Single source of truth for every risk figure/label shown here — the same
 // module the server scanner and read-model score from. No risk value or label
 // in this component is computed locally.
@@ -28,6 +29,7 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
   const [showRaw, setShowRaw] = useState(false);
   const [showReasoning, setShowReasoning] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [copiedFixPrompt, setCopiedFixPrompt] = useState(false);
   const [copiedCodeId, setCopiedCodeId] = useState<string | null>(null);
   const [expandedApiRows, setExpandedApiRows] = useState<Record<string, boolean>>({});
 
@@ -56,6 +58,15 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
   };
 
   const handleDownloadPdf = () => downloadReportPdf(scan, posture, findings);
+
+  // One consolidated, agent-ready remediation prompt covering every actionable
+  // finding — the single "Complete Fix Prompt" hand-off (replaces per-finding ones).
+  const fixableCount = actionableFindings(findings).length;
+  const handleCopyFixPrompt = () => {
+    navigator.clipboard.writeText(buildScanFixPrompt(scan));
+    setCopiedFixPrompt(true);
+    setTimeout(() => setCopiedFixPrompt(false), 2000);
+  };
 
   // A scan that never completed has no real findings/score to report — showing
   // the normal report for it would misrepresent an empty findings list (from a
@@ -108,6 +119,17 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
           </button>
 
           <div className="flex items-center space-x-3">
+            {fixableCount > 0 && (
+              <button
+                onClick={handleCopyFixPrompt}
+                title={`One complete prompt to fix all ${fixableCount} issue(s) — paste into Claude Code, Codex, Replit, Cursor, or Windsurf`}
+                className="px-3.5 py-1.5 bg-purple-500/10 border border-purple-500/40 hover:border-purple-400 text-purple-200 hover:text-white text-xs font-mono transition-all flex items-center space-x-1.5 cursor-pointer"
+                id="report-fixprompt-btn"
+              >
+                {copiedFixPrompt ? <Check className="w-3.5 h-3.5 text-purple-300" /> : <Sparkles className="w-3.5 h-3.5 text-purple-300" />}
+                <span>{copiedFixPrompt ? 'Copied Fix Prompt' : `Copy Fix Prompt (${fixableCount})`}</span>
+              </button>
+            )}
             <button
               onClick={handleShareClick}
               className="px-3.5 py-1.5 bg-[#18181b] border border-[#27272a] hover:border-[#3f3f46] text-[#a1a1aa] hover:text-white text-xs font-mono transition-all flex items-center space-x-1.5 cursor-pointer"

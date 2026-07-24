@@ -8,7 +8,7 @@ import { useSeclayer } from './hooks/useSeclayer.js';
 
 export default function App() {
   const {
-    user, scans, apiKeys, credits, transactions, freeMode, justGeneratedKey, setJustGeneratedKey,
+    user, scans, apiKeys, credits, transactions, freeMode, devSkipDomainVerification, justGeneratedKey, setJustGeneratedKey,
     deepseekKeySet, deepseekKeyPreview, saveDeepseekKey,
     currentView, setCurrentView, selectedScanId, setSelectedScanId, showLogin, setShowLogin,
     isPerformingAction, activeScan, checkoutNotice, setCheckoutNotice,
@@ -58,6 +58,7 @@ export default function App() {
             onDismissGeneratedKey={() => setJustGeneratedKey(null)}
             refreshData={loadUserContext}
             freeMode={freeMode}
+            devSkipDomainVerification={devSkipDomainVerification}
             deepseekKeySet={deepseekKeySet}
             deepseekKeyPreview={deepseekKeyPreview}
             saveDeepseekKey={saveDeepseekKey}

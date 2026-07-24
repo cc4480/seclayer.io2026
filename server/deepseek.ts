@@ -165,7 +165,19 @@ export async function generateAiReport(
         impact: typeof f.impact === 'string' && f.impact.trim() ? f.impact.trim() : buildImpactFallback(severity),
         agentPrompt: typeof f.agentPrompt === 'string' && f.agentPrompt.trim()
           ? f.agentPrompt.trim()
-          : buildAgentPrompt({ title, description: f.description || '', fix, category, owasp: mapOwasp(category, title) }, url),
+          : buildAgentPrompt(
+              {
+                title,
+                description: f.description || '',
+                fix,
+                category,
+                owasp: mapOwasp(category, title),
+                severity,
+                confidence,
+                impact: typeof f.impact === 'string' && f.impact.trim() ? f.impact.trim() : buildImpactFallback(severity),
+              },
+              url,
+            ),
       };
     });
 

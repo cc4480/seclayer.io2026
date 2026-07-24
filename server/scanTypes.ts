@@ -85,6 +85,14 @@ export interface ScanOptions {
   // arbitrary third-party sites. See server/domainVerify.ts.
   allowActiveProbes?: boolean;
 
+  // Unlocks the AGGRESSIVE probe tier (SSTI, path traversal/LFI, open redirect,
+  // CRLF injection, CORS misconfig, out-of-band XXE, NoSQL operator injection) —
+  // more invasive than the standard red-team probes, so it is a separate opt-in
+  // that ALSO requires allowActiveProbes (verified ownership). Still
+  // non-destructive: every aggressive probe proves via oracle/signature/OOB, never
+  // by writing, deleting, or degrading the target. See server/aggressiveProbes.ts.
+  allowAggressiveProbes?: boolean;
+
   // Two owned test identities that unlock a PROVEN cross-tenant BOLA/IDOR check
   // (docs/confirmed-evidence-spec.md §3.1a). Layered on top of allowActiveProbes —
   // ownership must still be verified. When absent, the two-identity probe is

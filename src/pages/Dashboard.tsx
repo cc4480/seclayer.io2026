@@ -1,4 +1,4 @@
-import { useState, useEffect, type FormEvent } from 'react';
+import { useState, useEffect, useRef, type FormEvent } from 'react';
 import { CheckCircle, Info } from 'lucide-react';
 import { Scan, ApiKey, User } from '../types.js';
 import DashboardHeader from '../components/dashboard/DashboardHeader.js';
@@ -14,6 +14,41 @@ import ExclusionsTab from '../components/dashboard/ExclusionsTab.js';
 import BillingTab from '../components/dashboard/BillingTab.js';
 import ApiDocsTab from '../components/dashboard/ApiDocsTab.js';
 
+// Persisted scan-launcher config so the advanced fields (auth header + the two
+// BOLA identities) come pre-filled and never need re-entering — set them once and
+// they stick across scans and reloads. Defaults match the bundled vulnerable test
+// app so a BOLA run works out of the box; edit them for a real target and the
+// edits persist.
+const LS = {
+  read<T>(key: string, fallback: T): T {
+    try {
+      const v = typeof localStorage !== 'undefined' ? localStorage.getItem(key) : null;
+      return v != null ? (JSON.parse(v) as T) : fallback;
+    } catch { return fallback; }
+  },
+  write(key: string, value: unknown) {
+    try { if (typeof localStorage !== 'undefined') localStorage.setItem(key, JSON.stringify(value)); } catch { /* ignore */ }
+  },
+};
+const DEFAULT_BOLA_A = { authHeader: 'Bearer tok-alice', ownResource: '/api/orders/1001', ownMarker: 'alice@vulnshop.test' };
+const DEFAULT_BOLA_B = { authHeader: 'Bearer tok-bob', ownResource: '/api/orders/1002', ownMarker: 'bob@vulnshop.test' };
+
+// Per-target memory: each scanned host remembers its own auth header + BOLA
+// identities, keyed by hostname, so switching between your apps auto-fills that
+// app's values. Layered on top of the global "last used" defaults above.
+type TargetConfig = { authHeader?: string; bolaA?: typeof DEFAULT_BOLA_A; bolaB?: typeof DEFAULT_BOLA_B };
+function readTargetConfig(host: string): TargetConfig | null {
+  if (!host) return null;
+  const all = LS.read<Record<string, TargetConfig>>('sl_targetConfigs', {});
+  return all[host] || null;
+}
+function writeTargetConfig(host: string, cfg: TargetConfig) {
+  if (!host) return;
+  const all = LS.read<Record<string, TargetConfig>>('sl_targetConfigs', {});
+  all[host] = cfg;
+  LS.write('sl_targetConfigs', all);
+}
+
 interface DashboardProps {
   user: User;
   scans: Scan[];
@@ -24,10 +59,11 @@ interface DashboardProps {
   onDismissGeneratedKey: () => void;
   refreshData: () => void;
   freeMode: boolean;
+  devSkipDomainVerification: boolean;
   deepseekKeySet: boolean;
   deepseekKeyPreview: string | null;
   saveDeepseekKey: (key: string) => Promise<{ ok: boolean; message?: string }>;
-  onInitiateScan: (url: string, authHeader?: string, bolaIdentities?: any, activeProbes?: boolean) => void;
+  onInitiateScan: (url: string, authHeader?: string, bolaIdentities?: any, activeProbes?: boolean, aggressiveProbes?: boolean) => void;
   onGenerateKey: () => void;
   onRevokeKey: (keyId: string) => void;
   onPurchaseCredits: (packName: 'single' | 'pack5' | 'pack20') => void;
@@ -39,18 +75,31 @@ interface DashboardProps {
 
 export default function Dashboard({
   user, scans, apiKeys, credits, transactions, justGeneratedKey, onDismissGeneratedKey, refreshData, freeMode,
-  deepseekKeySet, deepseekKeyPreview, saveDeepseekKey,
+  devSkipDomainVerification, deepseekKeySet, deepseekKeyPreview, saveDeepseekKey,
   onInitiateScan, onGenerateKey, onRevokeKey, onPurchaseCredits, onViewReport, isPerformingAction,
   checkoutNotice, onDismissCheckoutNotice,
 }: DashboardProps) {
   const [scanUrl, setScanUrl] = useState('');
-  const [authHeader, setAuthHeader] = useState('');
+  // Advanced config is pre-filled from localStorage (or sensible defaults) so
+  // nothing has to be entered by hand, and any edits are remembered.
+  const [authHeader, setAuthHeader] = useState(() => LS.read('sl_authHeader', ''));
   const [showAdvanced, setShowAdvanced] = useState(false);
   // Two-identity BOLA/IDOR cross-tenant test (docs/confirmed-evidence-spec.md §3.1a).
-  const [bolaEnabled, setBolaEnabled] = useState(false);
-  const emptyIdentity = { authHeader: '', ownResource: '', ownMarker: '' };
-  const [bolaA, setBolaA] = useState({ ...emptyIdentity });
-  const [bolaB, setBolaB] = useState({ ...emptyIdentity });
+  const [bolaEnabled, setBolaEnabled] = useState(() => LS.read('sl_bolaEnabled', true));
+  // Aggressive tier: more invasive (but non-destructive) probes — SSTI, LFI,
+  // XXE, CORS, CRLF, open redirect, NoSQL. ON by default so the Active Red-Team
+  // Scan is a single-click full sweep; uncheck it in Advanced Options for a
+  // red-team-only run. Server-side it still only runs on a verified/owned target.
+  const [aggressiveEnabled, setAggressiveEnabled] = useState(() => LS.read('sl_aggressiveEnabled', true));
+  const [bolaA, setBolaA] = useState(() => LS.read('sl_bolaA', DEFAULT_BOLA_A));
+  const [bolaB, setBolaB] = useState(() => LS.read('sl_bolaB', DEFAULT_BOLA_B));
+
+  // Persist advanced config so the fields stay filled across scans and reloads.
+  useEffect(() => { LS.write('sl_authHeader', authHeader); }, [authHeader]);
+  useEffect(() => { LS.write('sl_bolaEnabled', bolaEnabled); }, [bolaEnabled]);
+  useEffect(() => { LS.write('sl_aggressiveEnabled', aggressiveEnabled); }, [aggressiveEnabled]);
+  useEffect(() => { LS.write('sl_bolaA', bolaA); }, [bolaA]);
+  useEffect(() => { LS.write('sl_bolaB', bolaB); }, [bolaB]);
   const [buyPack, setBuyPack] = useState<'single' | 'pack5' | 'pack20'>('pack5');
   const [isBuying, setIsBuying] = useState(false);
   const [errorText, setErrorText] = useState('');
@@ -66,6 +115,32 @@ export default function Dashboard({
 
   const dv = useDomainVerification(scanUrl, user.id);
   const m = useMonitoring(user, scans, refreshData);
+
+  // --- Per-target memory ---
+  // The current target's hostname (''/none until a URL is entered). Each host
+  // remembers its own auth header + BOLA identities so switching between your
+  // apps auto-fills that app's values; unknown hosts keep the last-used values.
+  const currentHost = dv.currentDomain;
+  const hostRef = useRef(currentHost);
+  const loadedHostRef = useRef('');
+  useEffect(() => { hostRef.current = currentHost; }, [currentHost]);
+  // When the target host changes: load that host's saved config, or — for a host
+  // we've never configured — reset to a clean slate so a PREVIOUS app's auth
+  // token or identities never carry over to a different app (auth is per-app and
+  // secret; BOLA falls back to the editable demo defaults).
+  useEffect(() => {
+    if (!currentHost || currentHost === loadedHostRef.current) return;
+    loadedHostRef.current = currentHost;
+    const cfg = readTargetConfig(currentHost);
+    setAuthHeader(cfg && typeof cfg.authHeader === 'string' ? cfg.authHeader : '');
+    setBolaA(cfg?.bolaA ?? DEFAULT_BOLA_A);
+    setBolaB(cfg?.bolaB ?? DEFAULT_BOLA_B);
+  }, [currentHost]);
+  // Save the current fields under the current host whenever they change (via a
+  // ref so a host switch alone never writes the previous host's values).
+  useEffect(() => {
+    if (hostRef.current) writeTargetConfig(hostRef.current, { authHeader, bolaA, bolaB });
+  }, [authHeader, bolaA, bolaB]);
 
   const notify = (msg: string, tone: 'success' | 'neutral' = 'success') => {
     setToastMsg(msg);
@@ -116,14 +191,15 @@ export default function Dashboard({
     // Red-team requires this domain to already carry real DNS/file proof of
     // ownership. Guide the user to that flow instead of launching (the server
     // enforces this regardless; this just avoids a scan that silently downgrades
-    // to passive-only).
-    if (active && !dv.currentDomainVerified) {
+    // to passive-only). The dev-only DEV_SKIP_DOMAIN_VERIFICATION flag lifts this
+    // gate for local probe testing (server-side flag; always off in production).
+    if (active && !dv.currentDomainVerified && !devSkipDomainVerification) {
       setErrorText(`Active red-team needs ${dv.currentDomain || 'this domain'} verified via DNS TXT record or well-known file first — see above.`);
       void dv.handleStartVerification();
       return;
     }
 
-    onInitiateScan(urlStr, authHeader.trim() || undefined, bolaIdentities, active);
+    onInitiateScan(urlStr, authHeader.trim() || undefined, bolaIdentities, active, active && aggressiveEnabled);
   };
 
   // Enter key / form submit → the primary action (active red-team).
@@ -174,8 +250,10 @@ export default function Dashboard({
               showAdvanced={showAdvanced} setShowAdvanced={setShowAdvanced}
               bolaEnabled={bolaEnabled} setBolaEnabled={setBolaEnabled}
               bolaA={bolaA} setBolaA={setBolaA} bolaB={bolaB} setBolaB={setBolaB}
+              aggressiveEnabled={aggressiveEnabled} setAggressiveEnabled={setAggressiveEnabled}
               errorText={errorText} isPerformingAction={isPerformingAction}
               launchScan={launchScan} handleScanSubmit={handleScanSubmit} dv={dv} freeMode={freeMode}
+              devSkipDomainVerification={devSkipDomainVerification}
             />
             {freeMode ? (
               <DeepSeekKeyCard deepseekKeySet={deepseekKeySet} deepseekKeyPreview={deepseekKeyPreview} saveDeepseekKey={saveDeepseekKey} />

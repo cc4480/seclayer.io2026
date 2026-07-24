@@ -1,0 +1,31 @@
+[
+  "https://simple-app-no-expectation.example.com",
+
+  { "url": "https://your-sqli-app.example.com", "expect": ["SQL Injection"] },
+  { "url": "https://your-xss-app.example.com", "expect": ["Reflected XSS"] },
+  { "url": "https://your-ssti-app.example.com", "expect": ["Template Injection"] },
+  { "url": "https://your-lfi-app.example.com", "expect": ["Path Traversal"] },
+  { "url": "https://your-cmdinj-app.example.com", "expect": ["Command Injection"] },
+  { "url": "https://your-ssrf-app.example.com", "expect": ["Server-Side Request Forgery (SSRF)"] },
+  { "url": "https://your-openredirect-app.example.com", "expect": ["Open Redirect"] },
+  { "url": "https://your-crlf-app.example.com", "expect": ["Response Header Injection"] },
+  { "url": "https://your-cors-app.example.com", "expect": ["CORS Misconfiguration"] },
+  { "url": "https://your-xxe-app.example.com", "expect": ["XML External Entity"] },
+  { "url": "https://your-nosql-app.example.com", "expect": ["NoSQL"] },
+  { "url": "https://your-graphql-app.example.com", "expect": ["GraphQL"] },
+
+  {
+    "url": "https://your-auth-gated-app.example.com",
+    "expect": ["SQL Injection"],
+    "authHeader": "Bearer eyJhbGci... (or 'Cookie: session=...')"
+  },
+
+  {
+    "url": "https://your-bola-app.example.com",
+    "expect": ["Broken Object Level Authorization"],
+    "bola": [
+      { "label": "tenant-A", "authHeader": "Bearer tokenA", "ownResource": "/api/orders/1001", "ownMarker": "a@example.com" },
+      { "label": "tenant-B", "authHeader": "Bearer tokenB", "ownResource": "/api/orders/1002", "ownMarker": "b@example.com" }
+    ]
+  }
+]

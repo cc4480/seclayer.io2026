@@ -1,0 +1,110 @@
+[
+  {
+    "url": "http://127.0.0.1:4100",
+    "error": null,
+    "scanId": "scan_9135003fcb5ef284",
+    "score": 10,
+    "findings": [
+      {
+        "title": "Insecure Connection Protocol (HTTP)",
+        "severity": "high",
+        "category": "EASM"
+      },
+      {
+        "title": "Verbose Server Framework Signature Leaked",
+        "severity": "low",
+        "category": "EASM"
+      },
+      {
+        "title": "Missing Content-Security-Policy (CSP)",
+        "severity": "medium",
+        "category": "IAST"
+      },
+      {
+        "title": "Missing Strict-Transport-Security (HSTS) Policy",
+        "severity": "medium",
+        "category": "IAST"
+      },
+      {
+        "title": "Missing X-Frame-Options / Clickjacking Immunity",
+        "severity": "medium",
+        "category": "IAST"
+      },
+      {
+        "title": "Active SQL Injection Probe",
+        "severity": "critical",
+        "category": "RED_TEAM"
+      },
+      {
+        "title": "Active Reflected XSS Probe",
+        "severity": "high",
+        "category": "RED_TEAM"
+      },
+      {
+        "title": "Active OS Command Injection",
+        "severity": "critical",
+        "category": "RED_TEAM"
+      },
+      {
+        "title": "Active Server-Side Request Forgery (SSRF)",
+        "severity": "critical",
+        "category": "RED_TEAM"
+      },
+      {
+        "title": "Blind Server-Side Request Forgery (out-of-band)",
+        "severity": "critical",
+        "category": "RED_TEAM"
+      },
+      {
+        "title": "Active Server-Side Template Injection (SSTI)",
+        "severity": "critical",
+        "category": "RED_TEAM"
+      },
+      {
+        "title": "Active Path Traversal / Local File Inclusion",
+        "severity": "critical",
+        "category": "RED_TEAM"
+      },
+      {
+        "title": "Active Open Redirect",
+        "severity": "medium",
+        "category": "RED_TEAM"
+      },
+      {
+        "title": "Active CRLF / HTTP Response Header Injection",
+        "severity": "high",
+        "category": "RED_TEAM"
+      },
+      {
+        "title": "Active CORS Misconfiguration (origin reflection + credentials)",
+        "severity": "high",
+        "category": "RED_TEAM"
+      },
+      {
+        "title": "Active XML External Entity (XXE) — out-of-band",
+        "severity": "critical",
+        "category": "RED_TEAM"
+      },
+      {
+        "title": "Active NoSQL Injection (operator authentication bypass)",
+        "severity": "critical",
+        "category": "RED_TEAM"
+      },
+      {
+        "title": "GraphQL Schema Introspection Exposed",
+        "severity": "high",
+        "category": "API_SEC"
+      },
+      {
+        "title": "Exposed User Object Endpoint",
+        "severity": "critical",
+        "category": "API_SEC"
+      },
+      {
+        "title": "Broken Object Level Authorization (BOLA)",
+        "severity": "critical",
+        "category": "API_SEC"
+      }
+    ]
+  }
+]

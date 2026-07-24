@@ -10,6 +10,7 @@ export type ProcessScanJob = (
   scanId: string,
   allowActiveProbes: boolean,
   bolaIdentities?: [BolaIdentity, BolaIdentity],
+  allowAggressiveProbes?: boolean,
 ) => void;
 
 export interface RouteContext {

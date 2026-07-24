@@ -33,6 +33,15 @@ export const config = {
   // just referencing isProd) so this can never accidentally evaluate true in
   // a production build regardless of how the flag is later refactored.
   devSkipAuth: process.env.NODE_ENV !== 'production' && process.env.DEV_SKIP_AUTH !== 'false',
+  // Dev-only: unlock the ACTIVE red-team exploit probes (SQLi/XSS/cmd-injection/
+  // SSRF/GraphQL/BOLA) WITHOUT the usual DNS/well-known domain-ownership proof, so
+  // the probes can be exercised locally (e.g. against test-targets/vulnerable-app).
+  // Opt-in and HARD-disabled in production — the ownership gate exists so the
+  // platform can't be used as an anonymous attack proxy, so it can never be
+  // bypassed on a real deployment regardless of this env var. Pair with
+  // SCAN_DEV_ALLOW_HOSTS to also let the SSRF guard reach a loopback target.
+  devSkipDomainVerification:
+    process.env.NODE_ENV !== 'production' && process.env.DEV_SKIP_DOMAIN_VERIFICATION === 'true',
 };
 
 // Logs configuration warnings; returns false if a production-critical setting is
@@ -52,6 +61,9 @@ export function validateConfigOnBoot(): boolean {
   }
   if (config.freeMode) {
     warnings.push('FREE_MODE is on — scans require no credits (free public testing). Set FREE_MODE=false once payments are configured.');
+  }
+  if (config.devSkipDomainVerification) {
+    warnings.push('DEV_SKIP_DOMAIN_VERIFICATION is on — active red-team probes run WITHOUT domain-ownership proof. DEV ONLY: only scan targets you own (this is hard-disabled in production). Unset it to restore the verification gate.');
   }
 
   if (config.isProd) {

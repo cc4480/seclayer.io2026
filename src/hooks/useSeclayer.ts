@@ -14,6 +14,10 @@ export function useSeclayer() {
   // Free public-testing mode (server-controlled): scans cost no credits, so the
   // UI hides the paywall and credit gating. Sourced from /api/auth/me.
   const [freeMode, setFreeMode] = useState(false);
+  // Dev-only (server-controlled): active red-team probes are unlocked without the
+  // DNS/file domain-ownership step. Lets the launcher skip the verify gate while
+  // testing locally. Always false in production. Sourced from /api/auth/me.
+  const [devSkipDomainVerification, setDevSkipDomainVerification] = useState(false);
   // Personal DeepSeek key (bring-your-own-key) status. The raw key is never sent
   // to the client — only whether one is set and a masked preview.
   const [deepseekKeySet, setDeepseekKeySet] = useState(false);
@@ -66,6 +70,7 @@ export function useSeclayer() {
       setUser(userData.user);
       setCredits(userData.user.credits);
       setFreeMode(!!userData.freeMode);
+      setDevSkipDomainVerification(!!userData.devSkipDomainVerification);
       setDeepseekKeySet(!!userData.deepseekKeySet);
       setDeepseekKeyPreview(userData.deepseekKeyPreview ?? null);
 
@@ -137,7 +142,7 @@ export function useSeclayer() {
     }, 400);
   };
 
-  const onInitiateScan = async (url: string, authHeader?: string, bolaIdentities?: any, activeProbes: boolean = true) => {
+  const onInitiateScan = async (url: string, authHeader?: string, bolaIdentities?: any, activeProbes: boolean = true, aggressiveProbes: boolean = false) => {
     if (!user) {
       setShowLogin(true);
       return;
@@ -147,7 +152,7 @@ export function useSeclayer() {
       const res = await fetch('/api/scans', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, authHeader, bolaIdentities, activeProbes })
+        body: JSON.stringify({ url, authHeader, bolaIdentities, activeProbes, aggressiveProbes })
       });
 
       if (res.ok) {
@@ -279,7 +284,7 @@ export function useSeclayer() {
   const activeScan = scans.find(s => s.id === selectedScanId);
 
   return {
-    user, scans, apiKeys, credits, transactions, freeMode, justGeneratedKey, setJustGeneratedKey,
+    user, scans, apiKeys, credits, transactions, freeMode, devSkipDomainVerification, justGeneratedKey, setJustGeneratedKey,
     deepseekKeySet, deepseekKeyPreview, saveDeepseekKey,
     currentView, setCurrentView, selectedScanId, setSelectedScanId, showLogin, setShowLogin,
     isPerformingAction, activeScan, checkoutNotice, setCheckoutNotice,

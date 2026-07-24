@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from 'react';
-import { Zap, Check, Clipboard, AlertTriangle, Sparkles, Copy } from 'lucide-react';
+import { Zap, Check, Clipboard, AlertTriangle } from 'lucide-react';
 import { Finding } from '../../types.js';
 import { isProven } from '../../../server/scoring.js';
 import { SEVERITY_TOKENS } from '../../lib/severity.js';
@@ -113,32 +113,9 @@ export default function FindingCard(props: FindingCardProps) {
         </div>
       </div>
 
-      {/* "Fix with AI" — a ready-to-paste prompt for the user's own coding agent */}
-      {finding.agentPrompt && !finding.isFalsePositive && (
-        <div className="mt-3 p-4 rounded border border-purple-500/20 bg-purple-500/5">
-          <div className="flex justify-between items-center mb-1.5">
-            <span className="text-purple-300/80 font-mono text-[9px] uppercase tracking-wider flex items-center space-x-1.5">
-              <Sparkles className="w-3 h-3" />
-              <span>Fix With AI — paste into Cursor / Claude Code / Windsurf</span>
-            </span>
-            <button
-              onClick={() => handleCopyCode(`agent-${finding.id}`, finding.agentPrompt!)}
-              className="text-[10px] font-mono text-[#52525b] hover:text-purple-300 flex items-center space-x-1 transition-colors cursor-pointer"
-            >
-              {copiedCodeId === `agent-${finding.id}` ? (
-                <><Check className="w-3 h-3 text-purple-300 shrink-0" /><span>Copied prompt</span></>
-              ) : (
-                <><Clipboard className="w-3 h-3 text-[#52525b] shrink-0" /><span>Copy prompt</span></>
-              )}
-            </button>
-          </div>
-          <div className="overflow-x-auto max-h-48 scrollbar-thin">
-            <code className="text-[11px] font-mono whitespace-pre-wrap leading-relaxed block py-1 text-zinc-300">
-              {finding.agentPrompt}
-            </code>
-          </div>
-        </div>
-      )}
+      {/* Per-finding AI prompts were consolidated into a single "Copy Fix Prompt"
+          hand-off at the top of the report (see ReportViewer / scanFixPrompt),
+          so each finding no longer repeats the shared framing and guardrails. */}
 
       {/* False Positives Management UI Drawer Toggle */}
       <div className="mt-4 border-t border-[#27272a]/30 pt-3 flex flex-col">

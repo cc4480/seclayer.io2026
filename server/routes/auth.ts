@@ -98,6 +98,8 @@ export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
     // are free (payments not configured / FREE_MODE on). The DeepSeek status
     // lets the client render the bring-your-own-key card without ever seeing
     // the raw key.
-    res.json({ user, freeMode: config.freeMode, ...deepseekKeyStatus(db.getUserDeepseekKey(user.id)) });
+    // devSkipDomainVerification (dev-only) lets the launcher unlock the active
+    // red-team scan without the DNS/file ownership step; always false in prod.
+    res.json({ user, freeMode: config.freeMode, devSkipDomainVerification: config.devSkipDomainVerification, ...deepseekKeyStatus(db.getUserDeepseekKey(user.id)) });
   });
 }

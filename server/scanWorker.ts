@@ -29,6 +29,7 @@ export function makeProcessScanJob(oobCollaborator?: OobCollaborator) {
     scanId: string,
     allowActiveProbes: boolean,
     bolaIdentities?: [BolaIdentity, BolaIdentity],
+    allowAggressiveProbes?: boolean,
   ): Promise<void> {
     try {
       console.log(`[Job Worker] Starting scan ${scanId}`);
@@ -45,7 +46,7 @@ export function makeProcessScanJob(oobCollaborator?: OobCollaborator) {
 
       // Active diagnostics (HTTP probing, header/secret/SCA/path checks, fuzzing).
       db.updateScan(scanId, { status: "scanning" });
-      const diagnostics = await runDiagnostics(scan.url, scan.authHeader, { allowActiveProbes, bolaIdentities, oob: oobCollaborator, scanId });
+      const diagnostics = await runDiagnostics(scan.url, scan.authHeader, { allowActiveProbes, allowAggressiveProbes, bolaIdentities, oob: oobCollaborator, scanId });
       if (isCanceled(scanId)) { console.log(`[Job Worker] Scan ${scanId} was canceled mid-flight — skipping analysis.`); return; }
 
       // Fast (flash), cheap narration of what the sweep actually found — read

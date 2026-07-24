@@ -17,12 +17,17 @@ interface Props {
   setBolaA: (v: Identity) => void;
   bolaB: Identity;
   setBolaB: (v: Identity) => void;
+  aggressiveEnabled: boolean;
+  setAggressiveEnabled: (v: boolean) => void;
   errorText: string;
   isPerformingAction: boolean;
   launchScan: (active: boolean) => void;
   handleScanSubmit: (e: FormEvent) => void;
   dv: ReturnType<typeof useDomainVerification>;
   freeMode?: boolean;
+  // Dev-only: server has DEV_SKIP_DOMAIN_VERIFICATION on, so active probes run
+  // without DNS/file ownership proof. Purely presentational here.
+  devSkipDomainVerification?: boolean;
 }
 
 // The primary "trigger a pen-test" form: target URL, domain-verification prompt,
@@ -32,7 +37,9 @@ export default function ScanLauncher(props: Props) {
   const {
     scanUrl, setScanUrl, authHeader, setAuthHeader, showAdvanced, setShowAdvanced,
     bolaEnabled, setBolaEnabled, bolaA, setBolaA, bolaB, setBolaB,
+    aggressiveEnabled, setAggressiveEnabled,
     errorText, isPerformingAction, launchScan, handleScanSubmit, dv, freeMode,
+    devSkipDomainVerification,
   } = props;
 
   return (
@@ -69,12 +76,16 @@ export default function ScanLauncher(props: Props) {
 
         {dv.currentDomain && (
           <div className={`p-3 rounded border text-[11px] font-mono flex items-start space-x-2 ${
-            dv.currentDomainVerified ? 'border-[#22c55e]/25 bg-[#22c55e]/5 text-[#22c55e]' : 'border-amber-500/25 bg-amber-500/5 text-amber-400'
+            dv.currentDomainVerified ? 'border-[#22c55e]/25 bg-[#22c55e]/5 text-[#22c55e]'
+              : devSkipDomainVerification ? 'border-purple-500/30 bg-purple-500/5 text-purple-300'
+              : 'border-amber-500/25 bg-amber-500/5 text-amber-400'
           }`}>
             <ShieldCheck className="w-3.5 h-3.5 shrink-0 mt-0.5" />
             <div className="flex-1 space-y-1.5">
               {dv.currentDomainVerified ? (
                 <span>Ownership verified for <strong>{dv.currentDomain}</strong> — full active exploit testing (SQLi/XSS/SSRF/API) is enabled for this scan.</span>
+              ) : devSkipDomainVerification ? (
+                <span>Dev mode — ownership check bypassed (<code>DEV_SKIP_DOMAIN_VERIFICATION</code>). Active exploit probes will run against <strong>{dv.currentDomain}</strong> without DNS/file proof. Only scan targets you own; this is disabled in production.</span>
               ) : (
                 <>
                   <span>
@@ -143,6 +154,14 @@ export default function ScanLauncher(props: Props) {
                   </div>
                 )}
               </div>
+
+              <div className="pt-3 border-t border-[#27272a]/60">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={aggressiveEnabled} onChange={(e) => setAggressiveEnabled(e.target.checked)} disabled={isPerformingAction} className="accent-purple-500" id="aggressive-enable" />
+                  <span className="text-[10px] font-mono uppercase tracking-wider text-purple-300">Aggressive tier — SSTI · LFI · XXE · CORS · CRLF · open-redirect · NoSQL</span>
+                </label>
+                <p className="mt-2 text-[10px] font-mono text-[#a1a1aa]"><span className="text-purple-300">On by default.</span> More invasive but non-destructive probes (oracle/OOB-proven, no writes or DoS). Runs on the <span className="text-[#22c55e]">Active Scan</span> against a verified/owned target — uncheck for a red-team-only run. Only scan targets you're authorized to test.</p>
+              </div>
             </div>
           )}
         </div>
@@ -159,7 +178,9 @@ export default function ScanLauncher(props: Props) {
             <span className="text-[10px] font-mono text-[#52525b]">Cost per scan: <strong className="text-[#22c55e]">{freeMode ? 'Free during beta' : '1 credit'}</strong></span>
             {dv.currentDomain && (
               <span className="text-[9px] font-mono text-[#52525b]">
-                {dv.currentDomainVerified ? 'Red-team unlocked for this domain' : 'Red-team requires DNS/file verification first'}
+                {(dv.currentDomainVerified || devSkipDomainVerification)
+                  ? <>Active probes unlocked{devSkipDomainVerification ? ' (dev: verification bypassed)' : ''} · <span className={aggressiveEnabled ? 'text-purple-300' : ''}>Aggressive tier {aggressiveEnabled ? 'ON' : 'off'}</span></>
+                  : 'Red-team requires DNS/file verification first'}
               </span>
             )}
           </div>
@@ -170,7 +191,7 @@ export default function ScanLauncher(props: Props) {
             </button>
             <button type="submit" disabled={isPerformingAction || !scanUrl.trim()} className="px-5 py-2.5 bg-[#22c55e] hover:bg-[#4ade80] text-black text-xs font-mono font-bold uppercase tracking-wider rounded disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-2 shrink-0 cursor-pointer" id="trigger-scan-btn">
               <Zap className="w-3.5 h-3.5" />
-              <span>Active Red-Team Scan</span>
+              <span>{aggressiveEnabled ? 'Active Scan — Full Attack' : 'Active Red-Team Scan'}</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
