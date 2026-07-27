@@ -57,6 +57,12 @@ if (process.env.VULN_EXPOSE_SURFACE === '1') {
     { probe: 'LFI — discovered param',               titleIncludes: 'Local File Inclusion (discovered parameter' },
     { probe: 'Open Redirect — discovered param',     titleIncludes: 'Open Redirect (discovered parameter' },
     { probe: 'CRLF — discovered param',              titleIncludes: 'Header Injection (discovered parameter' },
+    // POST-body fuzzing: the crawler discovers a <form method=POST action=/submit-review>
+    // and the fuzzer confirms injection in its form FIELDS (not just GET query
+    // params). Matched on the form's endpoint path so these are unambiguously the
+    // POST-body findings, distinct from the GET-link rows above.
+    { probe: 'XSS — discovered POST form field',     titleIncludes: 'Reflected XSS (discovered parameter "q" on /submit-review' },
+    { probe: 'SQLi — discovered POST form field',    titleIncludes: 'SQL Injection (discovered parameter "id" on /submit-review' },
   );
 }
 

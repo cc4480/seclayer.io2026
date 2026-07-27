@@ -16,6 +16,10 @@
 //               /api/orders/:id (BOLA, two identities)
 //   Aggressive: ?name (SSTI), ?file (LFI), ?next (open redirect), ?lang (CRLF),
 //               Origin header (CORS), POST xml (XXE OOB), POST /api/login (NoSQL)
+//   Discovered POST form (VULN_EXPOSE_SURFACE=1): a crawlable <form method=POST
+//               action=/submit-review> with fields q (XSS) + id (SQLi) whose
+//               body feeds the same reflective sinks, validating POST-body
+//               discovered-parameter fuzzing alongside the GET-link surface.
 import http from 'node:http';
 
 const PORT = Number(process.argv[2] || process.env.VULN_PORT || 4100);
@@ -153,6 +157,23 @@ function handle(req, res, rawBody) {
       + `<a href="/go?next=/home">Continue</a> `
       + `<a href="/prefs?lang=en">Language</a>`
       + `</nav>`;
+    // A crawlable POST <form> so DISCOVERED-parameter fuzzing is exercised over a
+    // form body, not just GET query strings. Its fields (q, id) map to the same
+    // reflective sinks below via the form-body merge, so the fuzzer's POST
+    // payloads confirm XSS/SQLi on /submit-review exactly as on a GET link.
+    body += `<form method="POST" action="/submit-review">`
+      + `<input name="q" placeholder="review">`
+      + `<input name="id" placeholder="ref">`
+      + `<button type="submit">Submit review</button></form>`;
+  }
+
+  // Form-encoded POST bodies feed the SAME reflective sinks as GET query params,
+  // so a crawler-discovered POST <form> (see VULN_EXPOSE_SURFACE above) exercises
+  // injection exactly like a GET link — this is what lets validate-probes assert
+  // POST-body discovered-parameter fuzzing. Placed AFTER the open-redirect/CRLF
+  // handlers, which stay GET-only to match the scanner's own POST policy.
+  if (req.method === 'POST' && /application\/x-www-form-urlencoded/i.test(req.headers['content-type'] || '')) {
+    for (const [k, v] of new URLSearchParams(rawBody || '')) q.set(k, v);
   }
 
   // 1. SQL injection — DB error ONLY when the value breaks the query (a quote);
