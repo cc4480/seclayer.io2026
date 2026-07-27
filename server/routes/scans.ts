@@ -157,6 +157,66 @@ export function registerScanRoutes(app: express.Express, ctx: RouteContext) {
     });
   });
 
+  // --- Public shareable report links ---
+  // The base for the public URL: the trusted APP_URL in production, the request
+  // host in dev.
+  const publicBase = (req: express.Request) => config.appUrl || `${req.protocol}://${req.get("host")}`;
+
+  // Owner creates (or re-fetches) the public link for one of their completed
+  // scans. Returns the token + the full /r/<token> URL to copy.
+  app.post("/api/scans/:id/share", requireAuth, (req, res) => {
+    const token = db.createShareToken(getUserId(req), req.params.id);
+    if (!token) {
+      return res.status(404).json({ status: "error", message: "Scan not found, not yours, or not complete yet." });
+    }
+    res.json({ status: "ok", shareToken: token, shareUrl: `${publicBase(req)}/r/${token}` });
+  });
+
+  // Owner revokes the public link — any existing /r/<token> immediately 404s.
+  app.delete("/api/scans/:id/share", requireAuth, (req, res) => {
+    if (!db.revokeShareToken(getUserId(req), req.params.id)) {
+      return res.status(404).json({ status: "error", message: "This scan has no active share link, or it isn't yours." });
+    }
+    res.json({ status: "ok" });
+  });
+
+  // PUBLIC, unauthenticated read-only report by share token. Rate-limited so the
+  // (unguessable, 128-bit) token space can't be brute-forced. Serves only a
+  // sanitized view: suppression is applied and owner-internal fields (userId,
+  // authHeader, the token itself) are never echoed.
+  const shareLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 60,
+    keyPrefix: "public-report",
+    message: "Too many requests. Please slow down.",
+  });
+  app.get("/api/public/report/:token", shareLimiter, (req, res) => {
+    const raw = db.getScanByShareToken(req.params.token);
+    // A revoked/never-shared token, or a scan that somehow isn't complete, is a
+    // flat 404 — no hint about whether the token ever existed.
+    if (!raw || raw.status !== "complete") {
+      return res.status(404).json({ status: "error", message: "This report link is not available. It may have been revoked." });
+    }
+    const scan = db.getScanWithSuppressedFindings(raw);
+    res.json({
+      status: "ok",
+      report: {
+        id: scan.id,
+        url: scan.url,
+        status: scan.status,
+        score: scan.score,
+        severity: scan.severity,
+        findings: scan.findings,
+        aiSummary: scan.aiSummary,
+        aiReasoning: scan.aiReasoning,
+        executiveBreakdown: scan.executiveBreakdown,
+        evidence: scan.evidence,
+        createdAt: scan.createdAt,
+        completedAt: scan.completedAt,
+      },
+    });
+  });
+
   // --- False Positive & Suppression Rules ---
   app.get("/api/suppressions", requireAuth, (req, res) => {
     res.json({ suppressions: db.listSuppressions(getUserId(req)) });

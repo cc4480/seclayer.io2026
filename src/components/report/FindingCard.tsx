@@ -20,6 +20,9 @@ export interface FindingCardProps {
   setSuppressError: (v: string | null) => void;
   handleSaveSuppression: (finding: Finding) => void;
   handleRemoveSuppressionDirectly: (title: string) => void;
+  // Read-only (public shared report): hide the false-positive suppression
+  // controls, which require the authenticated owner's account.
+  readOnly?: boolean;
 }
 
 export default function FindingCard(props: FindingCardProps) {
@@ -117,7 +120,8 @@ export default function FindingCard(props: FindingCardProps) {
           hand-off at the top of the report (see ReportViewer / scanFixPrompt),
           so each finding no longer repeats the shared framing and guardrails. */}
 
-      {/* False Positives Management UI Drawer Toggle */}
+      {/* False Positives Management UI Drawer Toggle (owner only) */}
+      {!props.readOnly && (
       <div className="mt-4 border-t border-[#27272a]/30 pt-3 flex flex-col">
         {suppressInputId === finding.id ? (
           <div className="bg-[#121214] border border-[#27272a]/80 p-3.5 rounded space-y-3 animate-fade-in">
@@ -185,6 +189,7 @@ export default function FindingCard(props: FindingCardProps) {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

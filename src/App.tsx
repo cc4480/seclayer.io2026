@@ -3,10 +3,26 @@ import Landing from './pages/Landing.js';
 import Dashboard from './pages/Dashboard.js';
 import ReportViewer from './pages/ReportViewer.js';
 import ScanProgress from './pages/ScanProgress.js';
+import PublicReport from './pages/PublicReport.js';
 import LoginModal from './components/LoginModal.js';
 import { useSeclayer } from './hooks/useSeclayer.js';
 
+// A public shared-report deep link: /r/<token>. Detected before any auth flow so
+// a logged-out visitor sees the read-only report, not the login/dashboard app.
+function shareTokenFromPath(): string | null {
+  const m = /^\/r\/([A-Za-z0-9_-]+)\/?$/.exec(window.location.pathname);
+  return m ? m[1] : null;
+}
+
 export default function App() {
+  // Early, hook-free branch: a share link renders the standalone public view and
+  // never mounts the authenticated app (useSeclayer, nav, dashboard).
+  const shareToken = shareTokenFromPath();
+  if (shareToken) return <PublicReport token={shareToken} />;
+  return <AuthedApp />;
+}
+
+function AuthedApp() {
   const {
     user, scans, apiKeys, credits, transactions, freeMode, devSkipDomainVerification, justGeneratedKey, setJustGeneratedKey,
     deepseekKeySet, deepseekKeyPreview, saveDeepseekKey,

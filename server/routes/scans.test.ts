@@ -139,3 +139,82 @@ test('POST /api/scans/:id/cancel 409s for a scan owned by someone else, without 
     assert.equal(db.getScan(otherScan.id)!.status, 'queued', 'the other user\'s scan must be untouched');
   });
 });
+
+// --- Public shareable report links ---
+
+// Create a completed scan for the harness user and return its id.
+function completedScan(userId: string, url = SAFE_TARGET): string {
+  const s = db.createScan(userId, url);
+  db.updateScan(s.id, {
+    status: 'complete', score: 80, severity: 'medium', aiSummary: 'summary',
+    findings: [{ id: 'f1', title: 'Missing CSP', description: 'd', severity: 'medium', confidence: 'medium', fix: 'add csp', category: 'IAST' }],
+    completedAt: new Date().toISOString(),
+  });
+  return s.id;
+}
+
+test('POST /api/scans/:id/share mints a link; the public report is viewable without auth and sanitized', async () => {
+  await withScanApp(async (base, userId) => {
+    const scanId = completedScan(userId);
+    const shareRes = await fetch(`${base}/api/scans/${scanId}/share`, { method: 'POST' });
+    assert.equal(shareRes.status, 200);
+    const { shareToken, shareUrl } = await shareRes.json();
+    assert.match(shareToken, /^shr_[0-9a-f]{32}$/);
+    assert.match(shareUrl, /\/r\/shr_[0-9a-f]{32}$/);
+
+    // Public fetch — no credentials at all.
+    const pub = await fetch(`${base}/api/public/report/${shareToken}`);
+    assert.equal(pub.status, 200);
+    const { report } = await pub.json();
+    assert.equal(report.url, SAFE_TARGET);
+    assert.equal(report.findings.length, 1);
+    // Owner-internal fields must never be exposed on the public payload.
+    assert.equal(report.userId, undefined, 'userId must not leak');
+    assert.equal(report.authHeader, undefined, 'authHeader must not leak');
+    assert.equal(report.shareToken, undefined, 'the token must not be echoed back');
+  });
+});
+
+test('POST /api/scans/:id/share is idempotent (same token on repeat calls)', async () => {
+  await withScanApp(async (base, userId) => {
+    const scanId = completedScan(userId);
+    const a = await (await fetch(`${base}/api/scans/${scanId}/share`, { method: 'POST' })).json();
+    const b = await (await fetch(`${base}/api/scans/${scanId}/share`, { method: 'POST' })).json();
+    assert.equal(a.shareToken, b.shareToken, 'repeat share returns the same token, not a new one');
+  });
+});
+
+test('DELETE /api/scans/:id/share revokes the link so the public URL 404s', async () => {
+  await withScanApp(async (base, userId) => {
+    const scanId = completedScan(userId);
+    const { shareToken } = await (await fetch(`${base}/api/scans/${scanId}/share`, { method: 'POST' })).json();
+    assert.equal((await fetch(`${base}/api/public/report/${shareToken}`)).status, 200);
+
+    const del = await fetch(`${base}/api/scans/${scanId}/share`, { method: 'DELETE' });
+    assert.equal(del.status, 200);
+    assert.equal((await fetch(`${base}/api/public/report/${shareToken}`)).status, 404, 'revoked link no longer resolves');
+  });
+});
+
+test('GET /api/public/report/:token 404s for an unknown token', async () => {
+  await withScanApp(async (base) => {
+    const res = await fetch(`${base}/api/public/report/shr_deadbeefdeadbeefdeadbeefdeadbeef`);
+    assert.equal(res.status, 404);
+  });
+});
+
+test('POST /api/scans/:id/share 404s for an incomplete scan and for another user\'s scan', async () => {
+  const other = db.getOrCreateUser(`share-other-${Date.now()}@test.io`);
+  const otherScanId = completedScan(other.id); // completed, but owned by someone else
+  await withScanApp(async (base, userId) => {
+    // Incomplete scan of our own → nothing worth sharing.
+    const pending = db.createScan(userId, SAFE_TARGET); // status: queued
+    const inc = await fetch(`${base}/api/scans/${pending.id}/share`, { method: 'POST' });
+    assert.equal(inc.status, 404);
+
+    // Another user's scan → 404 (never mints a token).
+    const cross = await fetch(`${base}/api/scans/${otherScanId}/share`, { method: 'POST' });
+    assert.equal(cross.status, 404);
+    assert.equal(db.getScan(otherScanId)!.shareToken, undefined, "other user's scan stays unshared");
+  });
+});

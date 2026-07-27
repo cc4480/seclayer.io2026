@@ -22,13 +22,18 @@ interface ReportViewerProps {
   previousScan?: Scan;
   onBack: () => void;
   onRefreshScans?: () => void;
+  // Public shared-report mode: hides owner-only controls (share/revoke,
+  // false-positive suppression) and shows a read-only, no-account view.
+  isPublic?: boolean;
 }
 
-export default function ReportViewer({ scan, previousScan, onBack, onRefreshScans }: ReportViewerProps) {
+export default function ReportViewer({ scan, previousScan, onBack, onRefreshScans, isPublic }: ReportViewerProps) {
   const [activeTab, setActiveTab] = useState<'OVERVIEW' | SecCategory>('OVERVIEW');
   const [showRaw, setShowRaw] = useState(false);
   const [showReasoning, setShowReasoning] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [shareError, setShareError] = useState(false);
+  const [shareToken, setShareToken] = useState<string | undefined>(scan.shareToken);
   const [copiedFixPrompt, setCopiedFixPrompt] = useState(false);
   const [copiedCodeId, setCopiedCodeId] = useState<string | null>(null);
   const [expandedApiRows, setExpandedApiRows] = useState<Record<string, boolean>>({});
@@ -45,10 +50,35 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
   const posture = deriveSecurityPosture(findings);
   const banner = bannerForPosture(findings);
 
-  const handleShareClick = () => {
-    navigator.clipboard.writeText(window.location.href);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2000);
+  // Owner action: mint (or re-fetch) the scan's public link and copy the real
+  // /r/<token> URL — replacing the old behavior that copied the private,
+  // auth-gated dashboard URL a recipient could never open.
+  const handleShareClick = async () => {
+    setShareError(false);
+    try {
+      const res = await fetch(`/api/scans/${scan.id}/share`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.shareUrl) {
+        setShareToken(data.shareToken);
+        await navigator.clipboard.writeText(data.shareUrl);
+        setCopiedLink(true);
+        setTimeout(() => setCopiedLink(false), 2500);
+      } else {
+        setShareError(true);
+        setTimeout(() => setShareError(false), 3000);
+      }
+    } catch {
+      setShareError(true);
+      setTimeout(() => setShareError(false), 3000);
+    }
+  };
+
+  // Owner action: revoke the public link so /r/<token> immediately stops working.
+  const handleRevokeShare = async () => {
+    try {
+      const res = await fetch(`/api/scans/${scan.id}/share`, { method: 'DELETE' });
+      if (res.ok) setShareToken(undefined);
+    } catch { /* leave the link as-is on error */ }
   };
 
   const handleCopyCode = (findingId: string, fixText: string) => {
@@ -115,7 +145,7 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
             id="report-back-btn"
           >
             <ArrowLeft className="w-4 h-4 text-[#22c55e]" />
-            <span>Audit Workspace</span>
+            <span>{isPublic ? 'Scan your own site with Seclayer' : 'Audit Workspace'}</span>
           </button>
 
           <div className="flex items-center space-x-3">
@@ -130,14 +160,34 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
                 <span>{copiedFixPrompt ? 'Copied Fix Prompt' : `Copy Fix Prompt (${fixableCount})`}</span>
               </button>
             )}
-            <button
-              onClick={handleShareClick}
-              className="px-3.5 py-1.5 bg-[#18181b] border border-[#27272a] hover:border-[#3f3f46] text-[#a1a1aa] hover:text-white text-xs font-mono transition-all flex items-center space-x-1.5 cursor-pointer"
-              id="report-share-btn"
-            >
-              {copiedLink ? <Check className="w-3.5 h-3.5 text-[#22c55e]" /> : <Share2 className="w-3.5 h-3.5 text-[#52525b]" />}
-              <span>{copiedLink ? 'Copied' : 'Share Link'}</span>
-            </button>
+            {isPublic ? (
+              <span className="px-3.5 py-1.5 bg-[#18181b] border border-[#27272a] text-[#52525b] text-xs font-mono flex items-center space-x-1.5">
+                <Share2 className="w-3.5 h-3.5 text-[#52525b]" />
+                <span>Read-only shared report</span>
+              </span>
+            ) : (
+              <div className="flex items-center space-x-1.5">
+                <button
+                  onClick={handleShareClick}
+                  title={shareToken ? 'Public link is active — click to copy it again' : 'Create a public, read-only link anyone can open'}
+                  className="px-3.5 py-1.5 bg-[#18181b] border border-[#27272a] hover:border-[#3f3f46] text-[#a1a1aa] hover:text-white text-xs font-mono transition-all flex items-center space-x-1.5 cursor-pointer"
+                  id="report-share-btn"
+                >
+                  {copiedLink ? <Check className="w-3.5 h-3.5 text-[#22c55e]" /> : <Share2 className="w-3.5 h-3.5 text-[#52525b]" />}
+                  <span>{copiedLink ? 'Copied public link' : shareError ? 'Share failed — retry' : shareToken ? 'Copy public link' : 'Share Link'}</span>
+                </button>
+                {shareToken && (
+                  <button
+                    onClick={handleRevokeShare}
+                    title="Disable the public link"
+                    className="px-2 py-1.5 bg-[#18181b] border border-[#27272a] hover:border-[#f87171]/40 text-[#71717a] hover:text-[#f87171] text-[10px] font-mono uppercase tracking-wider transition-all cursor-pointer"
+                    id="report-revoke-btn"
+                  >
+                    Revoke
+                  </button>
+                )}
+              </div>
+            )}
             <button
               onClick={handleDownloadPdf}
               className="px-3.5 py-1.5 bg-[#18181b] border border-[#27272a] hover:border-[#3f3f46] text-[#a1a1aa] hover:text-white text-xs font-mono transition-all flex items-center space-x-1.5 cursor-pointer"
@@ -220,6 +270,7 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
               <FindingsPanel
                 findings={findings}
                 activeTab={activeTab}
+                readOnly={isPublic}
                 copiedCodeId={copiedCodeId}
                 handleCopyCode={handleCopyCode}
                 expandedApiRows={expandedApiRows}

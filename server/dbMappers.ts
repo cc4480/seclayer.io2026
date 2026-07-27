@@ -30,6 +30,7 @@ export function rowToScan(row: any): Scan | undefined {
     error: row.error ?? undefined,
     createdAt: row.createdAt,
     completedAt: row.completedAt ?? undefined,
+    shareToken: row.shareToken ?? undefined,
   };
 }
 

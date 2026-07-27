@@ -120,6 +120,9 @@ export interface Scan {
   error?: string;
   createdAt: string;
   completedAt?: string;
+  // When set, this scan has a public, read-only shareable report link
+  // (/r/<shareToken>) that anyone can open without an account. Cleared on revoke.
+  shareToken?: string;
 }
 
 export interface CreditTransaction {

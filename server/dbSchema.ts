@@ -137,6 +137,11 @@ export function runMigrations(db: Database.Database): void {
   addColumnIfMissing(db, "scans", "narrationLog", "TEXT");
   addColumnIfMissing(db, "scans", "executiveBreakdown", "TEXT");
   addColumnIfMissing(db, "scans", "evidence", "TEXT");
+  // Public shareable-report token. Nullable; SQLite lets a UNIQUE index hold many
+  // NULLs, so only issued (non-null) tokens must be unique — an unshared scan
+  // simply has none. A scan is shared only while this is set; revoking clears it.
+  addColumnIfMissing(db, "scans", "shareToken", "TEXT");
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_scans_share ON scans(shareToken)");
   addColumnIfMissing(db, "domain_verifications", "method", "TEXT");
   addColumnIfMissing(db, "domain_verifications", "attestation", "TEXT");
   addColumnIfMissing(db, "monitored_targets", "scanHour", "INTEGER");

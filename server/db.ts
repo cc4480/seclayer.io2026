@@ -190,6 +190,39 @@ class SqliteDb {
     ).get(userId, url));
   }
 
+  // --- Public shareable report links ---
+  // Mint (or return the existing) unguessable token for a COMPLETE scan the
+  // caller owns, so anyone with the resulting link can view a read-only report
+  // without an account. Idempotent: a second call returns the same token rather
+  // than churning the link. Returns null when the scan isn't the user's or isn't
+  // complete (an in-flight/failed scan has no report worth sharing).
+  createShareToken(userId: string, scanId: string): string | null {
+    const scan = this.getScan(scanId);
+    if (!scan || scan.userId !== userId || scan.status !== 'complete') return null;
+    if (scan.shareToken) return scan.shareToken;
+    const token = 'shr_' + crypto.randomBytes(16).toString('hex');
+    this.db.prepare('UPDATE scans SET shareToken = ? WHERE id = ? AND userId = ?').run(token, scanId, userId);
+    return token;
+  }
+
+  // Revoke a scan's public link (owner-scoped). Returns true when a token was
+  // actually cleared, so the caller can distinguish "revoked" from "not owned".
+  revokeShareToken(userId: string, scanId: string): boolean {
+    const res = this.db.prepare(
+      'UPDATE scans SET shareToken = NULL WHERE id = ? AND userId = ? AND shareToken IS NOT NULL'
+    ).run(scanId, userId);
+    return res.changes > 0;
+  }
+
+  // Resolve a public share token to its scan — the ONLY read path that returns a
+  // scan without a userId check, so it is deliberately narrow: matches only a
+  // live (non-revoked) token. Callers must still apply the suppression read-model
+  // and strip owner-internal fields before serving it publicly.
+  getScanByShareToken(token: string): Scan | undefined {
+    if (!token) return undefined;
+    return rowToScan(this.db.prepare('SELECT * FROM scans WHERE shareToken = ?').get(token));
+  }
+
   // --- Out-of-band collaborator (blind SSRF/RCE proof) ---
   //
   // A token is registered when the scanner mints a callback URL, so the public
