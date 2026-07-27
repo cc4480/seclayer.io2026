@@ -1,0 +1,36 @@
+name: 'Seclayer Security Scan'
+description: 'Run a Seclayer black-box security scan and fail the build on findings at or above a severity threshold.'
+branding:
+  icon: 'shield'
+  color: 'green'
+inputs:
+  url:
+    description: 'Target URL to scan, including scheme (e.g. https://staging.example.com).'
+    required: true
+  api-key:
+    description: 'Seclayer API key. Store it as a repository secret and pass it here.'
+    required: true
+  fail-on:
+    description: 'Minimum finding severity that fails the build: info | low | medium | high | critical.'
+    required: false
+    default: 'high'
+  api-url:
+    description: 'Seclayer backend base URL.'
+    required: false
+    default: 'https://seclayer.io'
+  auth-header:
+    description: 'Optional Authorization header value for scanning authenticated endpoints (e.g. "Bearer …").'
+    required: false
+    default: ''
+runs:
+  using: 'composite'
+  steps:
+    - shell: bash
+      env:
+        SECLAYER_API_KEY: ${{ inputs.api-key }}
+      run: >-
+        npx -y @seclayer/mcp scan
+        --url "${{ inputs.url }}"
+        --fail-on "${{ inputs.fail-on }}"
+        --api-url "${{ inputs.api-url }}"
+        ${{ inputs.auth-header && format('--auth-header "{0}"', inputs.auth-header) || '' }}

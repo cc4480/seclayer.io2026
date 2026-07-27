@@ -64,6 +64,40 @@ The API key is never a tool parameter — it's bound once at server startup so i
 
 **Output:** the same full Markdown report as `seclayer_scan` — for a scan that already ran, WITHOUT re-running or re-paying for it. Lets an agent act on a result it (or a teammate on the same key) already produced instead of scanning again.
 
+## CI/CD gate (`seclayer-mcp scan`)
+
+The same package doubles as a CI gate: run one scan and fail the build when any
+active finding is at or above a severity threshold.
+
+```bash
+SECLAYER_API_KEY=... npx -y @seclayer/mcp scan \
+  --url https://staging.example.com \
+  --fail-on high
+```
+
+Options: `--url` (required), `--key` (or `SECLAYER_API_KEY`), `--api-url` (or
+`SECLAYER_API_URL`, default `https://seclayer.io`), `--fail-on`
+(`info|low|medium|high|critical`, default `high`), `--auth-header`. Exit codes:
+**0** passed, **1** gate failed (findings at/above the threshold, listed on
+stderr), **2** usage or scan error. Suppressed (false-positive) findings never
+gate a build.
+
+### GitHub Action
+
+A composite action ships at `.github/actions/seclayer-scan`:
+
+```yaml
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: cc4480/seclayer.io2026/.github/actions/seclayer-scan@main
+        with:
+          url: https://staging.example.com
+          api-key: ${{ secrets.SECLAYER_API_KEY }}
+          fail-on: high
+```
+
 ## Development
 
 ```bash

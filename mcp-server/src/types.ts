@@ -18,6 +18,9 @@ export interface Finding {
   endpoint?: string;
   impact?: string;
   agentPrompt?: string;
+  // True when the owner has marked this finding a false positive; such findings
+  // are excluded from the score and must never gate a CI build.
+  isFalsePositive?: boolean;
   // Presence (not shape) is all this package cares about: it means the
   // finding carries a replayable exploit receipt, promoting it to "proven".
   evidence?: unknown;
