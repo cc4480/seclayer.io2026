@@ -25,7 +25,8 @@ export function isScreenshotEnabled(): boolean {
 
 // Best-effort synchronous block of obviously-internal request hosts inside the
 // browser (defense in depth; rendering should run in an egress-restricted env).
-function hostLooksInternal(hostname: string): boolean {
+// Exported so the DOM-XSS probe reuses the exact same SSRF filter.
+export function hostLooksInternal(hostname: string): boolean {
   const h = hostname.replace(/^\[|\]$/g, "").toLowerCase();
   if (h === "localhost" || h.endsWith(".localhost") || h.endsWith(".local") || h.endsWith(".internal")) return true;
   if (net.isIPv4(h)) {

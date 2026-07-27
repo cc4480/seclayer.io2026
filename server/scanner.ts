@@ -11,6 +11,7 @@ import { runRedTeamProbes } from "./redTeamProbes.js";
 import { runAggressiveProbes } from "./aggressiveProbes.js";
 import { runApiSecProbes } from "./apiProbes.js";
 import { probeJwtAuth } from "./jwtProbe.js";
+import { probeDomXss } from "./domXss.js";
 import { runPassiveScan } from "./passiveScan.js";
 import type { DiagnosticResult, ScanOptions } from "./scanTypes.js";
 
@@ -114,6 +115,15 @@ export async function runDiagnostics(
       if (jwtFinding) result.redTeamFindings = [...(result.redTeamFindings || []), jwtFinding];
     } catch (e) {
       console.warn("JWT auth probe encountered an error", e);
+    }
+
+    // DOM-based XSS (headless-browser execution proof). No-ops unless
+    // ENABLE_BROWSER_RENDERING is set; non-mutating, so gated on ownership only.
+    try {
+      const domFinding = await probeDomXss(url, headers);
+      if (domFinding) result.redTeamFindings = [...(result.redTeamFindings || []), domFinding];
+    } catch (e) {
+      console.warn("DOM-XSS probe encountered an error", e);
     }
   }
 
