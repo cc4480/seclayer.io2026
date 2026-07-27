@@ -87,3 +87,66 @@ test("calling seclayer_scan against a failing backend returns isError:true with 
     },
   );
 });
+
+test("all three tools are discoverable and none exposes an apiKey parameter", async () => {
+  await withFakeBackend(
+    (_req, res) => res.writeHead(500).end("unused"),
+    async (baseUrl) => {
+      await withConnectedClient(baseUrl, async (client) => {
+        const { tools } = await client.listTools();
+        const names = tools.map((t) => t.name).sort();
+        assert.deepEqual(names, ["seclayer_get_report", "seclayer_list_scans", "seclayer_scan"]);
+        // The bound API key must never leak into any tool's per-call schema.
+        for (const t of tools) {
+          assert.equal(Object.prototype.hasOwnProperty.call(t.inputSchema.properties ?? {}, "apiKey"), false, `${t.name} must not expose apiKey`);
+        }
+        const getReport = tools.find((t) => t.name === "seclayer_get_report")!;
+        assert.deepEqual(getReport.inputSchema.required, ["scanId"]);
+      });
+    },
+  );
+});
+
+test("seclayer_list_scans returns the formatted history table over the MCP protocol", async () => {
+  await withFakeBackend(
+    (req, res) => {
+      assert.match(req.url || "", /^\/api\/mcp\/scans/);
+      assert.equal(req.headers["x-api-key"], "sl_live_test");
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        success: true,
+        scans: [{ id: "scan_1", url: "https://x.test", status: "complete", score: 80, severity: "low", createdAt: "t0", completedAt: "t1" }],
+      }));
+    },
+    async (baseUrl) => {
+      await withConnectedClient(baseUrl, async (client) => {
+        const result: any = await client.callTool({ name: "seclayer_list_scans", arguments: { limit: 10 } });
+        assert.equal(result.isError, undefined);
+        assert.match(result.content[0].text, /scan_1/);
+        assert.match(result.content[0].text, /seclayer_get_report/);
+      });
+    },
+  );
+});
+
+test("seclayer_get_report fetches a report by id over the MCP protocol", async () => {
+  await withFakeBackend(
+    (req, res) => {
+      assert.equal(req.url, "/api/mcp/scans/scan_1");
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        success: true, targetUrl: "https://x.test", postureScore: 64, vulnerabilityLevel: "medium",
+        analysisSummary: "retrieved", executiveBreakdown: { overview: "o", riskAreas: [], businessImpact: "b", priorityActions: [] },
+        securityFindings: [], completedAt: "2026-01-01T00:00:00Z",
+      }));
+    },
+    async (baseUrl) => {
+      await withConnectedClient(baseUrl, async (client) => {
+        const result: any = await client.callTool({ name: "seclayer_get_report", arguments: { scanId: "scan_1" } });
+        assert.equal(result.isError, undefined);
+        assert.match(result.content[0].text, /Posture score: 64\/100/);
+        assert.match(result.content[0].text, /retrieved/);
+      });
+    },
+  );
+});
