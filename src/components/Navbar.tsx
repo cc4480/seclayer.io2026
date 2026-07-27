@@ -34,8 +34,12 @@ export default function Navbar({
     <nav className="border-b border-[#27272a] bg-[#09090b]/80 backdrop-blur-md sticky top-0 z-50 px-6 py-4">
       <div className="max-w-7xl mx-auto flex items-center justify-between">
         {/* Logo and Tagline */}
-        <div 
+        <div
           onClick={() => onNavigate('landing')}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onNavigate('landing'); } }}
+          role="button"
+          tabIndex={0}
+          aria-label="Seclayer home"
           className="flex items-center space-x-3 cursor-pointer group relative"
           id="navbar-brand-logo"
         >
@@ -91,8 +95,12 @@ export default function Navbar({
           {userEmail ? (
             <>
               {/* Credits Indicator */}
-              <div 
+              <div
                 onClick={() => onNavigate('dashboard')}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onNavigate('dashboard'); } }}
+                role="button"
+                tabIndex={0}
+                aria-label={freeMode ? 'Free beta — open dashboard' : `Credits: ${credits} — open dashboard`}
                 className="flex items-center space-x-2 bg-[#0c0c0e] border border-[#27272a] hover:border-[#22c55e]/45 rounded-md px-3 py-1.5 transition-all text-[#a1a1aa] cursor-pointer text-xs font-mono"
                 id="navbar-credits-pill"
               >
@@ -121,9 +129,10 @@ export default function Navbar({
                   onClick={onLogout}
                   className="p-1.5 rounded bg-[#18181b] border border-[#27272a] text-[#a1a1aa] hover:text-[#f87171] hover:border-[#f87171]/20 transition-all"
                   title="Sign Out"
+                  aria-label="Sign out"
                   id="navbar-logout-btn"
                 >
-                  <LogOut className="w-4 h-4" />
+                  <LogOut className="w-4 h-4" aria-hidden="true" />
                 </button>
               </div>
             </>

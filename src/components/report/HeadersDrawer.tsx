@@ -16,13 +16,14 @@ export default function HeadersDrawer({ scan, findings, showRaw, setShowRaw }: P
     <div className="bg-[#0c0c0e] border border-[#27272a] rounded p-6">
       <button
         onClick={() => setShowRaw(!showRaw)}
+        aria-expanded={showRaw}
         className="w-full flex items-center justify-between text-[#a1a1aa] hover:text-white font-mono text-xs uppercase tracking-wider cursor-pointer"
       >
         <div className="flex items-center space-x-2">
-          <Terminal className="w-4 h-4 text-[#22c55e]" />
+          <Terminal className="w-4 h-4 text-[#22c55e]" aria-hidden="true" />
           <span>Diagnostic Raw Headers & Outputs</span>
         </div>
-        {showRaw ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+        {showRaw ? <ChevronUp className="w-4 h-4" aria-hidden="true" /> : <ChevronDown className="w-4 h-4" aria-hidden="true" />}
       </button>
 
       {showRaw && (

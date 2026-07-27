@@ -44,15 +44,19 @@ export default function LoginModal({ onClose }: LoginModalProps) {
       <div
         className="relative w-full max-w-md bg-[#0c0c0e] border border-[#27272a] p-8 rounded shadow-2xl space-y-6"
         onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Sign in to Seclayer"
         id="login-modal-root"
       >
         {/* Close Button */}
         <button
           onClick={onClose}
           className="absolute top-4 right-4 p-1 rounded text-[#52525b] hover:text-white transition-colors cursor-pointer"
+          aria-label="Close sign-in dialog"
           id="login-modal-close"
         >
-          <X className="w-4 h-4" />
+          <X className="w-4 h-4" aria-hidden="true" />
         </button>
 
         <div className="text-center space-y-2">

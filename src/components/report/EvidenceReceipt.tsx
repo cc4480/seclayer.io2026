@@ -50,26 +50,27 @@ export default function EvidenceReceipt({ finding, expandedApiRows, setExpandedA
       <div className="mt-3">
         <button
           onClick={() => setExpandedApiRows(p => ({ ...p, [`ev-${finding.id}`]: !p[`ev-${finding.id}`] }))}
+          aria-expanded={!!expandedApiRows[`ev-${finding.id}`]}
           className="w-full flex items-center justify-between p-2.5 rounded bg-black/40 hover:bg-black border border-zinc-800/80 transition-colors cursor-pointer group"
         >
           <span className="flex items-center gap-2 text-[10px] font-mono text-zinc-400 group-hover:text-[#22c55e] transition-colors uppercase tracking-wider font-bold">
-            <Terminal className="w-3.5 h-3.5 shrink-0" /> Raw attack exchange & replay
+            <Terminal className="w-3.5 h-3.5 shrink-0" aria-hidden="true" /> Raw attack exchange & replay
           </span>
-          {expandedApiRows[`ev-${finding.id}`] ? <ChevronUp className="w-4 h-4 text-zinc-500" /> : <ChevronDown className="w-4 h-4 text-zinc-500" />}
+          {expandedApiRows[`ev-${finding.id}`] ? <ChevronUp className="w-4 h-4 text-zinc-500" aria-hidden="true" /> : <ChevronDown className="w-4 h-4 text-zinc-500" aria-hidden="true" />}
         </button>
         {expandedApiRows[`ev-${finding.id}`] && (
           <div className="mt-2 space-y-2 animate-fade-in">
             {ev.reproduction && (
               <div className="p-2.5 bg-black border border-zinc-800 rounded flex items-center justify-between gap-2 overflow-x-auto">
                 <code className="text-[10px] font-mono whitespace-pre text-zinc-300 break-all">{ev.reproduction}</code>
-                <button onClick={() => handleCopyCode(`repro-${finding.id}`, ev.reproduction)} className="text-zinc-500 hover:text-white cursor-pointer shrink-0"><Copy className="w-3 h-3"/></button>
+                <button onClick={() => handleCopyCode(`repro-${finding.id}`, ev.reproduction)} aria-label="Copy reproduction command" className="text-zinc-500 hover:text-white cursor-pointer shrink-0"><Copy className="w-3 h-3" aria-hidden="true"/></button>
               </div>
             )}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
               <div className="p-3 bg-black border border-zinc-800 rounded relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-full bg-zinc-900/80 p-1.5 border-b border-zinc-800 text-[9px] uppercase tracking-wider font-mono text-amber-500/80 flex items-center justify-between">
                   <span>Attack Request</span>
-                  <button onClick={() => handleCopyCode(`evreq-${finding.id}`, ev.attack.request)} className="text-zinc-500 hover:text-white cursor-pointer"><Copy className="w-3 h-3"/></button>
+                  <button onClick={() => handleCopyCode(`evreq-${finding.id}`, ev.attack.request)} aria-label="Copy attack request" className="text-zinc-500 hover:text-white cursor-pointer"><Copy className="w-3 h-3" aria-hidden="true"/></button>
                 </div>
                 <div className="pt-6 overflow-x-auto max-h-64 scrollbar-thin">
                   <code className="text-[10px] font-mono whitespace-pre text-zinc-400 break-all">{ev.attack.request}</code>
@@ -78,7 +79,7 @@ export default function EvidenceReceipt({ finding, expandedApiRows, setExpandedA
               <div className="p-3 bg-black border border-zinc-800 rounded relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-full bg-zinc-900/80 p-1.5 border-b border-zinc-800 text-[9px] uppercase tracking-wider font-mono text-red-400/80 flex items-center justify-between">
                   <span>{isOob ? 'Out-of-Band Callback' : 'Attack Response'}</span>
-                  <button onClick={() => handleCopyCode(`evres-${finding.id}`, ev.attack.response)} className="text-zinc-500 hover:text-white cursor-pointer"><Copy className="w-3 h-3"/></button>
+                  <button onClick={() => handleCopyCode(`evres-${finding.id}`, ev.attack.response)} aria-label={isOob ? 'Copy out-of-band callback' : 'Copy attack response'} className="text-zinc-500 hover:text-white cursor-pointer"><Copy className="w-3 h-3" aria-hidden="true"/></button>
                 </div>
                 <div className="pt-6 overflow-x-auto max-h-64 scrollbar-thin">
                   <code className="text-[10px] font-mono whitespace-pre text-zinc-400 break-all">{ev.attack.response}</code>
