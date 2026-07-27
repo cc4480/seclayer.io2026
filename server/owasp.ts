@@ -14,6 +14,10 @@ export function mapOwasp(category: string, title: string): string {
   if (/\bssrf\b|server-side request forgery/.test(t)) {
     return "A10:2021 – Server-Side Request Forgery (SSRF)";
   }
+  // A07 — Identification and Authentication Failures (JWT/session/auth bypass)
+  if (/\bjwt\b|json web token|signature not verified|authentication bypass|auth bypass|session fixation|weak session/.test(t)) {
+    return "A07:2021 – Identification and Authentication Failures";
+  }
   // A01 — Broken Access Control (IDOR/BOLA, directory listing, exposed admin/db panels)
   if (/\b(idor|bola)\b|broken object level|broken access|directory listing|access control|phpmyadmin|adminer|admin panel|unauthorized/.test(t)) {
     return "A01:2021 – Broken Access Control";

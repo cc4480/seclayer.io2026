@@ -10,6 +10,7 @@ import { probeStoredXss } from "./storedXss.js";
 import { runRedTeamProbes } from "./redTeamProbes.js";
 import { runAggressiveProbes } from "./aggressiveProbes.js";
 import { runApiSecProbes } from "./apiProbes.js";
+import { probeJwtAuth } from "./jwtProbe.js";
 import { runPassiveScan } from "./passiveScan.js";
 import type { DiagnosticResult, ScanOptions } from "./scanTypes.js";
 
@@ -103,6 +104,18 @@ export async function runDiagnostics(
   result.apiSecFindings = allowActiveProbes
     ? await runApiSecProbes(url, host, headers, { bolaIdentities: opts.bolaIdentities })
     : [];
+
+  // JWT auth-weakness probe (signature-not-verified). Only fires when the scan
+  // carries a Bearer JWT and the endpoint enforces auth; read-only. Gated on
+  // ownership; appended to the red-team findings for the shared receipt pipeline.
+  if (allowActiveProbes) {
+    try {
+      const jwtFinding = await probeJwtAuth(url, headers);
+      if (jwtFinding) result.redTeamFindings = [...(result.redTeamFindings || []), jwtFinding];
+    } catch (e) {
+      console.warn("JWT auth probe encountered an error", e);
+    }
+  }
 
   // AGGRESSIVE tier (opt-in, more invasive): SSTI, LFI/path-traversal, open
   // redirect, CRLF, CORS, out-of-band XXE, NoSQL injection. Non-destructive and
