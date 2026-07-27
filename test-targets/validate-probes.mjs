@@ -63,6 +63,9 @@ if (process.env.VULN_EXPOSE_SURFACE === '1') {
     // POST-body findings, distinct from the GET-link rows above.
     { probe: 'XSS — discovered POST form field',     titleIncludes: 'Reflected XSS (discovered parameter "q" on /submit-review' },
     { probe: 'SQLi — discovered POST form field',    titleIncludes: 'SQL Injection (discovered parameter "id" on /submit-review' },
+    // Stored/persistent XSS: submit a marker to the /guestbook form, then see it
+    // served back unescaped on a separate GET.
+    { probe: 'Stored XSS — discovered form',         titleIncludes: 'Stored XSS (discovered form field "comment" on /guestbook' },
   );
 }
 

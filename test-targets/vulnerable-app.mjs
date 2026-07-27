@@ -20,6 +20,8 @@
 //               action=/submit-review> with fields q (XSS) + id (SQLi) whose
 //               body feeds the same reflective sinks, validating POST-body
 //               discovered-parameter fuzzing alongside the GET-link surface.
+//   Stored XSS (VULN_EXPOSE_SURFACE=1): a crawlable /guestbook form that
+//               persists `comment` and renders it unescaped on GET.
 import http from 'node:http';
 
 const PORT = Number(process.argv[2] || process.env.VULN_PORT || 4100);
@@ -31,6 +33,11 @@ const ORDERS = {
   '1001': { id: '1001', owner: 'tok-alice', email: 'alice@vulnshop.test', total: '$42.00', card: '**** 4242' },
   '1002': { id: '1002', owner: 'tok-bob', email: 'bob@vulnshop.test', total: '$88.00', card: '**** 1881' },
 };
+
+// STORED XSS sink: POST /guestbook persists the `comment` field; GET /guestbook
+// renders every stored comment UNESCAPED, so a payload submitted once executes
+// for anyone who later loads the page. In-memory, reset on restart.
+const GUESTBOOK = [];
 
 const server = http.createServer((req, res) => {
   // Buffer the request body so the XXE / NoSQL simulations can inspect POST data.
@@ -88,6 +95,20 @@ function handle(req, res, rawBody) {
       ? { authenticated: true, token: 'sess_' + Math.random().toString(16).slice(2) }
       : { authenticated: false }));
     return;
+  }
+
+  // STORED XSS — persist the posted comment, then render ALL stored comments
+  // unescaped on GET, so a payload submitted once executes for later visitors.
+  if (u.pathname === '/guestbook') {
+    if (req.method === 'POST') {
+      const comment = new URLSearchParams(rawBody || '').get('comment') || '';
+      GUESTBOOK.push(comment);
+      res.writeHead(200, { 'Content-Type': 'text/html', ...cors });
+      return res.end('<!doctype html><html><body>Thanks for your comment!</body></html>');
+    }
+    const items = GUESTBOOK.map((c) => `<li>${c}</li>`).join(''); // deliberately UNESCAPED
+    res.writeHead(200, { 'Content-Type': 'text/html', ...cors });
+    return res.end(`<!doctype html><html><body><h1>Guestbook</h1><ul>${items}</ul></body></html>`);
   }
 
   // 6. GraphQL introspection — a production endpoint with introspection left ON.
@@ -165,6 +186,11 @@ function handle(req, res, rawBody) {
       + `<input name="q" placeholder="review">`
       + `<input name="id" placeholder="ref">`
       + `<button type="submit">Submit review</button></form>`;
+    // A crawlable guestbook form whose /guestbook endpoint persists + renders the
+    // comment unescaped — the discoverable surface for the STORED-XSS probe.
+    body += `<form method="POST" action="/guestbook">`
+      + `<input name="comment" placeholder="leave a comment">`
+      + `<button type="submit">Sign guestbook</button></form>`;
   }
 
   // Form-encoded POST bodies feed the SAME reflective sinks as GET query params,

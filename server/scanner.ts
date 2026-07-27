@@ -6,6 +6,7 @@ import { renderPage, isRenderingEnabled } from "./render.js";
 import { safeFetch, assertTargetIsScannable } from "./ssrf.js";
 import { parseAuthHeader } from "./evidence.js";
 import { fuzzDiscoveredTargets } from "./paramFuzzer.js";
+import { probeStoredXss } from "./storedXss.js";
 import { runRedTeamProbes } from "./redTeamProbes.js";
 import { runAggressiveProbes } from "./aggressiveProbes.js";
 import { runApiSecProbes } from "./apiProbes.js";
@@ -153,6 +154,16 @@ export async function runDiagnostics(
         const fuzzTargets = allTargets.filter((t) => t.params.length > 0);
         fuzz = await fuzzDiscoveredTargets(fuzzTargets, { ...headers, "Cache-Control": "no-cache" }, { aggressive: allowAggressiveProbes });
         result.redTeamFindings = [...(result.redTeamFindings || []), ...fuzz.findings];
+      }
+
+      // Stored/persistent XSS over discovered POST forms. Aggressive tier: it
+      // submits a persisting marker (mutates state), so it requires the same
+      // explicit opt-in as the other invasive probes. Proves the two-step flow —
+      // POST the marker, then see it on a separate GET.
+      if (allowAggressiveProbes) {
+        const formTargets = allTargets.filter((t) => t.method === "POST" && t.params.length > 0);
+        const stored = await probeStoredXss(formTargets, { ...headers, "Cache-Control": "no-cache" });
+        result.redTeamFindings = [...(result.redTeamFindings || []), ...stored];
       }
 
       result.crawl = {
