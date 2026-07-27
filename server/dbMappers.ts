@@ -8,6 +8,8 @@ export function rowToUser(row: any): User | undefined {
   return {
     id: row.id, email: row.email, credits: row.credits,
     notifyWebhook: row.notifyWebhook ?? undefined, createdAt: row.createdAt,
+    emailDigest: row.emailDigest ? true : false,
+    lastDigestAt: row.lastDigestAt ?? undefined,
   };
 }
 

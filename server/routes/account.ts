@@ -203,6 +203,16 @@ export function registerAccountRoutes(app: express.Express, ctx: RouteContext) {
     res.json({ status: "ok", notifyWebhook: user?.notifyWebhook ?? null });
   });
 
+  // --- Weekly monitoring digest email (opt-in) ---
+  app.put("/api/user/email-digest", requireAuth, (req, res) => {
+    const { enabled } = req.body || {};
+    if (typeof enabled !== "boolean") {
+      return res.status(400).json({ status: "error", message: "enabled (boolean) is required." });
+    }
+    const user = db.setEmailDigest(getUserId(req), enabled);
+    res.json({ status: "ok", emailDigest: user?.emailDigest ?? false });
+  });
+
   // --- Personal DeepSeek API key (bring-your-own-key) ---
   // Lets a user supply their own DeepSeek key so their scans get full AI reports
   // even when the server has no global key (e.g. free mode). Send an empty/null

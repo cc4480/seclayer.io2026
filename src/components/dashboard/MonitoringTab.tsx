@@ -134,6 +134,24 @@ export default function MonitoringTab({ m, onViewReport }: { m: ReturnType<typeo
             {m.webhookSaving ? 'Saving…' : m.webhookSaved ? 'Saved ✓' : m.webhookUrl.trim() ? 'Save Webhook' : 'Disable'}
           </button>
         </div>
+
+        {/* Weekly digest email opt-in */}
+        <div className="mt-4 pt-4 border-t border-[#27272a] flex items-center justify-between gap-3">
+          <div>
+            <span className="text-white text-[11px] font-mono font-bold">Weekly digest email</span>
+            <p className="text-[10px] text-[#a1a1aa] mt-0.5">A summary of every monitored target's posture and what changed, emailed once a week.</p>
+          </div>
+          <button
+            type="button"
+            onClick={m.toggleDigest}
+            disabled={m.digestSaving}
+            role="switch"
+            aria-checked={m.digestOn}
+            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors cursor-pointer disabled:opacity-50 ${m.digestOn ? 'bg-[#22c55e]' : 'bg-[#27272a]'}`}
+          >
+            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${m.digestOn ? 'translate-x-6' : 'translate-x-1'}`} />
+          </button>
+        </div>
       </div>
 
       <div className="bg-[#0c0c0e] border border-[#27272a] rounded p-5">

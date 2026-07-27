@@ -320,3 +320,24 @@ test('GET /api/monitoring enriches each target with its latest scan', async () =
     assert.equal(target.lastScan.severity, 'medium');
   });
 });
+
+test('PUT /api/user/email-digest toggles the opt-in and validates the body', async () => {
+  await withAccountApp(async (base, userId) => {
+    const on = await fetch(`${base}/api/user/email-digest`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: true }),
+    });
+    assert.equal(on.status, 200);
+    assert.equal((await on.json()).emailDigest, true);
+    assert.equal(db.getUser(userId)!.emailDigest, true);
+
+    const off = await fetch(`${base}/api/user/email-digest`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: false }),
+    });
+    assert.equal((await off.json()).emailDigest, false);
+
+    const bad = await fetch(`${base}/api/user/email-digest`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: 'yes' }),
+    });
+    assert.equal(bad.status, 400);
+  });
+});

@@ -7,6 +7,8 @@ export interface User {
   credits: number;
   notifyWebhook?: string; // optional Slack-compatible alert webhook
   createdAt: string;
+  emailDigest?: boolean;  // opt-in: weekly monitoring digest email
+  lastDigestAt?: string;  // when the last digest was sent (server-side scheduling)
 }
 
 // A single request/response pair captured verbatim during active probing — the

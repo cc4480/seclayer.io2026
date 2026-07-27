@@ -86,6 +86,24 @@ class SqliteDb {
     return this.getUser(userId);
   }
 
+  // Opt in/out of the weekly monitoring digest email.
+  setEmailDigest(userId: string, enabled: boolean): User | undefined {
+    this.db.prepare("UPDATE users SET emailDigest = ? WHERE id = ?").run(enabled ? 1 : 0, userId);
+    return this.getUser(userId);
+  }
+
+  // Users who opted into the digest (the worker's candidate recipients).
+  listDigestRecipients(): User[] {
+    return (this.db.prepare("SELECT * FROM users WHERE emailDigest = 1").all() as any[])
+      .map(rowToUser)
+      .filter((u): u is User => !!u);
+  }
+
+  // Record that a digest was just delivered, so the weekly cadence is honored.
+  markDigestSent(userId: string, iso: string): void {
+    this.db.prepare("UPDATE users SET lastDigestAt = ? WHERE id = ?").run(iso, userId);
+  }
+
   // Per-user "bring your own key" DeepSeek credential. Stored so the scan
   // pipeline can use the user's own AI budget; deliberately NOT surfaced via
   // rowToUser/the User type, so it never leaks to the client. Pass null to clear.

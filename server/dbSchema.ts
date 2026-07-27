@@ -132,6 +132,9 @@ export function runMigrations(db: Database.Database): void {
   // Additive column migrations (safe across existing databases).
   addColumnIfMissing(db, "users", "notifyWebhook", "TEXT");
   addColumnIfMissing(db, "users", "deepseekApiKey", "TEXT");
+  // Opt-in weekly monitoring digest email + when the last one was sent.
+  addColumnIfMissing(db, "users", "emailDigest", "INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing(db, "users", "lastDigestAt", "TEXT");
   addColumnIfMissing(db, "api_keys", "keyPreview", "TEXT");
   addColumnIfMissing(db, "scans", "aiReasoning", "TEXT");
   addColumnIfMissing(db, "scans", "narrationLog", "TEXT");

@@ -24,6 +24,29 @@ export function useMonitoring(user: User, scans: Scan[], onDataChanged?: () => v
   const [webhookSaving, setWebhookSaving] = useState(false);
   const [webhookSaved, setWebhookSaved] = useState(false);
 
+  // Opt-in weekly monitoring digest email.
+  const [digestOn, setDigestOn] = useState<boolean>(!!user.emailDigest);
+  const [digestSaving, setDigestSaving] = useState(false);
+  const toggleDigest = async () => {
+    const next = !digestOn;
+    setDigestSaving(true);
+    try {
+      const res = await fetch('/api/user/email-digest', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: next }),
+      });
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setDigestOn(!!data.emailDigest);
+      }
+    } catch {
+      /* leave the toggle as-is on error */
+    } finally {
+      setDigestSaving(false);
+    }
+  };
+
   const fetchSuppressRules = async () => {
     try {
       const res = await fetch(`/api/suppressions`);
@@ -205,5 +228,6 @@ export function useMonitoring(user: User, scans: Scan[], onDataChanged?: () => v
     monitorDay, setMonitorDay, monitorTime, setMonitorTime, isAddingMonitor, monitorError,
     handleAddMonitor, handleDeleteMonitor, togglePause, scanNow, editSchedule, busyTargetId, rowNotice,
     webhookUrl, setWebhookUrl, webhookSaving, webhookSaved, saveWebhook,
+    digestOn, digestSaving, toggleDigest,
   };
 }
