@@ -89,10 +89,15 @@ export function renderRawResponse(res: Response, bodyWindow: string): string {
   return lines.join("\n");
 }
 
-// Assemble a full exploit receipt from a single GET attack exchange whose proof is
+// Assemble a full exploit receipt from a single attack exchange whose proof is
 // a substring of the response body at [matchIndex, matchIndex+quote.length). The
 // response is windowed so the proof always survives truncation, keeping the
 // invariant that signal.quote is a literal substring of the stored response.
+//
+// Defaults to a GET exchange. For a POST body injection (the discovered-form
+// fuzzer), pass reqMethod:"POST" with the reqBody and reqContentType actually
+// sent, so the receipt's raw request and curl reproduction show the real POST —
+// the proof (signal.quote in the response) is identical either way.
 export function buildProbeEvidence(params: {
   method: ExploitEvidence["method"];
   attackUrl: string;
@@ -103,22 +108,34 @@ export function buildProbeEvidence(params: {
   quote: string;
   why: string;
   demonstration: string;
+  reqMethod?: "GET" | "POST";
+  reqBody?: string;
+  reqContentType?: string;
 }): ExploitEvidence {
+  const reqMethod = params.reqMethod || "GET";
   const bodyWindow = windowAround(params.body, params.matchIndex, params.quote.length);
   const response = renderRawResponse(params.res, bodyWindow);
+  const reqHeaders =
+    reqMethod === "POST" && params.reqContentType
+      ? { ...params.requestHeaders, "Content-Type": params.reqContentType }
+      : params.requestHeaders;
+  const request = renderRawRequest(reqMethod, params.attackUrl, reqHeaders, params.reqBody);
+  const reproduction =
+    reqMethod === "POST"
+      ? `curl -s -X POST "${params.attackUrl}"` +
+        (params.reqContentType ? ` -H "Content-Type: ${params.reqContentType}"` : "") +
+        (params.reqBody != null ? ` --data '${params.reqBody}'` : "")
+      : `curl -s "${params.attackUrl}"`;
   return {
     method: params.method,
-    attack: {
-      request: renderRawRequest("GET", params.attackUrl, params.requestHeaders),
-      response,
-    },
+    attack: { request, response },
     signal: {
       quote: params.quote,
       offsetInResponse: response.indexOf(params.quote),
       why: params.why,
     },
     demonstration: params.demonstration,
-    reproduction: `curl -s "${params.attackUrl}"`,
+    reproduction,
     capturedAt: new Date().toISOString(),
   };
 }

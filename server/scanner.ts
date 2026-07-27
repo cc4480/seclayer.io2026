@@ -146,8 +146,12 @@ export async function runDiagnostics(
       // is gated behind verified domain ownership like the other red-team probes.
       let fuzz = { findings: [] as any[], paramsTested: 0 };
       if (allowActiveProbes) {
-        const getTargets = allTargets.filter((t) => t.method === "GET" && t.params.length > 0);
-        fuzz = await fuzzDiscoveredTargets(getTargets, { ...headers, "Cache-Control": "no-cache" }, { aggressive: allowAggressiveProbes });
+        // Fuzz both GET query parameters and POST form fields the crawler mapped.
+        // The fuzzer sends each payload with the target's own method (query string
+        // for GET, form-encoded body for POST), so discovered forms are no longer
+        // mapped-but-skipped.
+        const fuzzTargets = allTargets.filter((t) => t.params.length > 0);
+        fuzz = await fuzzDiscoveredTargets(fuzzTargets, { ...headers, "Cache-Control": "no-cache" }, { aggressive: allowAggressiveProbes });
         result.redTeamFindings = [...(result.redTeamFindings || []), ...fuzz.findings];
       }
 

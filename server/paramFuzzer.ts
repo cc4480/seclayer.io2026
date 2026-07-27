@@ -1,11 +1,15 @@
-// Active injection fuzzing of discovered GET parameters. Smarter than a fixed
-// one-payload-per-param sweep: (1) parameters are prioritized by how injectable
-// their names look, (2) XSS is reflection-guided — a benign marker is sent first,
-// and real payloads only follow where it reflects, matched to the reflection
-// context, and (3) SQLi tries an ordered set of context-breakers with early-exit.
-// Bounded by BOTH a request cap and a wall-clock deadline, so raising the cap
-// never balloons scan time on a slow target. Every finding still carries a PROVEN
-// receipt (substring-verifiable signal).
+// Active injection fuzzing of discovered parameters — GET query parameters AND
+// POST form fields the crawler mapped. Smarter than a fixed one-payload-per-param
+// sweep: (1) parameters are prioritized by how injectable their names look,
+// (2) XSS is reflection-guided — a benign marker is sent first, and real payloads
+// only follow where it reflects, matched to the reflection context, and (3) SQLi
+// tries an ordered set of context-breakers with early-exit. GET puts the payload
+// in the query string; POST sends a form-encoded body carrying every discovered
+// field (the injected one set to the payload, the rest to a benign filler) so
+// validation that requires sibling fields still reaches the sink. Bounded by BOTH
+// a request cap and a wall-clock deadline, so raising the cap never balloons scan
+// time on a slow target. Every finding still carries a PROVEN receipt
+// (substring-verifiable signal) that reflects the exact request — GET or POST.
 import crypto from "crypto";
 import { InjectableTarget } from "./crawler.js";
 import { guardedFetch, safeFetch } from "./ssrf.js";
@@ -62,6 +66,53 @@ export async function fuzzDiscoveredTargets(
   };
   const canSpend = () => budget > 0 && Date.now() < DEADLINE;
 
+  // Form-encoded POST body carrying every discovered field: the injected field
+  // holds the payload, the rest a benign filler, so endpoints that validate the
+  // presence of sibling fields still process our value. The injected field is
+  // guaranteed present even if it wasn't in the discovered list.
+  const FILLER = "seclayer";
+  const formBody = (allParams: string[], injectParam: string, value: string): string => {
+    const usp = new URLSearchParams();
+    const names = allParams.includes(injectParam) ? allParams : [...allParams, injectParam];
+    for (const p of names) usp.set(p, p === injectParam ? value : FILLER);
+    return usp.toString();
+  };
+
+  // A single (param=value) injection sent with the target's own method. Returns
+  // the exchange plus the exact request shape, so the PROVEN receipt shows the
+  // real GET or POST. The response-side proof (signal.quote appearing in the
+  // body) is identical for both, so every probe below is method-agnostic.
+  type Sent = {
+    res: Response;
+    text: string;
+    attackUrl: string;
+    reqMethod: "GET" | "POST";
+    reqBody?: string;
+    reqContentType?: string;
+  };
+  const sendInjection = async (t: InjectableTarget, param: string, value: string): Promise<Sent> => {
+    if (t.method === "POST") {
+      const body = formBody(t.params, param, value);
+      const contentType = "application/x-www-form-urlencoded";
+      const ctl = new AbortController();
+      const id = setTimeout(() => ctl.abort(), 4000);
+      try {
+        const res = await safeFetch(t.url, {
+          method: "POST",
+          headers: { ...fuzzHeaders, "Content-Type": contentType },
+          body,
+          signal: ctl.signal,
+        });
+        return { res, text: await res.text(), attackUrl: t.url, reqMethod: "POST", reqBody: body, reqContentType: contentType };
+      } finally {
+        clearTimeout(id);
+      }
+    }
+    const url = buildUrl(t.url, param, value);
+    const { res, text } = await probe(url);
+    return { res, text, attackUrl: url, reqMethod: "GET" };
+  };
+
   // SQL context-breakers, ordered by error-provoking yield. A bare unbalanced
   // quote/paren is the highest-signal error trigger (an "' OR 1=1-- -" often
   // produces VALID sql and no error); these cover single-quote, double-quote and
@@ -92,23 +143,22 @@ export async function fuzzDiscoveredTargets(
   };
 
   // --- per-class probes (each pushes a PROVEN finding on success) ---
-  const trySqli = async (targetUrl: string, param: string, endpointPath: string): Promise<void> => {
+  const trySqli = async (t: InjectableTarget, param: string, endpointPath: string): Promise<void> => {
     const key = `sqli:${endpointPath}:${param}`;
     if (reported.has(key)) return;
     for (const breaker of SQL_BREAKERS) {
       if (!canSpend()) return;
       budget--;
       try {
-        const attackUrl = buildUrl(targetUrl, param, breaker);
-        const { res, text } = await probe(attackUrl);
-        const m = sqlErrorSig.exec(text);
+        const sent = await sendInjection(t, param, breaker);
+        const m = sqlErrorSig.exec(sent.text);
         if (m) {
           // Differential guard against false positives: confirm a benign value
           // for this parameter doesn't already produce the same DB error. If it
           // does, the error is inherent page content, not injection — suppress.
           // Only runs on a match (rare), so it doesn't inflate the request budget.
           budget--;
-          const baseText = await probe(buildUrl(targetUrl, param, "seclayer1")).then((p) => p.text).catch(() => "");
+          const baseText = await sendInjection(t, param, "seclayer1").then((s) => s.text).catch(() => "");
           if (sqlErrorSig.test(baseText)) return; // inherent error → not a finding
           reported.add(key);
           findings.push({
@@ -119,13 +169,14 @@ export async function fuzzDiscoveredTargets(
             testName: `SQL Injection (discovered parameter "${param}" on ${endpointPath})`,
             payload: `${param}=${breaker}`,
             severity: "critical",
-            description: `Injecting SQL metacharacters into the discovered parameter "${param}" on ${endpointPath} provoked a database error, indicating an exploitable SQL injection.`,
+            description: `Injecting SQL metacharacters into the discovered ${sent.reqMethod} parameter "${param}" on ${endpointPath} provoked a database error, indicating an exploitable SQL injection.`,
             fix: "Use parameterized queries / prepared statements for this endpoint; never concatenate request input into SQL.",
             evidence: buildProbeEvidence({
-              method: "error-signature", attackUrl, requestHeaders: fuzzHeaders, res, body: text,
+              method: "error-signature", attackUrl: sent.attackUrl, requestHeaders: fuzzHeaders, res: sent.res, body: sent.text,
               matchIndex: m.index, quote: m[0],
+              reqMethod: sent.reqMethod, reqBody: sent.reqBody, reqContentType: sent.reqContentType,
               why: `This raw database error is emitted only when the injected payload breaks the SQL query's syntax, proving the "${param}" parameter reaches the database unescaped.`,
-              demonstration: `We injected ${breaker} into the "${param}" parameter on ${endpointPath} and the server returned a raw database error — proof that this parameter's value is concatenated into a SQL query unescaped.`,
+              demonstration: `We injected ${breaker} into the "${param}" ${sent.reqMethod} parameter on ${endpointPath} and the server returned a raw database error — proof that this parameter's value is concatenated into a SQL query unescaped.`,
             }),
           });
           return; // early-exit: confirmed for this param
@@ -134,7 +185,7 @@ export async function fuzzDiscoveredTargets(
     }
   };
 
-  const tryXss = async (targetUrl: string, param: string, endpointPath: string): Promise<void> => {
+  const tryXss = async (t: InjectableTarget, param: string, endpointPath: string): Promise<void> => {
     const key = `xss:${endpointPath}:${param}`;
     if (reported.has(key) || !canSpend()) return;
     // Reflection-guided: send a benign marker first; only fuzz XSS where it lands.
@@ -142,7 +193,7 @@ export async function fuzzDiscoveredTargets(
     let ctx: XssCtx | null = null;
     try {
       const marker = `zq${crypto.randomBytes(4).toString("hex")}`;
-      const { text } = await probe(buildUrl(targetUrl, param, marker));
+      const { text } = await sendInjection(t, param, marker);
       const mi = text.indexOf(marker);
       if (mi !== -1) ctx = reflectionContext(text, mi);
     } catch { /* skip */ }
@@ -156,13 +207,12 @@ export async function fuzzDiscoveredTargets(
       const token = `sx${crypto.randomBytes(4).toString("hex")}`;
       const payload = xssForContext(c, token);
       try {
-        const attackUrl = buildUrl(targetUrl, param, payload);
-        const { res, text } = await probe(attackUrl);
-        const idx = text.indexOf(payload);
+        const sent = await sendInjection(t, param, payload);
+        const idx = sent.text.indexOf(payload);
         // Verbatim reflection is confirmed, but still require the response to be
         // browser-parsed HTML and the payload to land in an executing context —
         // a non-HTML body or a comment/<textarea>/<title> reflection is inert.
-        if (idx !== -1 && xssReflectionExecutes(res.headers.get("content-type"), text, idx)) {
+        if (idx !== -1 && xssReflectionExecutes(sent.res.headers.get("content-type"), sent.text, idx)) {
           reported.add(key);
           findings.push({
             // Same reasoning as the SQLi finding above: the param + endpoint
@@ -171,13 +221,14 @@ export async function fuzzDiscoveredTargets(
             testName: `Reflected XSS (discovered parameter "${param}" on ${endpointPath})`,
             payload: `${param}=${payload}`,
             severity: "high",
-            description: `The discovered parameter "${param}" on ${endpointPath} reflects unencoded HTML/JavaScript into the response, confirming a reflected Cross-Site Scripting vulnerability.`,
+            description: `The discovered ${sent.reqMethod} parameter "${param}" on ${endpointPath} reflects unencoded HTML/JavaScript into the response, confirming a reflected Cross-Site Scripting vulnerability.`,
             fix: "Apply context-aware output encoding for this parameter and deploy a restrictive Content-Security-Policy.",
             evidence: buildProbeEvidence({
-              method: "reflection", attackUrl, requestHeaders: fuzzHeaders, res, body: text,
+              method: "reflection", attackUrl: sent.attackUrl, requestHeaders: fuzzHeaders, res: sent.res, body: sent.text,
               matchIndex: idx, quote: payload,
+              reqMethod: sent.reqMethod, reqBody: sent.reqBody, reqContentType: sent.reqContentType,
               why: `The payload was reflected verbatim and unescaped in ${c === "attr" ? "an attribute" : c === "script" ? "a script" : "an HTML"} context, so a browser executes the injected "${param}" value as live markup.`,
-              demonstration: `We placed ${payload} in the "${param}" parameter on ${endpointPath} and the server echoed it back unescaped — an attacker-supplied script in this parameter would run in a visitor's browser.`,
+              demonstration: `We placed ${payload} in the "${param}" ${sent.reqMethod} parameter on ${endpointPath} and the server echoed it back unescaped — an attacker-supplied script in this parameter would run in a visitor's browser.`,
             }),
           });
           return; // confirmed for this param
@@ -192,7 +243,7 @@ export async function fuzzDiscoveredTargets(
 
   // SSTI: arithmetic oracle. The product only appears if the engine evaluated
   // our expression; the literal payload never contains it.
-  const trySsti = async (targetUrl: string, param: string, endpointPath: string): Promise<void> => {
+  const trySsti = async (t: InjectableTarget, param: string, endpointPath: string): Promise<void> => {
     const key = `ssti:${endpointPath}:${param}`;
     if (reported.has(key)) return;
     const a = 1000 + crypto.randomInt(8999), b = 1000 + crypto.randomInt(8999);
@@ -201,22 +252,22 @@ export async function fuzzDiscoveredTargets(
       if (!canSpend()) return;
       budget--;
       try {
-        const attackUrl = buildUrl(targetUrl, param, expr);
-        const { res, text } = await probe(attackUrl);
-        const idx = text.indexOf(product);
-        if (idx !== -1 && !text.includes(expr)) {
+        const sent = await sendInjection(t, param, expr);
+        const idx = sent.text.indexOf(product);
+        if (idx !== -1 && !sent.text.includes(expr)) {
           reported.add(key);
           findings.push({
             testName: `Server-Side Template Injection (discovered parameter "${param}" on ${endpointPath})`,
             payload: `${param}=${expr}`,
             severity: "critical",
-            description: `The discovered parameter "${param}" on ${endpointPath} is evaluated by a server-side template engine: injecting "${expr}" returned its computed result. SSTI frequently escalates to remote code execution.`,
+            description: `The discovered ${sent.reqMethod} parameter "${param}" on ${endpointPath} is evaluated by a server-side template engine: injecting "${expr}" returned its computed result. SSTI frequently escalates to remote code execution.`,
             fix: "Never render user input as a template. Pass untrusted values only as data to a pre-compiled/sandboxed template for this parameter.",
             evidence: buildProbeEvidence({
-              method: "oracle", attackUrl, requestHeaders: fuzzHeaders, res, body: text,
+              method: "oracle", attackUrl: sent.attackUrl, requestHeaders: fuzzHeaders, res: sent.res, body: sent.text,
               matchIndex: idx, quote: product,
+              reqMethod: sent.reqMethod, reqBody: sent.reqBody, reqContentType: sent.reqContentType,
               why: `We injected the template expression "${expr}"; the response contained ${product}, the exact product of ${a}×${b}, which the literal payload never contains — so the "${param}" value was evaluated as a template.`,
-              demonstration: `We placed "${expr}" in the "${param}" parameter on ${endpointPath} and the server rendered ${product} — proof the backend evaluated our expression (SSTI).`,
+              demonstration: `We placed "${expr}" in the "${param}" ${sent.reqMethod} parameter on ${endpointPath} and the server rendered ${product} — proof the backend evaluated our expression (SSTI).`,
             }),
           });
           return;
@@ -226,29 +277,29 @@ export async function fuzzDiscoveredTargets(
   };
 
   // Path traversal / LFI: retrieve /etc/passwd via a discovered parameter.
-  const tryLfi = async (targetUrl: string, param: string, endpointPath: string): Promise<void> => {
+  const tryLfi = async (t: InjectableTarget, param: string, endpointPath: string): Promise<void> => {
     const key = `lfi:${endpointPath}:${param}`;
     if (reported.has(key)) return;
     for (const payload of ["../../../../../../../../etc/passwd", "....//....//....//....//....//etc/passwd", "/etc/passwd"]) {
       if (!canSpend()) return;
       budget--;
       try {
-        const attackUrl = buildUrl(targetUrl, param, payload);
-        const { res, text } = await probe(attackUrl);
-        const m = PASSWD_SIG.exec(text);
+        const sent = await sendInjection(t, param, payload);
+        const m = PASSWD_SIG.exec(sent.text);
         if (m) {
           reported.add(key);
           findings.push({
             testName: `Path Traversal / Local File Inclusion (discovered parameter "${param}" on ${endpointPath})`,
             payload: `${param}=${payload}`,
             severity: "critical",
-            description: `The discovered parameter "${param}" on ${endpointPath} reads an attacker-supplied filesystem path: a traversal payload returned the contents of /etc/passwd. An attacker can read arbitrary files the app can access.`,
+            description: `The discovered ${sent.reqMethod} parameter "${param}" on ${endpointPath} reads an attacker-supplied filesystem path: a traversal payload returned the contents of /etc/passwd. An attacker can read arbitrary files the app can access.`,
             fix: "Resolve the path and confirm it stays within an allowed base directory (canonicalize then prefix-check), or map inputs to an allow-list; reject path separators/traversal for this parameter.",
             evidence: buildProbeEvidence({
-              method: "error-signature", attackUrl, requestHeaders: fuzzHeaders, res, body: text,
+              method: "error-signature", attackUrl: sent.attackUrl, requestHeaders: fuzzHeaders, res: sent.res, body: sent.text,
               matchIndex: m.index, quote: m[0],
+              reqMethod: sent.reqMethod, reqBody: sent.reqBody, reqContentType: sent.reqContentType,
               why: `This "root" line from /etc/passwd is outside the web root and only appears because our traversal payload in "${param}" reached the filesystem.`,
-              demonstration: `We requested "${payload}" via the "${param}" parameter on ${endpointPath} and the server returned /etc/passwd contents ("${m[0]}") — arbitrary file read.`,
+              demonstration: `We requested "${payload}" via the "${param}" ${sent.reqMethod} parameter on ${endpointPath} and the server returned /etc/passwd contents ("${m[0]}") — arbitrary file read.`,
             }),
           });
           return;
@@ -258,19 +309,22 @@ export async function fuzzDiscoveredTargets(
   };
 
   // Open redirect: a discovered parameter used as an unvalidated redirect target.
-  const tryOpenRedirect = async (targetUrl: string, param: string, endpointPath: string): Promise<void> => {
+  // GET-only: the proof is a 3xx Location header, which the raw GET probe
+  // captures; a form POST rarely drives an offsite redirect via a body field.
+  const tryOpenRedirect = async (t: InjectableTarget, param: string, endpointPath: string): Promise<void> => {
+    if (t.method !== "GET") return;
     const key = `redirect:${endpointPath}:${param}`;
     if (reported.has(key)) return;
     for (const payload of [`https://${REDIRECT_MARKER}/`, `//${REDIRECT_MARKER}/`]) {
       if (!canSpend()) return;
       budget--;
       try {
-        const attackUrl = buildUrl(targetUrl, param, payload);
+        const attackUrl = buildUrl(t.url, param, payload);
         const res = await probeRaw(attackUrl);
         const location = res.headers.get("location") || "";
         let offsite = false;
         if (res.status >= 300 && res.status < 400 && location) {
-          try { offsite = new URL(location, targetUrl).host === REDIRECT_MARKER; } catch { offsite = location.includes(REDIRECT_MARKER); }
+          try { offsite = new URL(location, t.url).host === REDIRECT_MARKER; } catch { offsite = location.includes(REDIRECT_MARKER); }
         }
         if (offsite) {
           reported.add(key);
@@ -295,14 +349,16 @@ export async function fuzzDiscoveredTargets(
 
   // CRLF / response-header injection via a discovered parameter. The %0d%0a must
   // stay percent-encoded in the URL, so this builds the query manually (buildUrl
-  // would re-encode the '%').
-  const tryCrlf = async (targetUrl: string, param: string, endpointPath: string): Promise<void> => {
+  // would re-encode the '%'). GET-only: the proof is an injected response header,
+  // captured by the raw GET probe.
+  const tryCrlf = async (t: InjectableTarget, param: string, endpointPath: string): Promise<void> => {
+    if (t.method !== "GET") return;
     const key = `crlf:${endpointPath}:${param}`;
     if (reported.has(key)) return;
     const marker = `x-seclayer-crlf-${crypto.randomBytes(4).toString("hex")}`;
     let base: string;
     try {
-      const u = new URL(targetUrl);
+      const u = new URL(t.url);
       u.searchParams.delete(param);
       base = u.toString();
     } catch { return; }
@@ -348,17 +404,18 @@ export async function fuzzDiscoveredTargets(
       if (!canSpend()) break;
       paramsTested++;
       // Run the higher-leaning class first so a tight budget hits likely wins.
-      if (s.sqli >= s.xss) { await trySqli(t.url, param, endpointPath); await tryXss(t.url, param, endpointPath); }
-      else { await tryXss(t.url, param, endpointPath); await trySqli(t.url, param, endpointPath); }
+      if (s.sqli >= s.xss) { await trySqli(t, param, endpointPath); await tryXss(t, param, endpointPath); }
+      else { await tryXss(t, param, endpointPath); await trySqli(t, param, endpointPath); }
 
       // Aggressive tier: the four param-injection classes, on the same discovered
       // parameter. Endpoint/header classes (CORS, XXE, NoSQL) run at the root +
-      // candidate-path level in server/aggressiveProbes.ts, not per-GET-param.
+      // candidate-path level in server/aggressiveProbes.ts, not per-param.
+      // trySsti/tryLfi run for GET and POST; open-redirect/CRLF are GET-only.
       if (aggressive) {
-        await trySsti(t.url, param, endpointPath);
-        await tryLfi(t.url, param, endpointPath);
-        await tryOpenRedirect(t.url, param, endpointPath);
-        await tryCrlf(t.url, param, endpointPath);
+        await trySsti(t, param, endpointPath);
+        await tryLfi(t, param, endpointPath);
+        await tryOpenRedirect(t, param, endpointPath);
+        await tryCrlf(t, param, endpointPath);
       }
     }
   }
