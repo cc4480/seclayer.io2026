@@ -15,6 +15,7 @@ import { probeCrlf } from "./aggressive/crlfInjection.js";
 import { probeCors } from "./aggressive/cors.js";
 import { probeXxe } from "./aggressive/xxe.js";
 import { probeNoSql } from "./aggressive/nosql.js";
+import { probeHostHeaderInjection } from "./aggressive/hostHeaderInjection.js";
 
 const PROBES: Probe[] = [
   probeSsti,
@@ -24,6 +25,7 @@ const PROBES: Probe[] = [
   probeCors,
   probeXxe,
   probeNoSql,
+  probeHostHeaderInjection,
 ];
 
 export async function runAggressiveProbes(
