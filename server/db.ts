@@ -442,6 +442,20 @@ class SqliteDb {
     return res.changes > 0;
   }
 
+  // Change an existing monitor's cadence (frequency + weekday + time-of-day),
+  // recomputing its human scheduleString and next-run instant from the new
+  // schedule exactly as addMonitoredTarget does — so display and timing stay in
+  // lockstep and the change takes effect on the very next tick, without the
+  // user having to delete and re-create the monitor. Scoped by userId; returns
+  // the updated target, or undefined when it doesn't belong to this user.
+  updateMonitoredSchedule(userId: string, id: string, schedule: MonitorSchedule): MonitoredTarget | undefined {
+    const nextScanAt = computeNextRun(new Date(), schedule).toISOString();
+    const res = this.db.prepare(
+      'UPDATE monitored_targets SET frequencyDays = ?, scheduleString = ?, scanHour = ?, scanMinute = ?, scanWeekday = ?, nextScanAt = ? WHERE id = ? AND userId = ?'
+    ).run(schedule.frequencyDays, describeSchedule(schedule), schedule.hour ?? null, schedule.minute ?? null, schedule.weekday ?? null, nextScanAt, id, userId);
+    return res.changes > 0 ? this.getMonitoredTarget(userId, id) : undefined;
+  }
+
   // Targets whose next scheduled scan is due (used by the monitoring worker).
   // Paused targets are never returned, so pausing a monitor cleanly stops it.
   listDueMonitoredTargets(nowIso: string): MonitoredTarget[] {

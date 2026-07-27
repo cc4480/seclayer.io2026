@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import net from "node:net";
 import type { AddressInfo } from "node:net";
-import { scan } from "./client.js";
+import { scan, listScans, getReport } from "./client.js";
 
 async function withServer(handler: http.RequestListener, fn: (baseUrl: string) => Promise<void>) {
   const server = http.createServer(handler);
@@ -158,6 +158,95 @@ test("scan maps a 200 missing success:true to malformed", async () => {
       const outcome = await scan(baseUrl, "key", { url: "https://x.test" });
       assert.equal(outcome.ok, false);
       assert.equal((outcome as any).kind, "malformed");
+    },
+  );
+});
+
+// --- read tools: listScans / getReport (no credit cost) ---
+
+test("listScans authenticates with the X-API-Key header and parses the scan list", async () => {
+  let method = "", path = "", sentKey = "";
+  await withServer(
+    (req, res) => {
+      method = req.method || "";
+      path = req.url || "";
+      sentKey = (req.headers["x-api-key"] as string) || "";
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        success: true,
+        scans: [
+          { id: "scan_a", url: "https://x.test", status: "complete", score: 42, severity: "high", createdAt: "t0", completedAt: "t1" },
+        ],
+      }));
+    },
+    async (baseUrl) => {
+      const outcome = await listScans(baseUrl, "sl_live_test", 5);
+      assert.equal(outcome.ok, true);
+      assert.equal((outcome as any).data.scans.length, 1);
+      assert.equal(method, "GET");
+      assert.match(path, /^\/api\/mcp\/scans\?limit=5$/);
+      assert.equal(sentKey, "sl_live_test", "key must travel in the X-API-Key header, not the body");
+    },
+  );
+});
+
+test("listScans maps a 401 to unauthorized", async () => {
+  await withServer(
+    (_req, res) => {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid or missing API key." }));
+    },
+    async (baseUrl) => {
+      const outcome = await listScans(baseUrl, "bad-key");
+      assert.equal(outcome.ok, false);
+      assert.equal((outcome as any).kind, "unauthorized");
+    },
+  );
+});
+
+test("getReport requests the scan by id and parses the full report", async () => {
+  let path = "";
+  await withServer(
+    (req, res) => {
+      path = req.url || "";
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        success: true, targetUrl: "https://x.test", postureScore: 55, vulnerabilityLevel: "medium",
+        analysisSummary: "sum", executiveBreakdown: { overview: "o", riskAreas: [], businessImpact: "b", priorityActions: [] },
+        securityFindings: [], completedAt: "2026-01-01T00:00:00Z",
+      }));
+    },
+    async (baseUrl) => {
+      const outcome = await getReport(baseUrl, "key", "scan_xyz");
+      assert.equal(outcome.ok, true);
+      assert.equal((outcome as any).data.postureScore, 55);
+      assert.equal(path, "/api/mcp/scans/scan_xyz");
+    },
+  );
+});
+
+test("getReport maps a 404 to not_found and a 409 to not_ready", async () => {
+  await withServer(
+    (_req, res) => {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Scan not found." }));
+    },
+    async (baseUrl) => {
+      const outcome = await getReport(baseUrl, "key", "missing");
+      assert.equal(outcome.ok, false);
+      assert.equal((outcome as any).kind, "not_found");
+    },
+  );
+  await withServer(
+    (_req, res) => {
+      res.writeHead(409, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Scan is not complete", status: "scanning" }));
+    },
+    async (baseUrl) => {
+      const outcome = await getReport(baseUrl, "key", "pending");
+      assert.equal(outcome.ok, false);
+      assert.equal((outcome as any).kind, "not_ready");
+      assert.match((outcome as any).message, /scanning/);
     },
   );
 });

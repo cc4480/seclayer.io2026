@@ -80,17 +80,61 @@ export function registerAccountRoutes(app: express.Express, ctx: RouteContext) {
     res.json({ status: "ok", target });
   });
 
-  // Pause/resume a monitor. Paused targets keep their configuration but are
-  // never picked up by the worker (see db.listDueMonitoredTargets).
+  // Update a monitor in place. Two independent edits share this route:
+  //  • pause/resume — { paused: boolean } (paused targets keep their config but
+  //    are never picked up by the worker; see db.listDueMonitoredTargets), and
+  //  • edit cadence — any of { frequencyDays, hour, minute, weekday }, so a user
+  //    can change how often / when a monitor runs without deleting and
+  //    re-creating it. Unspecified schedule fields keep their current value.
   app.patch("/api/monitoring/:id", requireAuth, (req, res) => {
-    const { paused } = req.body || {};
-    if (typeof paused !== "boolean") {
-      return res.status(400).json({ error: "paused (boolean) is required" });
+    const userId = getUserId(req);
+    const body = req.body || {};
+
+    // Pause/resume.
+    if (typeof body.paused === "boolean") {
+      if (!db.setMonitoredPaused(userId, req.params.id, body.paused)) {
+        return res.status(404).json({ error: "Monitored target not found" });
+      }
+      return res.json({ status: "ok", paused: body.paused });
     }
-    if (!db.setMonitoredPaused(getUserId(req), req.params.id, paused)) {
-      return res.status(404).json({ error: "Monitored target not found" });
+
+    // Edit cadence. Accept a partial change and merge it over the current values.
+    const hasSchedule = ["frequencyDays", "hour", "minute", "weekday"].some((k) => k in body);
+    if (hasSchedule) {
+      const existing = db.getMonitoredTarget(userId, req.params.id);
+      if (!existing) {
+        return res.status(404).json({ error: "Monitored target not found" });
+      }
+      // null explicitly clears a time-of-day/weekday field; undefined keeps it.
+      const merge = (key: "hour" | "minute" | "weekday", current: number | null | undefined) =>
+        key in body ? (body[key] == null || body[key] === "" ? null : Number(body[key])) : current ?? null;
+      const schedule = {
+        frequencyDays: "frequencyDays" in body ? Number(body.frequencyDays) || 7 : existing.frequencyDays,
+        hour: merge("hour", existing.scanHour),
+        minute: merge("minute", existing.scanMinute),
+        weekday: merge("weekday", existing.scanWeekday),
+      };
+      // Reject out-of-range values so a bad edit can't schedule a run that never
+      // fires (or fires at a nonsense time).
+      const badRange =
+        schedule.frequencyDays < 1 ||
+        (schedule.hour != null && (schedule.hour < 0 || schedule.hour > 23)) ||
+        (schedule.minute != null && (schedule.minute < 0 || schedule.minute > 59)) ||
+        (schedule.weekday != null && (schedule.weekday < 0 || schedule.weekday > 6)) ||
+        Number.isNaN(schedule.frequencyDays);
+      if (badRange) {
+        return res.status(400).json({ error: "Invalid schedule: frequencyDays ≥ 1, hour 0–23, minute 0–59, weekday 0–6 (0=Sunday)." });
+      }
+      const target = db.updateMonitoredSchedule(userId, req.params.id, schedule);
+      if (!target) {
+        return res.status(404).json({ error: "Monitored target not found" });
+      }
+      return res.json({ status: "ok", target });
     }
-    res.json({ status: "ok", paused });
+
+    return res.status(400).json({
+      error: "Provide `paused` (boolean) to pause/resume, or schedule fields (frequencyDays, hour, minute, weekday) to change the cadence.",
+    });
   });
 
   // Run a monitored target's scan immediately, on demand — the same launch path

@@ -102,4 +102,75 @@ export function registerMcpRoutes(app: express.Express, ctx: RouteContext) {
       res.status(500).json({ error: "Internal audit scanning failed", details: err.message, creditsRemaining });
     }
   });
+
+  // --- Read access for agents (no credit cost) ---
+  // Retrieval is READ-ONLY: it never runs the pipeline and never spends a
+  // credit, so an agent can review results it already paid for (and check scan
+  // status/history) without launching a new scan. Authenticated by the same API
+  // key as the scan endpoint, accepted in the X-API-Key header or an apiKey
+  // query param. Its own lighter limiter (distinct keyPrefix) so cheap reads
+  // don't share the heavy scan budget.
+  const mcpReadLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 30,
+    keyPrefix: "mcp-read",
+    message: "MCP read rate limit reached. Please wait a moment before the next call.",
+  });
+
+  const keyOwner = (req: express.Request) => {
+    const key = (req.header("x-api-key") || req.query.apiKey || "").toString().trim();
+    return key ? db.validateApiKey(key) : null;
+  };
+
+  // List this key owner's recent scans (compact: no findings bodies), newest
+  // first — so an agent can find the id of a scan to fetch in full below.
+  app.get("/api/mcp/scans", mcpReadLimiter, (req, res) => {
+    const user = keyOwner(req);
+    if (!user) {
+      return res.status(401).json({ error: "Invalid or missing API key. Pass it in the X-API-Key header or the apiKey query parameter." });
+    }
+    const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 100);
+    const scans = db.listScans(user.id).slice(0, limit).map((s) => ({
+      id: s.id,
+      url: s.url,
+      status: s.status,
+      score: s.score ?? null,
+      severity: s.severity ?? null,
+      createdAt: s.createdAt,
+      completedAt: s.completedAt ?? null,
+    }));
+    res.json({ success: true, scans });
+  });
+
+  // Fetch one completed scan's full report by id — the SAME shape POST
+  // /api/mcp/scan returns, so an agent (and the MCP formatter) can consume a
+  // retrieved report identically to a freshly-run one. Suppression is applied
+  // and the score recalculated via the shared read-model.
+  app.get("/api/mcp/scans/:id", mcpReadLimiter, (req, res) => {
+    const user = keyOwner(req);
+    if (!user) {
+      return res.status(401).json({ error: "Invalid or missing API key. Pass it in the X-API-Key header or the apiKey query parameter." });
+    }
+    const raw = db.getScan(req.params.id);
+    // 404 (not 403) when the scan isn't this owner's, so an id can't probe existence.
+    if (!raw || raw.userId !== user.id) {
+      return res.status(404).json({ error: "Scan not found." });
+    }
+    if (raw.status !== "complete") {
+      return res.status(409).json({ error: `Scan is not complete (status: ${raw.status}). Only completed scans have a report.`, status: raw.status });
+    }
+    const scan = db.getScanWithSuppressedFindings(raw);
+    res.json({
+      success: true,
+      targetUrl: scan.url,
+      postureScore: scan.score,
+      vulnerabilityLevel: scan.severity,
+      analysisSummary: scan.aiSummary,
+      executiveBreakdown: scan.executiveBreakdown,
+      securityFindings: scan.findings,
+      evidence: scan.evidence,
+      createdAt: scan.createdAt,
+      completedAt: scan.completedAt,
+    });
+  });
 }

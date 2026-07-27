@@ -1,5 +1,73 @@
-import { Clock, Globe, Plus, RefreshCw, AlertTriangle, Play, Pause, Zap } from 'lucide-react';
+import { useState } from 'react';
+import { Clock, Globe, Plus, RefreshCw, AlertTriangle, Play, Pause, Zap, Pencil } from 'lucide-react';
 import { useMonitoring } from '../../hooks/useMonitoring.js';
+
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+// Inline editor for an existing monitor's cadence — pre-filled from the target,
+// mirroring the add form's frequency/weekday/UTC-time controls. Saving PATCHes
+// the schedule; the server recomputes the next-run instant.
+function ScheduleEditor({
+  target, busy, onSave, onCancel,
+}: {
+  target: any;
+  busy: boolean;
+  onSave: (s: { frequencyDays: number; hour: number; minute: number; weekday?: number }) => void;
+  onCancel: () => void;
+}) {
+  const [freq, setFreq] = useState<number>(target.frequencyDays || 7);
+  const [day, setDay] = useState<string>(WEEKDAYS[target.scanWeekday ?? 1] || 'Monday');
+  const [time, setTime] = useState<string>(
+    target.scanHour != null && target.scanMinute != null ? `${pad2(target.scanHour)}:${pad2(target.scanMinute)}` : '09:00',
+  );
+
+  const save = () => {
+    const [h, mn] = (time || '09:00').split(':');
+    const schedule: { frequencyDays: number; hour: number; minute: number; weekday?: number } = {
+      frequencyDays: freq, hour: Number(h), minute: Number(mn),
+    };
+    if (freq === 7) schedule.weekday = WEEKDAYS.indexOf(day);
+    onSave(schedule);
+  };
+
+  return (
+    <div className="mt-3 pt-3 border-t border-[#27272a] flex flex-col sm:flex-row gap-2 items-start sm:items-center">
+      <span className="text-[10px] uppercase text-[#52525b] font-bold tracking-wider">Edit schedule</span>
+      <div className="bg-black border border-[#27272a] rounded p-1 flex items-center">
+        <select value={freq} onChange={(e) => setFreq(Number(e.target.value))} disabled={busy}
+          className="bg-transparent text-white text-[11px] font-mono focus:outline-none p-1 cursor-pointer">
+          <option value={1} className="bg-black">Daily</option>
+          <option value={7} className="bg-black">Weekly</option>
+          <option value={30} className="bg-black">Monthly</option>
+        </select>
+      </div>
+      {freq === 7 && (
+        <div className="bg-black border border-[#27272a] rounded p-1 flex items-center">
+          <select value={day} onChange={(e) => setDay(e.target.value)} disabled={busy}
+            className="bg-transparent text-white text-[11px] font-mono focus:outline-none p-1 cursor-pointer">
+            {WEEKDAYS.slice(1).concat('Sunday').map((d) => <option key={d} value={d} className="bg-black">{d}</option>)}
+          </select>
+        </div>
+      )}
+      <div className="bg-black border border-[#27272a] rounded p-1 flex items-center gap-1">
+        <input type="time" value={time} onChange={(e) => setTime(e.target.value)} disabled={busy}
+          className="bg-transparent text-white text-[11px] font-mono focus:outline-none p-1 cursor-pointer [color-scheme:dark]" />
+        <span className="text-[9px] text-[#52525b] font-mono pr-1">UTC</span>
+      </div>
+      <div className="flex gap-2">
+        <button onClick={save} disabled={busy}
+          className="px-3 py-1.5 bg-[#22c55e] hover:bg-[#4ade80] text-black rounded text-[10px] uppercase font-bold tracking-wider transition-all cursor-pointer disabled:opacity-40 flex items-center gap-1.5">
+          {busy ? <RefreshCw className="w-3 h-3 animate-spin" /> : null}Save
+        </button>
+        <button onClick={onCancel} disabled={busy}
+          className="px-3 py-1.5 bg-[#18181b] border border-[#27272a] hover:text-white text-[#a1a1aa] rounded text-[10px] uppercase font-bold tracking-wider transition-all cursor-pointer disabled:opacity-40">
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
 
 // Human-readable last-scan result for a monitor row, linking completed scans to
 // their report. In-flight/failed/never-run states are shown as plain text.
@@ -30,6 +98,7 @@ function LastScanResult({ lastScan, onViewReport }: { lastScan: any; onViewRepor
 // Continuous-monitoring tab: the Slack-compatible alert webhook, the add-target
 // form (cadence + weekday + UTC time), and the list of active monitors.
 export default function MonitoringTab({ m, onViewReport }: { m: ReturnType<typeof useMonitoring>; onViewReport: (scanId: string) => void }) {
+  const [editingId, setEditingId] = useState<string | null>(null);
   return (
     <div className="space-y-6 animate-fade-in text-xs font-mono">
       <div className="bg-[#18181b]/35 border border-[#27272a] rounded p-4 flex items-start space-x-3.5">
@@ -150,7 +219,8 @@ export default function MonitoringTab({ m, onViewReport }: { m: ReturnType<typeo
             const busy = m.busyTargetId === target.id;
             const notice = m.rowNotice && m.rowNotice.id === target.id ? m.rowNotice : null;
             return (
-            <div key={target.id} className="p-4 bg-black border border-[#27272a] rounded flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div key={target.id} className="p-4 bg-black border border-[#27272a] rounded flex flex-col gap-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="space-y-1.5">
                 <div className="flex items-center space-x-2">
                   <Globe className="w-4 h-4 text-[#52525b]" />
@@ -201,6 +271,13 @@ export default function MonitoringTab({ m, onViewReport }: { m: ReturnType<typeo
                   Scan now
                 </button>
                 <button
+                  onClick={() => setEditingId(editingId === target.id ? null : target.id)}
+                  disabled={busy}
+                  className="px-3 py-1.5 bg-[#18181b] border border-[#27272a] hover:border-[#3f3f46] hover:text-white text-[#a1a1aa] rounded text-[10px] uppercase font-bold tracking-wider transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                >
+                  <Pencil className="w-3 h-3" />Edit
+                </button>
+                <button
                   onClick={() => m.togglePause(target.id, !target.paused)}
                   disabled={busy}
                   className="px-3 py-1.5 bg-[#18181b] border border-[#27272a] hover:border-[#3f3f46] hover:text-white text-[#a1a1aa] rounded text-[10px] uppercase font-bold tracking-wider transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
@@ -214,6 +291,15 @@ export default function MonitoringTab({ m, onViewReport }: { m: ReturnType<typeo
                   Remove
                 </button>
               </div>
+              </div>
+              {editingId === target.id && (
+                <ScheduleEditor
+                  target={target}
+                  busy={busy}
+                  onSave={async (s) => { const r = await m.editSchedule(target.id, s); if (r.ok) setEditingId(null); }}
+                  onCancel={() => setEditingId(null)}
+                />
+              )}
             </div>
             );
           })

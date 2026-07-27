@@ -1,6 +1,6 @@
 # @seclayer/mcp
 
-A [Model Context Protocol](https://modelcontextprotocol.io) stdio server for [Seclayer](https://seclayer.io) — run a live black-box security scan directly from Claude Code, Cursor, Windsurf, or any other MCP-compatible AI agent, via a single `seclayer_scan` tool.
+A [Model Context Protocol](https://modelcontextprotocol.io) stdio server for [Seclayer](https://seclayer.io) — run a live black-box security scan directly from Claude Code, Cursor, Windsurf, or any other MCP-compatible AI agent. Exposes three tools: `seclayer_scan` (run a scan), `seclayer_list_scans` (review history), and `seclayer_get_report` (fetch a past report by id).
 
 ## Setup
 
@@ -40,15 +40,29 @@ Same `command`-type stdio configuration as Cursor, using the same `npx -y @secla
 
 A flag always takes precedence over its corresponding environment variable. If no key is available from either source, the server prints an error to stderr and exits immediately rather than starting.
 
-## The `seclayer_scan` tool
+## Tools
+
+The API key is never a tool parameter — it's bound once at server startup so it's never placed in the calling model's per-call context. All three tools use it automatically.
+
+### `seclayer_scan` — run a new scan (costs one credit)
 
 **Input:**
 - `url` (required) — the target to scan, including scheme.
 - `authHeader` (optional) — a raw `Authorization` header value (e.g. `Bearer eyJ...`) applied to every request, for scanning authenticated endpoints.
 
-The API key is never a tool parameter — it's bound once at server startup so it's never placed in the calling model's per-call context.
-
 **Output:** a single Markdown report — posture score, severity, executive summary, and every finding with its OWASP category, business impact, and a ready-to-apply fix (plus a suggested prompt for whichever coding agent is calling the tool). Each call costs one credit from the account tied to the configured API key. Active exploit probing (SQLi/XSS/SSRF/etc.) only runs once that account has verified ownership of the target domain from the dashboard — otherwise the scan is passive recon only.
+
+### `seclayer_list_scans` — review scan history (free, read-only)
+
+**Input:** `limit` (optional, default 20, max 100).
+
+**Output:** a Markdown table of the recent scans run under this API key — newest first, each with its scan id, target, status, posture score, and severity. Never launches a scan and costs no credits. Use it to recall a previous result, check whether a scan has finished, or find the id of a scan to fetch in full.
+
+### `seclayer_get_report` — fetch a past report by id (free, read-only)
+
+**Input:** `scanId` (required) — the id of a completed scan (from `seclayer_list_scans`).
+
+**Output:** the same full Markdown report as `seclayer_scan` — for a scan that already ran, WITHOUT re-running or re-paying for it. Lets an agent act on a result it (or a teammate on the same key) already produced instead of scanning again.
 
 ## Development
 

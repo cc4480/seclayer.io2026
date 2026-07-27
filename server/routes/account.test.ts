@@ -184,6 +184,76 @@ test('PATCH /api/monitoring/:id rejects a non-boolean and 404s for another user\
   assert.equal(db.getMonitoredTarget(otherUser.id, otherTarget.id)!.paused, false, 'other user\'s target untouched');
 });
 
+test('PATCH /api/monitoring/:id edits the cadence and recomputes the next run', async () => {
+  await withAccountApp(async (base, userId) => {
+    const id = await addTarget(base);
+    const before = db.getMonitoredTarget(userId, id)!;
+
+    // Change to a weekly Wednesday 06:30 UTC schedule.
+    const res = await fetch(`${base}/api/monitoring/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ frequencyDays: 7, weekday: 3, hour: 6, minute: 30 }),
+    });
+    assert.equal(res.status, 200);
+    const t = db.getMonitoredTarget(userId, id)!;
+    assert.equal(t.frequencyDays, 7);
+    assert.equal(t.scanWeekday, 3);
+    assert.equal(t.scanHour, 6);
+    assert.equal(t.scanMinute, 30);
+    // The next automated run must be recomputed (it should differ from the
+    // original daily-default schedule) and land in the future.
+    assert.notEqual(t.nextScanAt, before.nextScanAt);
+    assert.ok(new Date(t.nextScanAt!).getTime() > Date.now());
+    // It must fire on the chosen weekday at the chosen UTC time.
+    const next = new Date(t.nextScanAt!);
+    assert.equal(next.getUTCDay(), 3);
+    assert.equal(next.getUTCHours(), 6);
+    assert.equal(next.getUTCMinutes(), 30);
+  });
+});
+
+test('PATCH /api/monitoring/:id merges a partial schedule edit over existing values', async () => {
+  await withAccountApp(async (base, userId) => {
+    const id = await addTarget(base);
+    // Set a full schedule first.
+    await fetch(`${base}/api/monitoring/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ frequencyDays: 7, weekday: 1, hour: 9, minute: 0 }),
+    });
+    // Now change only the hour; weekday/minute/frequency must be preserved.
+    const res = await fetch(`${base}/api/monitoring/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hour: 14 }),
+    });
+    assert.equal(res.status, 200);
+    const t = db.getMonitoredTarget(userId, id)!;
+    assert.equal(t.scanHour, 14, 'hour changed');
+    assert.equal(t.scanWeekday, 1, 'weekday preserved');
+    assert.equal(t.scanMinute, 0, 'minute preserved');
+    assert.equal(t.frequencyDays, 7, 'frequency preserved');
+  });
+});
+
+test('PATCH /api/monitoring/:id rejects an out-of-range schedule (400) and 404s across users', async () => {
+  const otherUser = db.getOrCreateUser(`account-edit-other-${Date.now()}@test.io`);
+  const otherTarget = db.addMonitoredTarget(otherUser.id, SAFE_TARGET, 7);
+  await withAccountApp(async (base, userId) => {
+    const id = await addTarget(base);
+    const bad = await fetch(`${base}/api/monitoring/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hour: 25 }),
+    });
+    assert.equal(bad.status, 400, 'hour 25 is invalid');
+
+    const cross = await fetch(`${base}/api/monitoring/${otherTarget.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ frequencyDays: 3 }),
+    });
+    assert.equal(cross.status, 404, "can't edit another user's monitor");
+  });
+  assert.equal(db.getMonitoredTarget(otherUser.id, otherTarget.id)!.frequencyDays, 7, 'other user\'s schedule untouched');
+});
+
 test('POST /api/monitoring/:id/scan-now launches a scan, deducts a credit, and reschedules', async () => {
   const launched: Array<{ scanId: string; allowActiveProbes: boolean }> = [];
   await withAccountApp(async (base, userId) => {

@@ -129,6 +129,70 @@ test('POST /api/mcp/scan creates exactly one complete scan record on success, de
   }
 });
 
+test('GET /api/mcp/scans lists only the key owner\'s scans and 401s without a valid key', async () => {
+  const owner = db.getOrCreateUser(`mcp-list-owner-${Date.now()}@test.io`);
+  const { rawKey } = db.generateApiKey(owner.id);
+  const other = db.getOrCreateUser(`mcp-list-other-${Date.now()}@test.io`);
+  const ownScan = db.createScan(owner.id, 'https://93.184.216.34');
+  db.updateScan(ownScan.id, { status: 'complete', score: 70, severity: 'medium', completedAt: new Date().toISOString() });
+  db.createScan(other.id, 'https://1.1.1.1'); // must never appear for the owner's key
+
+  await withMcpApp(async (base) => {
+    // No key → 401.
+    const noKey = await fetch(`${base}/api/mcp/scans`);
+    assert.equal(noKey.status, 401);
+
+    // Owner's key → only their scan(s), compact shape, no findings bodies.
+    const res = await fetch(`${base}/api/mcp/scans`, { headers: { 'X-API-Key': rawKey } });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.success, true);
+    assert.ok(body.scans.some((s: any) => s.id === ownScan.id));
+    assert.ok(body.scans.every((s: any) => s.id !== undefined && s.findings === undefined), 'list is compact (no finding bodies)');
+    assert.ok(!body.scans.some((s: any) => s.url === 'https://1.1.1.1'), "another user's scan must never leak");
+  });
+});
+
+test('GET /api/mcp/scans/:id returns a completed report, 404s across users, and 409s when incomplete', async () => {
+  const owner = db.getOrCreateUser(`mcp-report-owner-${Date.now()}@test.io`);
+  const { rawKey } = db.generateApiKey(owner.id);
+  const other = db.getOrCreateUser(`mcp-report-other-${Date.now()}@test.io`);
+
+  const done = db.createScan(owner.id, 'https://93.184.216.34');
+  // One high-severity finding: the read-model recomputes the display score from
+  // findings (100 − 25 = 75), so the report's postureScore is deterministic and
+  // reflects the shared scoring, not whatever raw value was stored.
+  db.updateScan(done.id, {
+    status: 'complete', score: 61, severity: 'high', aiSummary: 'sum',
+    findings: [{ id: 'f1', title: 'Test High Finding', description: 'd', severity: 'high', confidence: 'high', fix: 'f', category: 'DAST' }],
+    completedAt: new Date().toISOString(),
+  });
+  const pending = db.createScan(owner.id, 'https://93.184.216.34'); // status: queued
+  const foreign = db.createScan(other.id, 'https://1.1.1.1');
+  db.updateScan(foreign.id, { status: 'complete', completedAt: new Date().toISOString() });
+
+  await withMcpApp(async (base) => {
+    // Completed → full report shape (same as POST /scan), no credit cost.
+    const ok = await fetch(`${base}/api/mcp/scans/${done.id}`, { headers: { 'X-API-Key': rawKey } });
+    assert.equal(ok.status, 200);
+    const report = await ok.json();
+    assert.equal(report.success, true);
+    assert.equal(report.targetUrl, 'https://93.184.216.34');
+    assert.equal(report.postureScore, 75, 'score is recomputed from findings via the shared read-model (100 − 25)');
+    assert.equal(report.vulnerabilityLevel, 'high');
+    assert.equal(report.securityFindings.length, 1);
+
+    // Another user's scan → 404 (not 403), so an id can't probe existence.
+    const cross = await fetch(`${base}/api/mcp/scans/${foreign.id}`, { headers: { 'X-API-Key': rawKey } });
+    assert.equal(cross.status, 404);
+
+    // Incomplete scan → 409 with the status.
+    const notReady = await fetch(`${base}/api/mcp/scans/${pending.id}`, { headers: { 'X-API-Key': rawKey } });
+    assert.equal(notReady.status, 409);
+    assert.equal((await notReady.json()).status, 'queued');
+  });
+});
+
 test('POST /api/mcp/scan is rate-limited per caller', async () => {
   // Regression test: this endpoint used to have no rateLimit() at all, unlike
   // every other scan-launching route, so a caller could burst unlimited

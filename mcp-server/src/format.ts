@@ -1,4 +1,4 @@
-import type { Finding, ScanSuccess, Severity } from "./types.js";
+import type { Finding, ScanListSuccess, ScanReport, Severity } from "./types.js";
 
 const SEVERITY_RANK: Record<Severity, number> = {
   critical: 0,
@@ -46,14 +46,17 @@ function formatFinding(finding: Finding, index: number): string {
 // This IS the tool's result content: the product's whole pitch is that a
 // finding's fix + agentPrompt is directly actionable by whatever coding agent
 // receives this text next, so the report is rendered in full rather than
-// summarized or left as raw JSON.
-export function formatScanReport(data: ScanSuccess): string {
+// summarized or left as raw JSON. Accepts either a freshly-run scan or a
+// retrieved historical report (same shape) — the credit line shows only for a
+// fresh scan, the date line only for a retrieved one.
+export function formatScanReport(data: ScanReport): string {
   const lines: string[] = [];
   lines.push(`# Seclayer Security Scan — ${data.targetUrl}`);
   lines.push("");
   lines.push(`Posture score: ${data.postureScore}/100`);
   lines.push(`Severity: ${data.vulnerabilityLevel.toUpperCase()}`);
-  lines.push(`Credits remaining: ${data.creditsRemaining}`);
+  if (data.creditsRemaining !== undefined) lines.push(`Credits remaining: ${data.creditsRemaining}`);
+  if (data.completedAt) lines.push(`Scanned: ${data.completedAt}`);
   lines.push("");
 
   lines.push("## Summary");
@@ -91,5 +94,27 @@ export function formatScanReport(data: ScanSuccess): string {
     lines.push(sorted.map((f, i) => formatFinding(f, i)).join("\n\n---\n\n"));
   }
 
+  return lines.join("\n");
+}
+
+// Pure — renders the compact scan-history list as a Markdown table an agent can
+// scan to find the id of a report to fetch in full. Newest first (as returned).
+export function formatScanList(data: ScanListSuccess): string {
+  const scans = data.scans || [];
+  if (scans.length === 0) {
+    return "No scans found for this API key yet. Run one with the seclayer_scan tool.";
+  }
+  const lines: string[] = [];
+  lines.push(`# Seclayer scan history (${scans.length})`);
+  lines.push("");
+  lines.push("| Scan ID | Target | Status | Score | Severity | Completed |");
+  lines.push("| --- | --- | --- | --- | --- | --- |");
+  for (const s of scans) {
+    const score = s.score == null ? "—" : `${s.score}/100`;
+    const sev = s.severity ? s.severity.toUpperCase() : "—";
+    lines.push(`| \`${s.id}\` | ${s.url} | ${s.status} | ${score} | ${sev} | ${s.completedAt || "—"} |`);
+  }
+  lines.push("");
+  lines.push("Fetch any completed scan's full report with the seclayer_get_report tool, passing its Scan ID.");
   return lines.join("\n");
 }

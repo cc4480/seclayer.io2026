@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { scan } from "./client.js";
-import { formatScanReport } from "./format.js";
+import { scan, listScans, getReport } from "./client.js";
+import { formatScanReport, formatScanList } from "./format.js";
 import { VERSION } from "./version.js";
 import type { ResolvedConfig } from "./cli.js";
 
@@ -47,6 +47,60 @@ export function buildServer(config: ResolvedConfig): McpServer {
     },
     async ({ url, authHeader }) => {
       const outcome = await scan(config.baseUrl, config.apiKey, { url, authHeader });
+      if (outcome.ok) {
+        return { content: [{ type: "text", text: formatScanReport(outcome.data) }] };
+      }
+      return { content: [{ type: "text", text: outcome.message }], isError: true };
+    },
+  );
+
+  // Review scans this key already ran — WITHOUT launching (and paying for) a new
+  // one. Read-only, no credit cost. Lets an agent recall a result, check whether
+  // a scan finished, or pick a scan id to fetch in full.
+  server.registerTool(
+    "seclayer_list_scans",
+    {
+      title: "List Seclayer Scans",
+      description:
+        "List recent Seclayer security scans run under this server's API key — newest first, with each scan's id, target, status, posture score, and severity. Read-only: it never launches a scan and costs no credits. Use it to recall a previous result, check whether a scan has finished, or find the id of a scan to fetch in full with seclayer_get_report.",
+      inputSchema: {
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(100)
+          .optional()
+          .describe("Maximum scans to return (default 20, max 100), newest first."),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true, destructiveHint: false },
+    },
+    async ({ limit }) => {
+      const outcome = await listScans(config.baseUrl, config.apiKey, limit);
+      if (outcome.ok) {
+        return { content: [{ type: "text", text: formatScanList(outcome.data) }] };
+      }
+      return { content: [{ type: "text", text: outcome.message }], isError: true };
+    },
+  );
+
+  // Fetch a completed scan's full report by id — the same report quality as a
+  // fresh scan, WITHOUT re-running (or paying for) it. Read-only, no credit cost.
+  server.registerTool(
+    "seclayer_get_report",
+    {
+      title: "Get Seclayer Scan Report",
+      description:
+        "Fetch the full report of a completed Seclayer scan by its id — posture score, executive summary and breakdown, and every finding with its impact, fix, and ready-to-apply agent prompt. Read-only: it never re-runs the scan and costs no credits. Get scan ids from seclayer_list_scans. Use this to act on a scan you (or a teammate on the same key) already ran instead of scanning again.",
+      inputSchema: {
+        scanId: z
+          .string()
+          .min(1)
+          .describe("The id of a completed scan (from seclayer_list_scans), e.g. scan_ab12cd34."),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true, destructiveHint: false },
+    },
+    async ({ scanId }) => {
+      const outcome = await getReport(config.baseUrl, config.apiKey, scanId);
       if (outcome.ok) {
         return { content: [{ type: "text", text: formatScanReport(outcome.data) }] };
       }

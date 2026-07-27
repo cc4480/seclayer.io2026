@@ -141,6 +141,38 @@ export function useMonitoring(user: User, scans: Scan[], onDataChanged?: () => v
     }
   };
 
+  // Edit an existing monitor's cadence in place (frequency + weekday + UTC
+  // time-of-day), without deleting and re-adding it. Sends a partial PATCH; the
+  // server recomputes the next-run instant and human schedule label. Returns
+  // whether it succeeded so the caller can close its inline editor.
+  const editSchedule = async (
+    id: string,
+    schedule: { frequencyDays?: number; hour?: number | null; minute?: number | null; weekday?: number | null },
+  ): Promise<{ ok: boolean }> => {
+    setBusyTargetId(id);
+    setRowNotice(null);
+    try {
+      const res = await fetch(`/api/monitoring/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(schedule),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        await fetchMonitoredTargets();
+        setRowNotice({ id, message: 'Schedule updated.', tone: 'ok' });
+        return { ok: true };
+      }
+      setRowNotice({ id, message: data.error || 'Could not update the schedule.', tone: 'error' });
+      return { ok: false };
+    } catch {
+      setRowNotice({ id, message: 'Could not update the schedule — check your connection and try again.', tone: 'error' });
+      return { ok: false };
+    } finally {
+      setBusyTargetId(null);
+    }
+  };
+
   // Run a monitor's scan immediately. The row's last-scan result then updates
   // as the scan progresses; a few delayed refetches catch its completion
   // without the user leaving the tab.
@@ -171,7 +203,7 @@ export function useMonitoring(user: User, scans: Scan[], onDataChanged?: () => v
     suppressRules, fetchSuppressRules,
     monitoredTargets, monitorUrl, setMonitorUrl, monitorFreq, setMonitorFreq,
     monitorDay, setMonitorDay, monitorTime, setMonitorTime, isAddingMonitor, monitorError,
-    handleAddMonitor, handleDeleteMonitor, togglePause, scanNow, busyTargetId, rowNotice,
+    handleAddMonitor, handleDeleteMonitor, togglePause, scanNow, editSchedule, busyTargetId, rowNotice,
     webhookUrl, setWebhookUrl, webhookSaving, webhookSaved, saveWebhook,
   };
 }

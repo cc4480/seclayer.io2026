@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { formatScanReport } from "./format.js";
-import type { Finding, ScanSuccess } from "./types.js";
+import { formatScanReport, formatScanList } from "./format.js";
+import type { Finding, ScanListSuccess, ScanReport, ScanSuccess } from "./types.js";
 
 function baseSuccess(overrides: Partial<ScanSuccess> = {}): ScanSuccess {
   return {
@@ -81,4 +81,43 @@ test("formatScanReport states plainly when there are no findings", () => {
   const text = formatScanReport(baseSuccess({ securityFindings: [] }));
   assert.match(text, /## Findings \(0\)/);
   assert.match(text, /No findings were reported for this target\./);
+});
+
+// --- retrieval formatting (read tools) ---
+
+test("formatScanReport shows the scan date for a retrieved report and omits the credit line", () => {
+  const report: ScanReport = {
+    success: true,
+    targetUrl: "https://target.example.com",
+    postureScore: 55,
+    vulnerabilityLevel: "medium",
+    analysisSummary: "Retrieved summary.",
+    executiveBreakdown: { overview: "o", riskAreas: [], businessImpact: "b", priorityActions: [] },
+    securityFindings: [],
+    completedAt: "2026-01-02T03:04:05Z",
+  };
+  const out = formatScanReport(report);
+  assert.match(out, /Scanned: 2026-01-02T03:04:05Z/);
+  assert.doesNotMatch(out, /Credits remaining/, "a retrieved report has no credit balance to show");
+});
+
+test("formatScanList renders a table of scans, newest first, with fetch guidance", () => {
+  const list: ScanListSuccess = {
+    success: true,
+    scans: [
+      { id: "scan_a", url: "https://a.test", status: "complete", score: 42, severity: "high", createdAt: "t0", completedAt: "t1" },
+      { id: "scan_b", url: "https://b.test", status: "scanning", score: null, severity: null, createdAt: "t2", completedAt: null },
+    ],
+  };
+  const out = formatScanList(list);
+  assert.match(out, /scan_a/);
+  assert.match(out, /42\/100/);
+  assert.match(out, /HIGH/);
+  assert.match(out, /scan_b/);
+  assert.match(out, /seclayer_get_report/);
+});
+
+test("formatScanList handles an empty history", () => {
+  const out = formatScanList({ success: true, scans: [] });
+  assert.match(out, /No scans found/);
 });
