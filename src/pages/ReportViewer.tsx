@@ -16,6 +16,7 @@ import CategoryTabBar from '../components/report/CategoryTabBar.js';
 import OverviewTab from '../components/report/OverviewTab.js';
 import FindingsPanel from '../components/report/FindingsPanel.js';
 import HeadersDrawer from '../components/report/HeadersDrawer.js';
+import ScanDiffPanel from '../components/report/ScanDiffPanel.js';
 
 interface ReportViewerProps {
   scan: Scan;
@@ -198,6 +199,12 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
             </button>
           </div>
         </div>
+
+        {/* What-changed delta vs the previous scan (owner view only; hidden on a
+            baseline scan or when nothing changed). */}
+        {previousScan && previousScan.status === 'complete' && (
+          <ScanDiffPanel scan={scan} previousScan={previousScan} />
+        )}
 
         {/* Audit Meta Summary Card */}
         <div className="bg-[#0c0c0e] border border-[#27272a] rounded overflow-hidden shadow-2xl">
