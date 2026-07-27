@@ -218,3 +218,25 @@ test('POST /api/scans/:id/share 404s for an incomplete scan and for another user
     assert.equal(db.getScan(otherScanId)!.shareToken, undefined, "other user's scan stays unshared");
   });
 });
+
+// --- Fix verification (retest) ---
+
+test('POST retest 403s when the domain is not verified, and 404s for unknown finding/scan', async () => {
+  const other = db.getOrCreateUser(`retest-other-${Date.now()}@test.io`);
+  const otherScanId = completedScan(other.id);
+  await withScanApp(async (base, userId) => {
+    const scanId = completedScan(userId); // finding id 'f1', domain NOT verified
+
+    // Domain unverified → 403 (a retest re-issues active exploit traffic).
+    const gated = await fetch(`${base}/api/scans/${scanId}/findings/f1/retest`, { method: 'POST' });
+    assert.equal(gated.status, 403);
+
+    // Unknown finding on an owned scan → 404.
+    const noFinding = await fetch(`${base}/api/scans/${scanId}/findings/nope/retest`, { method: 'POST' });
+    assert.equal(noFinding.status, 404);
+
+    // Another user's scan → 404 (never reveals it exists).
+    const cross = await fetch(`${base}/api/scans/${otherScanId}/findings/f1/retest`, { method: 'POST' });
+    assert.equal(cross.status, 404);
+  });
+});

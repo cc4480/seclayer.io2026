@@ -278,6 +278,7 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
                 findings={findings}
                 activeTab={activeTab}
                 readOnly={isPublic}
+                scanId={scan.id}
                 copiedCodeId={copiedCodeId}
                 handleCopyCode={handleCopyCode}
                 expandedApiRows={expandedApiRows}

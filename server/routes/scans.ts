@@ -6,6 +6,7 @@ import { config } from "../config.js";
 import { rateLimit } from "../rateLimit.js";
 import { assertScanTargetSafe } from "../scanner.js";
 import { extractDomain } from "../domainVerify.js";
+import { retestFinding } from "../retest.js";
 import type { BolaIdentity } from "../../src/types.js";
 import type { RouteContext } from "./context.js";
 
@@ -215,6 +216,43 @@ export function registerScanRoutes(app: express.Express, ctx: RouteContext) {
         completedAt: scan.completedAt,
       },
     });
+  });
+
+  // --- Single-finding fix verification (retest) ---
+  // Replays ONE finding's recorded exploit and reports whether it still fires.
+  // Free (no credit — it's a single request, not a scan). Gated exactly like the
+  // original active probe: the caller must own a verified domain (or dev-skip),
+  // since a retest re-issues real exploit traffic at the target. Rate-limited.
+  const retestLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 20,
+    keyPrefix: "retest",
+    message: "Retest rate limit reached. Please wait a moment before verifying more findings.",
+  });
+  app.post("/api/scans/:scanId/findings/:findingId/retest", requireAuth, retestLimiter, async (req, res) => {
+    const userId = getUserId(req);
+    const scan = db.getScan(req.params.scanId);
+    if (!scan || scan.userId !== userId) {
+      return res.status(404).json({ status: "error", message: "Scan not found" });
+    }
+    const finding = scan.findings?.find((f) => f.id === req.params.findingId);
+    if (!finding) {
+      return res.status(404).json({ status: "error", message: "Finding not found" });
+    }
+    // Re-issuing the exploit is active traffic → require the same ownership proof
+    // the original probe did (revocation since the scan must block a re-attack).
+    const allowed = config.devSkipDomainVerification || db.isDomainVerified(userId, extractDomain(scan.url));
+    if (!allowed) {
+      return res.status(403).json({ status: "error", message: "Verify ownership of this domain to retest active exploit findings." });
+    }
+    // Re-validate the target is still safe to reach (it may now resolve internally).
+    try {
+      await assertScanTargetSafe(scan.url);
+    } catch (e: any) {
+      return res.status(400).json({ status: "error", message: e?.message || "This target can no longer be reached safely." });
+    }
+    const result = await retestFinding(finding, scan);
+    res.json({ status: "ok", ...result });
   });
 
   // --- False Positive & Suppression Rules ---

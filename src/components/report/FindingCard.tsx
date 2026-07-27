@@ -1,5 +1,5 @@
-import type { Dispatch, SetStateAction } from 'react';
-import { Zap, Check, Clipboard, AlertTriangle } from 'lucide-react';
+import { useState, type Dispatch, type SetStateAction } from 'react';
+import { Zap, Check, Clipboard, AlertTriangle, ShieldCheck, Loader2 } from 'lucide-react';
 import { Finding } from '../../types.js';
 import { isProven } from '../../../server/scoring.js';
 import { SEVERITY_TOKENS } from '../../lib/severity.js';
@@ -23,6 +23,8 @@ export interface FindingCardProps {
   // Read-only (public shared report): hide the false-positive suppression
   // controls, which require the authenticated owner's account.
   readOnly?: boolean;
+  // Owner's scan id — needed to retest a single proven finding ("verify fix").
+  scanId: string;
 }
 
 export default function FindingCard(props: FindingCardProps) {
@@ -31,6 +33,24 @@ export default function FindingCard(props: FindingCardProps) {
     suppressInputId, setSuppressInputId, suppressReason, setSuppressReason,
     isSuppressing, suppressError, setSuppressError, handleSaveSuppression, handleRemoveSuppressionDirectly,
   } = props;
+
+  // Fix verification ("retest"): replays this one finding's exploit and reports
+  // whether it still fires. Owner-only, shown for proven findings.
+  const [retesting, setRetesting] = useState(false);
+  const [retestResult, setRetestResult] = useState<{ status: string; message: string } | null>(null);
+  const doRetest = async () => {
+    setRetesting(true);
+    setRetestResult(null);
+    try {
+      const res = await fetch(`/api/scans/${props.scanId}/findings/${finding.id}/retest`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      setRetestResult({ status: data.status || 'error', message: data.message || 'Could not verify this finding.' });
+    } catch {
+      setRetestResult({ status: 'error', message: 'Could not reach the server to run the retest.' });
+    } finally {
+      setRetesting(false);
+    }
+  };
 
   // Severity chip styling from the shared token map (single source of truth).
   const severityColor = finding.isFalsePositive
@@ -92,6 +112,34 @@ export default function FindingCard(props: FindingCardProps) {
 
       {!finding.isFalsePositive && finding.evidence && (
         <EvidenceReceipt finding={finding} expandedApiRows={expandedApiRows} setExpandedApiRows={setExpandedApiRows} handleCopyCode={handleCopyCode} />
+      )}
+
+      {/* Fix verification: replay this proven exploit and report if it still fires.
+          Owner-only (hidden on public reports and for suppressed findings). */}
+      {!props.readOnly && !finding.isFalsePositive && isProven(finding) && (
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <button
+            onClick={doRetest}
+            disabled={retesting}
+            title="Re-run this exploit only — free, no full scan — to check whether your fix worked"
+            className="px-3 py-1.5 bg-[#18181b] border border-[#27272a] hover:border-[#22c55e]/40 text-[#a1a1aa] hover:text-[#22c55e] text-[10px] font-mono uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {retesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+            {retesting ? 'Verifying…' : 'Verify fix'}
+          </button>
+          {retestResult && (
+            <span
+              className={`text-[11px] font-mono ${
+                retestResult.status === 'not_reproduced' ? 'text-[#22c55e]'
+                  : retestResult.status === 'still_present' ? 'text-[#f87171]'
+                  : 'text-zinc-500'
+              }`}
+            >
+              {retestResult.status === 'not_reproduced' ? '✓ ' : retestResult.status === 'still_present' ? '✗ ' : ''}
+              {retestResult.message}
+            </span>
+          )}
+        </div>
       )}
 
       {/* Detailed Remediation code fix payload block */}
