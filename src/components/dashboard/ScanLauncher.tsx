@@ -179,7 +179,7 @@ export default function ScanLauncher(props: Props) {
             {dv.currentDomain && (
               <span className="text-[9px] font-mono text-[#52525b]">
                 {(dv.currentDomainVerified || devSkipDomainVerification)
-                  ? <>Active probes unlocked{devSkipDomainVerification ? ' (dev: verification bypassed)' : ''} · <span className={aggressiveEnabled ? 'text-purple-300' : ''}>Aggressive tier {aggressiveEnabled ? 'ON' : 'off'}</span></>
+                  ? <>Active probes unlocked{devSkipDomainVerification ? ' (verification bypassed on this instance)' : ''} · <span className={aggressiveEnabled ? 'text-purple-300' : ''}>Aggressive tier {aggressiveEnabled ? 'ON' : 'off'}</span></>
                   : 'Red-team requires DNS/file verification first'}
               </span>
             )}

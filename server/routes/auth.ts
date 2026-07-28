@@ -98,8 +98,12 @@ export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
     // are free (payments not configured / FREE_MODE on). The DeepSeek status
     // lets the client render the bring-your-own-key card without ever seeing
     // the raw key.
-    // devSkipDomainVerification (dev-only) lets the launcher unlock the active
-    // red-team scan without the DNS/file ownership step; always false in prod.
-    res.json({ user, freeMode: config.freeMode, devSkipDomainVerification: config.devSkipDomainVerification, ...deepseekKeyStatus(db.getUserDeepseekKey(user.id)) });
+    // Whether active probes are unlocked on THIS instance without per-domain
+    // verification — either the dev flag (non-prod) or the operator flag
+    // (ALLOW_UNVERIFIED_ACTIVE_PROBES, any env). The client uses this one signal
+    // to enable the active-scan UI; kept under the existing field name so nothing
+    // downstream has to change.
+    const activeProbesUnlocked = config.devSkipDomainVerification || config.allowUnverifiedActiveProbes;
+    res.json({ user, freeMode: config.freeMode, devSkipDomainVerification: activeProbesUnlocked, ...deepseekKeyStatus(db.getUserDeepseekKey(user.id)) });
   });
 }
