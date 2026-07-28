@@ -7,7 +7,7 @@ import { db } from "./db.js";
 import { config } from "./config.js";
 import { computeNextRun } from "./schedule.js";
 import { assertScanTargetSafe } from "./scanner.js";
-import { extractDomain } from "./domainVerify.js";
+import { activeProbesUnlocked } from "./activeProbeGate.js";
 import type { ProcessScanJob } from "./routes/context.js";
 
 let monitorTickRunning = false;
@@ -52,8 +52,7 @@ export async function runDueMonitoredScans(processScanJob: ProcessScanJob): Prom
         }
         const scan = db.createScan(target.userId, target.url);
         db.markMonitoredScanned(target.id, new Date().toISOString(), next);
-        const allowActiveProbes =
-          config.devSkipDomainVerification || db.isDomainVerified(target.userId, extractDomain(target.url));
+        const allowActiveProbes = activeProbesUnlocked(target.userId, target.url);
         processScanJob(scan.id, allowActiveProbes);
       } catch (err: any) {
         // Invalid/unsafe target: defer instead of retrying every tick.

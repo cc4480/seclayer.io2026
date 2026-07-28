@@ -42,6 +42,14 @@ export const config = {
   // SCAN_DEV_ALLOW_HOSTS to also let the SSRF guard reach a loopback target.
   devSkipDomainVerification:
     process.env.NODE_ENV !== 'production' && process.env.DEV_SKIP_DOMAIN_VERIFICATION === 'true',
+  // OPERATOR opt-in (works in production too, unlike the dev flag above): unlock
+  // the active red-team/aggressive probes on THIS instance without per-domain
+  // ownership proof. Off by default. Intended for a private, single-tenant
+  // instance you run to test targets you own — set it once and every scan path
+  // (dashboard, scan-now, monitors, MCP) runs active probes. Do NOT enable it on
+  // an instance other people can reach or sign into: it re-opens the "aim active
+  // exploits at any domain" surface the ownership gate exists to close.
+  allowUnverifiedActiveProbes: process.env.ALLOW_UNVERIFIED_ACTIVE_PROBES === 'true',
 };
 
 // Logs configuration warnings; returns false if a production-critical setting is
@@ -64,6 +72,9 @@ export function validateConfigOnBoot(): boolean {
   }
   if (config.devSkipDomainVerification) {
     warnings.push('DEV_SKIP_DOMAIN_VERIFICATION is on — active red-team probes run WITHOUT domain-ownership proof. DEV ONLY: only scan targets you own (this is hard-disabled in production). Unset it to restore the verification gate.');
+  }
+  if (config.allowUnverifiedActiveProbes) {
+    warnings.push('ALLOW_UNVERIFIED_ACTIVE_PROBES is on — active red-team probes run WITHOUT domain-ownership proof on EVERY scan path, including in production. Only safe on a PRIVATE instance you control, testing targets you own. Anyone who can use this instance can now aim active exploits at any domain. Unset it to restore the ownership gate.');
   }
 
   if (config.isProd) {

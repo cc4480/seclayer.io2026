@@ -6,7 +6,7 @@ import { config } from "../config.js";
 import { deepseekKeyStatus } from "./deepseekKeyStatus.js";
 import { assertScanTargetSafe } from "../scanner.js";
 import { computeNextRun } from "../schedule.js";
-import { extractDomain } from "../domainVerify.js";
+import { activeProbesUnlocked } from "../activeProbeGate.js";
 import { createCheckoutSession, isStripeConfigured } from "../stripe.js";
 import type { RouteContext } from "./context.js";
 
@@ -172,7 +172,7 @@ export function registerAccountRoutes(app: express.Express, ctx: RouteContext) {
 
     const scan = db.createScan(userId, target.url);
     db.markMonitoredScanned(target.id, new Date().toISOString(), nextRunFor(target));
-    const allowActiveProbes = db.isDomainVerified(userId, extractDomain(target.url));
+    const allowActiveProbes = activeProbesUnlocked(userId, target.url);
     processScanJob(scan.id, allowActiveProbes);
     res.json({ status: "ok", scan });
   });

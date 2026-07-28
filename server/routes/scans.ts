@@ -5,7 +5,7 @@ import { db } from "../db.js";
 import { config } from "../config.js";
 import { rateLimit } from "../rateLimit.js";
 import { assertScanTargetSafe } from "../scanner.js";
-import { extractDomain } from "../domainVerify.js";
+import { activeProbesUnlocked } from "../activeProbeGate.js";
 import { retestFinding } from "../retest.js";
 import type { BolaIdentity } from "../../src/types.js";
 import type { RouteContext } from "./context.js";
@@ -94,8 +94,7 @@ export function registerScanRoutes(app: express.Express, ctx: RouteContext) {
     const requestedActive = req.body.activeProbes !== false;
     // The dev-only DEV_SKIP_DOMAIN_VERIFICATION flag unlocks the active probes
     // without DNS/file proof (local testing only; hard-disabled in production).
-    const allowActiveProbes =
-      requestedActive && (config.devSkipDomainVerification || db.isDomainVerified(userId, extractDomain(url)));
+    const allowActiveProbes = requestedActive && activeProbesUnlocked(userId, url);
 
     // Aggressive tier is a separate opt-in (more invasive) that only takes effect
     // when active probing is already unlocked for this target.
@@ -241,7 +240,7 @@ export function registerScanRoutes(app: express.Express, ctx: RouteContext) {
     }
     // Re-issuing the exploit is active traffic → require the same ownership proof
     // the original probe did (revocation since the scan must block a re-attack).
-    const allowed = config.devSkipDomainVerification || db.isDomainVerified(userId, extractDomain(scan.url));
+    const allowed = activeProbesUnlocked(userId, scan.url);
     if (!allowed) {
       return res.status(403).json({ status: "error", message: "Verify ownership of this domain to retest active exploit findings." });
     }

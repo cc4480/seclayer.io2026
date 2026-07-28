@@ -8,7 +8,7 @@ import { config } from "../config.js";
 import { rateLimit } from "../rateLimit.js";
 import { runDiagnostics, compileStaticFindings, compileScanEvidence, assertScanTargetSafe } from "../scanner.js";
 import { generateAiReport } from "../deepseek.js";
-import { extractDomain } from "../domainVerify.js";
+import { activeProbesUnlocked } from "../activeProbeGate.js";
 import type { RouteContext } from "./context.js";
 
 export function registerMcpRoutes(app: express.Express, ctx: RouteContext) {
@@ -59,7 +59,7 @@ export function registerMcpRoutes(app: express.Express, ctx: RouteContext) {
     try {
       // Active exploit probing only runs once this key's owner has verified
       // ownership of the target's domain; otherwise passive recon only.
-      const allowActiveProbes = db.isDomainVerified(user.id, extractDomain(url));
+      const allowActiveProbes = activeProbesUnlocked(user.id, url);
 
       // Runs scan diagnostic synchronously for MCP tools context
       const diagnostics = await runDiagnostics(url, authHeader, { allowActiveProbes, oob: ctx.oobCollaborator, scanId: scan.id });
