@@ -138,7 +138,10 @@ export function useSeclayer() {
     }
     setCurrentView('dashboard');
     setTimeout(() => {
-      onInitiateScan(initialUrl);
+      // Home-page launch runs the FULL suite — active red-team + aggressive
+      // ("black ops") — so a scan started from the landing hero is as complete
+      // as one launched from the dashboard's "Active Scan — Full Attack".
+      onInitiateScan(initialUrl, undefined, undefined, true, true);
     }, 400);
   };
 
