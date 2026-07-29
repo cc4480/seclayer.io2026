@@ -1,6 +1,17 @@
 export type ScanStatus = 'queued' | 'scanning' | 'analyzing' | 'complete' | 'failed' | 'canceled';
 export type Severity = 'info' | 'low' | 'medium' | 'high' | 'critical';
 
+// One line in the real-time scan ticker (see server/scanEvents.ts). Polled by
+// useScanEvents while a scan runs and rendered live in ScanProgress, so the user
+// watches each recon phase and each red-team/aggressive injection as it fires.
+export type LiveEventChannel = 'system' | 'recon' | 'probe' | 'result' | 'flash';
+export interface LiveEvent {
+  seq: number;   // monotonic per scan; the cursor the client polls with
+  ts: number;    // epoch ms
+  channel: LiveEventChannel;
+  text: string;
+}
+
 export interface User {
   id: string;
   email: string;

@@ -1,6 +1,7 @@
 import { RefreshCw, Cpu } from 'lucide-react';
 import { useScanPolling } from '../hooks/useScanPolling.js';
-import { buildScanLogs } from '../components/scanProgress/scanLogs.js';
+import { useScanEvents } from '../hooks/useScanEvents.js';
+import { buildScanLogs, liveEventsToLogs } from '../components/scanProgress/scanLogs.js';
 import ScanConsole from '../components/scanProgress/ScanConsole.js';
 import PollErrorScreen from '../components/scanProgress/PollErrorScreen.js';
 
@@ -12,7 +13,11 @@ interface ScanProgressProps {
 
 export default function ScanProgress({ scanId, onScanFinished, onCancel }: ScanProgressProps) {
   const { scan, progressPercent, pollError } = useScanPolling(scanId, onScanFinished, onCancel);
-  const logs = buildScanLogs(scan);
+  // Real-time ticker: the live per-injection feed while the scan runs. Falls back
+  // to the status-derived summary (from the persisted narrationLog) for a
+  // finished scan whose in-memory feed has already been evicted.
+  const liveEvents = useScanEvents(scanId);
+  const logs = liveEvents.length > 0 ? liveEventsToLogs(liveEvents) : buildScanLogs(scan);
 
   // Polling has permanently failed — surface it instead of spinning forever.
   if (pollError) {

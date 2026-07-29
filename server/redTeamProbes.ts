@@ -9,12 +9,14 @@
 // isolation is applied here — a single probe throwing (a network error, a
 // malformed response) never aborts the others or the scan.
 import type { OobCollaborator } from "./oob.js";
+import type { EmitFn } from "./scanEvents.js";
 import type { Probe, ProbeContext, RedTeamFinding } from "./redTeam/types.js";
 import { probeSqlInjection } from "./redTeam/sqlInjection.js";
 import { probeReflectedXss } from "./redTeam/reflectedXss.js";
 import { probeCommandInjection } from "./redTeam/commandInjection.js";
 import { probeSsrf } from "./redTeam/ssrf.js";
 import { probeBlindSsrf } from "./redTeam/blindSsrf.js";
+import { PROBE_DESCRIPTORS, emitProbeFiring, emitProbeResult } from "./probeDescriptors.js";
 
 // Ordered exactly as before: SQLi → XSS → cmd injection → reflected SSRF → blind
 // OOB SSRF. probeBlindSsrf no-ops on its own when no collaborator is configured.
@@ -29,7 +31,7 @@ const PROBES: Probe[] = [
 export async function runRedTeamProbes(
   url: string,
   headers: Record<string, string>,
-  opts: { oob?: OobCollaborator; scanId?: string } = {},
+  opts: { oob?: OobCollaborator; scanId?: string; emit?: EmitFn } = {},
 ): Promise<RedTeamFinding[]> {
   const ctx: ProbeContext = {
     url,
@@ -40,8 +42,11 @@ export async function runRedTeamProbes(
 
   const findings: RedTeamFinding[] = [];
   for (const probe of PROBES) {
+    const desc = PROBE_DESCRIPTORS[probe.name];
     try {
+      emitProbeFiring(opts.emit, desc);
       const finding = await probe(ctx);
+      emitProbeResult(opts.emit, desc, finding);
       if (finding) findings.push(finding);
     } catch (err) {
       // One probe's failure (fetch error, malformed response) must never stop

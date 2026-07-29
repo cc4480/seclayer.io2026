@@ -3,6 +3,7 @@
 // can depend on the shapes without importing the scanner entry point.
 import type { Finding, Severity, ExploitEvidence, BolaIdentity } from "../src/types.js";
 import type { OobCollaborator } from "./oob.js";
+import type { EmitFn } from "./scanEvents.js";
 
 // A confirmed exploit result from an active red-team probe (see server/redTeam/).
 // evidence, when present, is a captured receipt that promotes the finding to
@@ -108,4 +109,10 @@ export interface ScanOptions {
   // Optional scan id, forwarded to the collaborator so a recorded callback can be
   // attributed to this scan. Purely for the audit trail.
   scanId?: string;
+
+  // Live progress sink for the real-time ticker. When present, the pipeline
+  // reports each phase and each red-team/aggressive injection as it fires (see
+  // server/scanEvents.ts). Optional and side-effect-only — the scan produces the
+  // exact same DiagnosticResult whether or not anyone is listening.
+  emit?: EmitFn;
 }

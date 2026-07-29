@@ -1,6 +1,7 @@
 import { Finding, Severity } from "../src/types.js";
 import { DiagnosticResult } from "./scanner.js";
 import { callDeepSeek, resolveApiKey } from "./deepseekClient.js";
+import type { LiveEvent } from "./scanEvents.js";
 
 // Fast, cheap narration of scan progress for the live progress UI — distinct
 // from server/deepseek.ts's pro-tier report generation. Flash runs with
@@ -73,6 +74,40 @@ FACTS:
   } catch (err: any) {
     console.warn(`[narrate] flash scanning narration failed, using local fallback: ${err?.message || err}`);
     return localScanningNarration(diag);
+  }
+}
+
+// Live, incremental narration for the real-time ticker: given the newest raw
+// probe/recon events, ask Flash for a couple of plain-English "what/why" lines,
+// as if a senior pentester were talking the viewer through what's happening.
+// Best-effort — returns [] on no key / no events / any failure, because the raw
+// events already carry a built-in description, so the ticker is never left empty.
+const MAX_LIVE_LINES = 3;
+
+export async function narrateLiveBatch(
+  events: LiveEvent[],
+  url: string,
+  apiKey?: string | null,
+): Promise<string[]> {
+  const effectiveKey = resolveApiKey(apiKey);
+  if (!effectiveKey || events.length === 0) return [];
+  const recent = events.slice(-12).map((e) => e.text);
+  try {
+    const prompt = `You are narrating a LIVE penetration test of "${url}" for a terminal feed a developer is
+watching in real time. Below are the raw technical steps the scanner just performed (each is a probe it
+fired or a recon result). In plain English, write up to ${MAX_LIVE_LINES} short lines (each under 120
+characters) that explain WHAT is being attempted and WHY it matters — as a senior pentester talking the
+viewer through it. Present tense, specific to THESE steps, no markdown, no filler, do not just repeat the
+raw lines verbatim. Return JSON: {"lines": ["...", "..."]}.
+
+RECENT STEPS:
+${recent.map((t) => `- ${t}`).join("\n")}`;
+
+    const { content } = await callDeepSeek(MODEL_FLASH, prompt, { thinking: "disabled", maxTokens: 300, timeoutMs: 8000 }, effectiveKey);
+    return parseLines(content, MAX_LIVE_LINES) ?? [];
+  } catch (err: any) {
+    console.warn(`[narrate] live batch narration failed: ${err?.message || err}`);
+    return [];
   }
 }
 

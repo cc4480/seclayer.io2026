@@ -1,4 +1,12 @@
-import { Scan } from '../../types.js';
+import { Scan, LiveEvent } from '../../types.js';
+
+// Renders the real-time ticker: each live event becomes a channel-prefixed line
+// (e.g. "[PROBE] → SQL injection: firing …") that logLineClass then colors. This
+// is the live path used while a scan runs; buildScanLogs below is the fallback
+// for a finished scan re-opened later (rendered from the persisted narrationLog).
+export function liveEventsToLogs(events: LiveEvent[]): string[] {
+  return events.map((e) => `[${e.channel.toUpperCase()}] ${e.text}`);
+}
 
 // Derives the scanner console lines from the current scan state: a few
 // phase-transition markers plus the real deepseek-v4-flash narration
@@ -34,7 +42,12 @@ export function buildScanLogs(scan: Scan | null): string[] {
 
 // Maps a log line's channel prefix to its Tailwind text color.
 export function logLineClass(log: string): string {
+  // A proven exploit stands out regardless of channel — it's the headline event.
+  if (log.includes('✓ CONFIRMED')) return 'text-[#f87171] font-bold';
   if (log.includes('[SYSTEM]')) return 'text-[#22c55e] font-semibold';
+  if (log.includes('[RECON]')) return 'text-sky-400';
+  if (log.includes('[PROBE]')) return 'text-amber-400';
+  if (log.includes('[RESULT]')) return 'text-[#22c55e]';
   if (log.includes('[FLASH]')) return 'text-purple-400';
   if (log.includes('[DEEPSEEK]')) return 'text-amber-400';
   if (log.includes('[FATAL]')) return 'text-[#f87171] font-bold';

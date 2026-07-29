@@ -16,15 +16,17 @@ import { guardedFetch, safeFetch } from "./ssrf.js";
 import { buildProbeEvidence } from "./evidence.js";
 import { buildHeaderEvidence } from "./aggressive/aggHttp.js";
 import { xssReflectionExecutes } from "./fpFilters.js";
+import type { EmitFn } from "./scanEvents.js";
 
 export async function fuzzDiscoveredTargets(
   targets: InjectableTarget[],
   fuzzHeaders: Record<string, string>,
-  opts: { aggressive?: boolean } = {},
+  opts: { aggressive?: boolean; emit?: EmitFn } = {},
 ): Promise<{ findings: any[]; paramsTested: number }> {
   // The aggressive tier adds four more injection classes per parameter, so it
   // gets a larger request budget and a longer wall-clock cap.
   const aggressive = !!opts.aggressive;
+  const emit = opts.emit;
   const MAX_REQUESTS = aggressive ? 160 : 64;
   const MAX_PARAMS_PER_TARGET = 6;
   const DEADLINE = Date.now() + (aggressive ? 30000 : 20000); // wall-clock self-cap for slow targets
@@ -403,6 +405,8 @@ export async function fuzzDiscoveredTargets(
     for (const { p: param, s } of ranked) {
       if (!canSpend()) break;
       paramsTested++;
+      emit?.("probe", `→ Fuzzing "${param}" on ${endpointPath} — ${aggressive ? "SQLi/XSS/SSTI/LFI/redirect/CRLF" : "SQLi/XSS"} payloads…`);
+      const before = findings.length;
       // Run the higher-leaning class first so a tight budget hits likely wins.
       if (s.sqli >= s.xss) { await trySqli(t, param, endpointPath); await tryXss(t, param, endpointPath); }
       else { await tryXss(t, param, endpointPath); await trySqli(t, param, endpointPath); }
@@ -416,6 +420,10 @@ export async function fuzzDiscoveredTargets(
         await tryLfi(t, param, endpointPath);
         await tryOpenRedirect(t, param, endpointPath);
         await tryCrlf(t, param, endpointPath);
+      }
+      // Report any injections confirmed on this parameter to the live ticker.
+      for (let i = before; i < findings.length; i++) {
+        emit?.("result", `✓ CONFIRMED: ${findings[i].testName} [${String(findings[i].severity || "").toUpperCase()}] — payload: ${findings[i].payload}`);
       }
     }
   }

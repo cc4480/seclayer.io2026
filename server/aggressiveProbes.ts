@@ -7,7 +7,9 @@
 // per-scan aggressive opt-in (see ScanOptions.allowAggressiveProbes). Each probe
 // is isolated so one failure never aborts the rest.
 import type { OobCollaborator } from "./oob.js";
+import type { EmitFn } from "./scanEvents.js";
 import type { Probe, ProbeContext, RedTeamFinding } from "./redTeam/types.js";
+import { PROBE_DESCRIPTORS, emitProbeFiring, emitProbeResult } from "./probeDescriptors.js";
 import { probeSsti } from "./aggressive/ssti.js";
 import { probePathTraversal } from "./aggressive/pathTraversal.js";
 import { probeOpenRedirect } from "./aggressive/openRedirect.js";
@@ -31,7 +33,7 @@ const PROBES: Probe[] = [
 export async function runAggressiveProbes(
   url: string,
   headers: Record<string, string>,
-  opts: { oob?: OobCollaborator; scanId?: string } = {},
+  opts: { oob?: OobCollaborator; scanId?: string; emit?: EmitFn } = {},
 ): Promise<RedTeamFinding[]> {
   const ctx: ProbeContext = {
     url,
@@ -42,8 +44,11 @@ export async function runAggressiveProbes(
 
   const findings: RedTeamFinding[] = [];
   for (const probe of PROBES) {
+    const desc = PROBE_DESCRIPTORS[probe.name];
     try {
+      emitProbeFiring(opts.emit, desc);
       const finding = await probe(ctx);
+      emitProbeResult(opts.emit, desc, finding);
       if (finding) findings.push(finding);
     } catch (err) {
       console.warn(`[aggressive] probe ${probe.name} failed:`, err);

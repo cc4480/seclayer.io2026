@@ -18,7 +18,7 @@ export default function ScanConsole({ logs }: { logs: string[] }) {
         <span className="text-[10px] font-mono text-[#52525b] uppercase tracking-widest">Scanner Console outputs</span>
       </div>
 
-      <div className="space-y-1.5 max-h-48 overflow-y-auto font-mono text-[11px] leading-relaxed text-[#a1a1aa] select-all scrollbar-thin">
+      <div className="space-y-1.5 max-h-80 overflow-y-auto font-mono text-[11px] leading-relaxed text-[#a1a1aa] select-all scrollbar-thin">
         {logs.map((log, index) => (
           <div key={index} className={logLineClass(log)}>
             {log}

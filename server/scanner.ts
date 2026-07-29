@@ -31,6 +31,8 @@ export async function runDiagnostics(
   // The aggressive tier is more invasive, so it requires BOTH the active-probe
   // gate (verified ownership) AND an explicit per-scan opt-in.
   const allowAggressiveProbes = allowActiveProbes && !!opts.allowAggressiveProbes;
+  // Live progress sink for the real-time ticker (no-op when nobody's watching).
+  const emit = opts.emit;
   let url = targetUrl.trim();
   if (!/^https?:\/\//i.test(url)) {
     url = "https://" + url;
@@ -92,19 +94,27 @@ export async function runDiagnostics(
   // Passive recon of the root document: headers, cookies, SAST secrets, SCA
   // libraries, EASM perimeter, and sensitive paths. Returns the root HTML to
   // seed the crawler. Throws on an unreachable target. See server/passiveScan.ts.
-  const rootHtml = await runPassiveScan(url, host, hostname, headers, result);
+  emit?.("system", "Target validated. Passive recon: headers, TLS, secrets, libraries, perimeter & sensitive paths…");
+  const rootHtml = await runPassiveScan(url, host, hostname, headers, result, emit);
 
   // RED TEAM active fuzzing (SQLi/XSS/cmd-injection/SSRF, incl. blind OOB).
   // Gated behind verified domain ownership. See server/redTeamProbes.ts.
+  if (allowActiveProbes) emit?.("system", "Active red-team probes — firing real exploit payloads at the target…");
   result.redTeamFindings = allowActiveProbes
-    ? await runRedTeamProbes(url, headers, { oob: opts.oob, scanId: opts.scanId })
+    ? await runRedTeamProbes(url, headers, { oob: opts.oob, scanId: opts.scanId, emit })
     : [];
 
   // API SECURITY active probes (GraphQL introspection, exposed user object,
   // two-identity BOLA). Gated behind ownership. See server/apiProbes.ts.
+  if (allowActiveProbes) emit?.("system", "API security probes — GraphQL introspection, exposed objects, BOLA/IDOR…");
   result.apiSecFindings = allowActiveProbes
     ? await runApiSecProbes(url, host, headers, { bolaIdentities: opts.bolaIdentities })
     : [];
+  if (allowActiveProbes && emit) {
+    for (const f of result.apiSecFindings || []) {
+      emit("result", `✓ CONFIRMED: ${f.testName} [${f.severity.toUpperCase()}] — ${f.endpoint}`);
+    }
+  }
 
   // JWT auth-weakness probe (signature-not-verified). Only fires when the scan
   // carries a Bearer JWT and the endpoint enforces auth; read-only. Gated on
@@ -132,7 +142,8 @@ export async function runDiagnostics(
   // signature/OOB-proven. Appended to the red-team findings so they share the
   // RED_TEAM category, PROVEN-receipt scoring, and the report/fix-prompt pipeline.
   if (allowAggressiveProbes) {
-    const aggressive = await runAggressiveProbes(url, headers, { oob: opts.oob, scanId: opts.scanId });
+    emit?.("system", "Aggressive tier — SSTI, LFI, XXE, CORS, CRLF, open-redirect, NoSQL, host-header…");
+    const aggressive = await runAggressiveProbes(url, headers, { oob: opts.oob, scanId: opts.scanId, emit });
     result.redTeamFindings = [...(result.redTeamFindings || []), ...aggressive];
   }
 
@@ -142,6 +153,7 @@ export async function runDiagnostics(
   // than only a few hardcoded names. Strictly bounded by page/request/time caps.
   try {
     if (rootHtml && result.responseStatus > 0) {
+      emit?.("system", "Crawling to map the attack surface (links, forms, JS-referenced endpoints)…");
       const crawl = await crawlSite(url, authedFetch, {
         maxPages: 10,
         maxDepth: 2,
@@ -175,7 +187,8 @@ export async function runDiagnostics(
         // for GET, form-encoded body for POST), so discovered forms are no longer
         // mapped-but-skipped.
         const fuzzTargets = allTargets.filter((t) => t.params.length > 0);
-        fuzz = await fuzzDiscoveredTargets(fuzzTargets, { ...headers, "Cache-Control": "no-cache" }, { aggressive: allowAggressiveProbes });
+        if (fuzzTargets.length) emit?.("system", `Fuzzing ${fuzzTargets.length} discovered parameterized endpoint(s) with injection payloads…`);
+        fuzz = await fuzzDiscoveredTargets(fuzzTargets, { ...headers, "Cache-Control": "no-cache" }, { aggressive: allowAggressiveProbes, emit });
         result.redTeamFindings = [...(result.redTeamFindings || []), ...fuzz.findings];
       }
 
@@ -201,6 +214,7 @@ export async function runDiagnostics(
           }
         }),
       };
+      emit?.("recon", `Surface mapped: ${crawl.pagesVisited} page(s), ${allTargets.length} endpoint(s), ${fuzz.paramsTested} parameter(s) fuzzed.`);
     }
   } catch (crawlErr) {
     console.warn("Crawl/fuzz stage encountered an error", crawlErr);

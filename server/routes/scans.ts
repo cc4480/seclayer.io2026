@@ -7,6 +7,7 @@ import { rateLimit } from "../rateLimit.js";
 import { assertScanTargetSafe } from "../scanner.js";
 import { activeProbesUnlocked } from "../activeProbeGate.js";
 import { retestFinding } from "../retest.js";
+import * as scanEvents from "../scanEvents.js";
 import type { BolaIdentity } from "../../src/types.js";
 import type { RouteContext } from "./context.js";
 
@@ -131,6 +132,23 @@ export function registerScanRoutes(app: express.Express, ctx: RouteContext) {
     }
     scan = db.getScanWithSuppressedFindings(scan);
     res.json({ scan });
+  });
+
+  // Live event feed for the real-time scan ticker. The client polls this with a
+  // ?since=<cursor> seq and appends the returned events (see
+  // src/hooks/useScanEvents.ts). `found` is false once the in-memory stream has
+  // been evicted (e.g. a scan finished a while ago) — the client then falls back
+  // to the persisted narrationLog. Ownership is enforced exactly like GET
+  // /api/scans/:id: a 404 (not 403) so a scan id can't be probed for existence.
+  app.get("/api/scans/:id/events", requireAuth, (req, res) => {
+    const scan = db.getScan(req.params.id);
+    if (!scan || scan.userId !== getUserId(req)) {
+      return res.status(404).json({ status: "error", message: "Scan not found" });
+    }
+    const since = Number.parseInt(String(req.query.since ?? "0"), 10);
+    const cursor = Number.isFinite(since) && since >= 0 ? since : 0;
+    const { events, cursor: nextCursor, found } = scanEvents.getSince(scan.id, cursor);
+    res.json({ status: "ok", events, cursor: nextCursor, found, scanStatus: scan.status });
   });
 
   app.get("/api/scans/:id/report", requireAuth, (req, res) => {

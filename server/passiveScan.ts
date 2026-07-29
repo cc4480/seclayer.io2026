@@ -6,6 +6,7 @@
 // seed the crawler with it. A failure reaching the target throws, so the scan is
 // surfaced as failed rather than a misleading "clean" report.
 import type { DiagnosticResult } from "./scanner.js";
+import type { EmitFn } from "./scanEvents.js";
 import { safeFetch } from "./ssrf.js";
 import { analyzeSecrets, analyzeLibraries } from "./staticAnalysis.js";
 import { scanPerimeter } from "./perimeter.js";
@@ -18,27 +19,54 @@ const SECURITY_HEADERS = [
   "referrer-policy",
 ];
 
+// The initial root fetch gates the WHOLE scan: if it fails we abort with "did
+// not respond" rather than emit a misleading clean report. But many real targets
+// sleep when idle (Replit, Render, Fly and other free-tier PaaS) and cold-start
+// on the first request, taking far longer than a few seconds to answer. So we
+// try a normal window first and, ONLY on a timeout, retry once with a much
+// longer warmup window — the first hit wakes the container, the retry reaches it
+// once it's up. A warm target still answers on the first attempt with no penalty
+// (the timeout is a ceiling, not a fixed wait).
+const ROOT_FETCH_TIMEOUT_MS = 12000; // first attempt
+const ROOT_FETCH_WARMUP_TIMEOUT_MS = 30000; // cold-start retry
+
+async function fetchRoot(url: string, headers: Record<string, string>): Promise<Response> {
+  const attempt = async (timeoutMs: number): Promise<Response> => {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await safeFetch(url, { method: "GET", headers, signal: controller.signal });
+    } finally {
+      clearTimeout(id);
+    }
+  };
+  try {
+    return await attempt(ROOT_FETCH_TIMEOUT_MS);
+  } catch (err: any) {
+    // Cold start: the first request likely woke a sleeping host — retry once
+    // with a longer window before giving up on the target entirely.
+    if (err?.name === "AbortError") return await attempt(ROOT_FETCH_WARMUP_TIMEOUT_MS);
+    throw err;
+  }
+}
+
 export async function runPassiveScan(
   url: string,
   host: string,
   hostname: string,
   headers: Record<string, string>,
   result: DiagnosticResult,
+  emit?: EmitFn,
 ): Promise<string> {
   let rootHtml = "";
   try {
-    // 1. Core Header Analysis
-    const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), 6000); // 6s timeout max
-
-    const response = await safeFetch(url, {
-      method: "GET",
-      headers,
-      signal: controller.signal,
-    });
-    clearTimeout(id);
+    // 1. Core Header Analysis — cold-start-aware so a sleeping target that wakes
+    // slowly (Replit/Render/Fly free tiers) still gets scanned instead of failing
+    // the whole run on the first slow request.
+    const response = await fetchRoot(url, headers);
 
     result.responseStatus = response.status;
+    emit?.("recon", `Reachable — HTTP ${result.responseStatus} over ${result.sslSecure ? "HTTPS/TLS" : "plaintext HTTP (no TLS)"}.`);
 
     // Copy headers (lowercased)
     response.headers.forEach((value, key) => {
@@ -52,6 +80,9 @@ export async function runPassiveScan(
     for (const header of SECURITY_HEADERS) {
       if (!result.headers[header]) result.missingHeaders.push(header);
     }
+    emit?.("recon", result.missingHeaders.length
+      ? `${result.missingHeaders.length} security header(s) missing: ${result.missingHeaders.join(", ")}.`
+      : "All tracked security headers present.");
 
     // Technology leaks checking (X-Powered-By, Server, etc.)
     const serverHeader = result.headers["server"];
@@ -62,6 +93,7 @@ export async function runPassiveScan(
     if (poweredBy) {
       result.techLeaked.push(`X-Powered-By: ${poweredBy}`);
     }
+    if (result.techLeaked.length) emit?.("recon", `Tech/server signatures disclosed: ${result.techLeaked.join(", ")}.`);
 
     // Cookie flag analysis — evaluate EACH Set-Cookie individually. A prior
     // version concatenated every cookie into one string and substring-tested
@@ -102,6 +134,12 @@ export async function runPassiveScan(
 
     // 4. EASM perimeter (DNS, subdomains) + sensitive-path probing.
     await scanPerimeter(host, hostname, result);
+    const liveSubs = result.easmPerimeter.subdomains.filter((s) => s.status === "live").map((s) => s.domain);
+    emit?.("recon", `Perimeter: resolved ${result.easmPerimeter.ip || "n/a"}; ${liveSubs.length} live subdomain(s)${liveSubs.length ? ` — ${liveSubs.slice(0, 5).join(", ")}` : ""}.`);
+    const exposedPaths = result.probedPaths.filter((p) => p.exposed).map((p) => p.path);
+    emit?.("recon", exposedPaths.length
+      ? `Exposed sensitive path(s): ${exposedPaths.join(", ")}.`
+      : `Sensitive-path probe: ${result.probedPaths.length} checked, none exposed.`);
   } catch (err: any) {
     // A failure reaching the target means we cannot assess it. Surface this as
     // a failed scan rather than a misleading "clean" (no-findings) report.
