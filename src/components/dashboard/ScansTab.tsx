@@ -86,6 +86,7 @@ export default function ScansTab({
                 <th className="py-3 px-4">Status</th>
                 <th className="py-3 px-4">Postures Score</th>
                 <th className="py-3 px-4">Vulnerabilities</th>
+                <th className="py-3 px-4">Checks Run</th>
                 <th className="py-3 px-4 text-right">Execution Date</th>
               </tr>
             </thead>
@@ -140,6 +141,15 @@ export default function ScansTab({
                       {scan.score ? <span className={scoreColor}>{scan.score}</span> : <span className="text-[#52525b] font-mono text-xs font-normal">Pending</span>}
                     </td>
                     <td className="py-3.5 px-4">{severityBadge}</td>
+                    <td className="py-3.5 px-4 font-mono text-[11px]">
+                      {typeof scan.evidence?.coverage?.totalChecks === 'number' ? (
+                        <span className="text-[#a1a1aa]" title="Discrete security checks run against this target">
+                          {scan.evidence.coverage.totalChecks}
+                        </span>
+                      ) : (
+                        <span className="text-[#52525b]">—</span>
+                      )}
+                    </td>
                     <td className="py-3.5 px-4 text-right font-mono text-[11px] text-[#52525b] group-hover:text-[#22c55e] transition-colors">
                       <div className="flex items-center justify-end space-x-1.5">
                         <span>{new Date(scan.createdAt).toLocaleDateString()}</span>

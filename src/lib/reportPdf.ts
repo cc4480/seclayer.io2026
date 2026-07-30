@@ -116,9 +116,53 @@ export function downloadReportPdf(scan: Scan, posture: Posture, findings: Findin
     if (currentY > pageHeight - 60) { doc.addPage(); currentY = 20; }
   }
 
+  // Scan coverage — full transparency on exactly which checks ran (and which were
+  // gated), so the audited party can see the basis behind the verdict.
+  const coverage = scan.evidence?.coverage;
+  if (coverage) {
+    if (currentY > pageHeight - 60) { doc.addPage(); currentY = 20; }
+    doc.setFontSize(14);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(0, 0, 0);
+    doc.text("SCAN COVERAGE", 15, currentY);
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    const ranCount = coverage.items.filter((i) => i.ran).length;
+    doc.text(`${coverage.totalChecks} checks run across ${ranCount}/${coverage.items.length} check groups.`, 15, currentY + 7);
+
+    autoTable(doc, {
+      startY: currentY + 12,
+      head: [['Check group', 'Category', 'Checks', 'Status']],
+      body: coverage.items.map((i) => [
+        i.label,
+        i.category,
+        String(i.checks),
+        i.ran ? 'Ran' : `Not run${i.note ? ` — ${i.note}` : ''}`,
+      ]),
+      theme: 'grid',
+      styles: { fontSize: 8, cellPadding: 2.5 },
+      headStyles: { fillColor: [9, 9, 11], textColor: [255, 255, 255] },
+      columnStyles: {
+        0: { cellWidth: 74 },
+        1: { cellWidth: 20 },
+        2: { cellWidth: 16 },
+        3: { cellWidth: 60 },
+      },
+      didParseCell: (data) => {
+        // Dim the gated rows so "Ran" groups read as the primary coverage.
+        if (data.section === 'body' && !coverage.items[data.row.index].ran) {
+          data.cell.styles.textColor = [130, 130, 130];
+        }
+      },
+    });
+    currentY = (doc as any).lastAutoTable.finalY + 12;
+    if (currentY > pageHeight - 60) { doc.addPage(); currentY = 20; }
+  }
+
   // Findings Table
   doc.setFontSize(14);
   doc.setFont("helvetica", "bold");
+  doc.setTextColor(0, 0, 0);
   doc.text("TECHNICAL FINDINGS & REMEDIATION", 15, currentY);
 
   const tableBody = findings.map((f, i) => [
