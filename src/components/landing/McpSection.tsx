@@ -2,7 +2,17 @@ import { useState } from 'react';
 import { Key } from 'lucide-react';
 
 export default function McpSection({ onNavigate }: { onNavigate: (view: string, arg?: string) => void }) {
-  const [activeMcpTab, setActiveMcpTab] = useState<'claude' | 'cursor' | 'manual'>('claude');
+  const [activeMcpTab, setActiveMcpTab] = useState<'json' | 'cli' | 'usage'>('json');
+
+  const jsonConfig = `{
+  "mcpServers": {
+    "seclayer": {
+      "command": "npx",
+      "args": ["-y", "@seclayer/mcp"],
+      "env": { "SECLAYER_API_KEY": "YOUR_API_KEY" }
+    }
+  }
+}`;
 
   return (
     <div className="bg-[#0c0c0e] border-t border-b border-[#27272a] py-24 px-6 relative">
@@ -15,7 +25,7 @@ export default function McpSection({ onNavigate }: { onNavigate: (view: string, 
             <span className="text-[#22c55e] font-mono font-bold">[ sec ]layer MCP</span>
           </h2>
           <p className="text-[#a1a1aa] text-xs font-mono mb-6 leading-relaxed">
-            Before you hit deploy, trigger a pen-test directly inside your preferred AI Coding Assistants (like VSCode Cursor, Claude Code, Windsurf, or Bolt).
+            Before you hit deploy, trigger a pen-test directly inside any MCP-compatible AI coding agent or editor — it's a standard stdio MCP server, so it works the same everywhere.
           </p>
           <p className="text-[#a1a1aa] text-xs font-mono mb-8 leading-relaxed">
             The Seclayer Model Context Protocol (MCP) server securely bridges scan credits into developer environments. Simply provide your prepaid API Key, and query live vulnerabilities in natural language.
@@ -42,76 +52,54 @@ export default function McpSection({ onNavigate }: { onNavigate: (view: string, 
             <span className="text-[#52525b] font-mono text-[10px] ml-4">Terminal: seclayer-mcp</span>
           </div>
 
-          {/* MCP CLI Code Switcher tabs */}
+          {/* MCP config switcher — provider-neutral: the same stdio server, shown
+              as the config shapes any MCP client accepts. */}
           <div className="flex space-x-2 border-b border-[#27272a] mb-4 pb-1">
-            <button
-              onClick={() => setActiveMcpTab('claude')}
-              className={`px-3 py-1 font-mono text-[11px] border-b-2 transition-all pb-1.5 ${
-                activeMcpTab === 'claude'
-                  ? 'border-[#22c55e] text-[#22c55e]'
-                  : 'border-transparent text-[#52525b] hover:text-[#a1a1aa]'
-              }`}
-            >
-              Claude Code
-            </button>
-            <button
-              onClick={() => setActiveMcpTab('cursor')}
-              className={`px-3 py-1 font-mono text-[11px] border-b-2 transition-all pb-1.5 ${
-                activeMcpTab === 'cursor'
-                  ? 'border-[#22c55e] text-[#22c55e]'
-                  : 'border-transparent text-[#52525b] hover:text-[#a1a1aa]'
-              }`}
-            >
-              Cursor Config
-            </button>
-            <button
-              onClick={() => setActiveMcpTab('manual')}
-              className={`px-3 py-1 font-mono text-[11px] border-b-2 transition-all pb-1.5 ${
-                activeMcpTab === 'manual'
-                  ? 'border-[#22c55e] text-[#22c55e]'
-                  : 'border-transparent text-[#52525b] hover:text-[#a1a1aa]'
-              }`}
-            >
-              Usage Syntax
-            </button>
+            {([['json', 'JSON Config'], ['cli', 'CLI'], ['usage', 'Usage Syntax']] as const).map(([id, label]) => (
+              <button
+                key={id}
+                onClick={() => setActiveMcpTab(id)}
+                className={`px-3 py-1 font-mono text-[11px] border-b-2 transition-all pb-1.5 ${
+                  activeMcpTab === id
+                    ? 'border-[#22c55e] text-[#22c55e]'
+                    : 'border-transparent text-[#52525b] hover:text-[#a1a1aa]'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
 
           {/* Terminal Code Content */}
           <div className="bg-black p-2 text-xs font-mono select-all">
-            {activeMcpTab === 'claude' && (
+            {activeMcpTab === 'json' && (
               <div className="space-y-2 text-[#a1a1aa]">
-                <p className="text-[#52525b]">{"# Add the seclayer MCP tool to your active agent environment"}</p>
+                <p className="text-[#52525b]">{"// Add to your MCP client's config — the standard mcpServers block"}</p>
+                <pre className="bg-[#0c0c0e] p-3 rounded border border-[#27272a] text-[10px] overflow-x-auto text-zinc-300 whitespace-pre leading-relaxed">{jsonConfig}</pre>
+                <p className="text-[#52525b]">{"// Works the same in any MCP-compatible agent or editor."}</p>
+              </div>
+            )}
+
+            {activeMcpTab === 'cli' && (
+              <div className="space-y-2 text-[#a1a1aa]">
+                <p className="text-[#52525b]">{"# Or add it as a stdio command server in one line:"}</p>
                 <p className="text-zinc-300">
-                  <span className="text-rose-400">claude</span> mcp add seclayer -- npx -y @seclayer/mcp --key <span className="text-[#22c55e]">YOUR_SECLAYER_API_KEY</span>
+                  npx -y @seclayer/mcp --key <span className="text-[#22c55e]">YOUR_API_KEY</span>
                 </p>
-                <p className="text-[#52525b] mt-4">{"# Once activated, ask Claude Code directly:"}</p>
+                <p className="text-[#52525b] mt-4">{"# Then ask your agent in natural language:"}</p>
                 <p className="text-zinc-200">
                   "{'Run an audit check on https://staging-checkout.mydomain.io before deploying.'}"
                 </p>
               </div>
             )}
 
-            {activeMcpTab === 'cursor' && (
-              <div className="space-y-2 text-[#a1a1aa]">
-                <p className="text-[#52525b]">{"// Insert into Settings > Features > MCP > Add New Server"}</p>
-                <div className="bg-[#0c0c0e] p-3 rounded border border-[#27272a] text-[11px] overflow-x-auto text-zinc-300 space-y-1">
-                  <p>Name: <span className="text-[#22c55e]">seclayer</span></p>
-                  <p>Type: <span className="text-purple-400">command</span></p>
-                  <p>Command:</p>
-                  <p className="text-[10px] text-[#a1a1aa] bg-black p-1.5 rounded select-all font-mono whitespace-nowrap border border-[#27272a]">
-                    npx -y @seclayer/mcp --key <span className="text-[#22c55e]">YOUR_API_KEY</span>
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {activeMcpTab === 'manual' && (
+            {activeMcpTab === 'usage' && (
               <div className="space-y-2 text-[#a1a1aa]">
                 <p className="text-[#52525b]">{"// How your agent calls the tool once the server is configured"}</p>
                 <p className="text-[#22c55e]">seclayer_scan({' {'}</p>
                 <p className="pl-4">url: <span className="text-amber-500">"https://dev-payments.corp.sh"</span></p>
                 <p className="text-[#22c55e]">{'}'})</p>
-                <p className="text-[#52525b] mt-2">{"// The API key is set once at server startup (--key), never per call."}</p>
+                <p className="text-[#52525b] mt-2">{"// The API key is set once at server startup, never per call."}</p>
               </div>
             )}
           </div>

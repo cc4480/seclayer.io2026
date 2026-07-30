@@ -33,7 +33,7 @@ export default function ApiKeysPanel({
           </button>
         </div>
         <p className="text-[#a1a1aa] text-xs font-mono mb-6">
-          Generate API key headers for your AI agents (Cursor, Claude Code, Windsurf) to query the MCP tool. {freeMode ? 'Scans are free during the beta.' : 'Consumes credits from your main balance.'}
+          Generate an API key for any MCP-compatible AI coding agent to query the MCP tool. {freeMode ? 'Scans are free during the beta.' : 'Consumes credits from your main balance.'}
         </p>
 
         {justGeneratedKey && (
@@ -90,7 +90,7 @@ export default function ApiKeysPanel({
           <Terminal className="w-48 h-48 text-white" />
         </div>
         <h3 className="font-mono text-xs text-[#22c55e] font-bold uppercase tracking-wider mb-2">MCP Integration Help</h3>
-        <p className="text-[#a1a1aa] text-xs mb-4 font-mono">Set up Cursor with Seclayer by introducing a new command type:</p>
+        <p className="text-[#a1a1aa] text-xs mb-4 font-mono">Add Seclayer to any MCP-compatible client as a stdio command server:</p>
         <div className="bg-black p-3 rounded font-mono text-[10px] text-zinc-300 select-all leading-relaxed border border-[#27272a] break-all mb-4">
           npx -y @seclayer/mcp --key <span className="text-[#22c55e]">{justGeneratedKey?.rawKey || "YOUR_API_KEY"}</span>
         </div>
