@@ -1,0 +1,68 @@
+name: Publish @seclayer/mcp
+
+# Publishes the MCP server package to npm. Two ways to trigger:
+#   1. Push a tag matching mcp-vX.Y.Z (must equal mcp-server/package.json version).
+#   2. Manually via the Actions tab (workflow_dispatch); leave dry_run=true to
+#      validate the publish without actually releasing.
+#
+# Requires an npm automation token stored as the NPM_TOKEN repository secret
+# (npmjs.com -> Access Tokens -> Generate -> "Automation"). The token's account
+# must have publish rights to the @seclayer scope.
+on:
+  push:
+    tags: ['mcp-v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Validate only — do not actually publish'
+        type: boolean
+        default: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Never publish a broken package: gate on the same checks CI runs.
+      - name: Typecheck
+        run: npm run lint -w @seclayer/mcp
+      - name: Test
+        run: npm test -w @seclayer/mcp
+      - name: Build
+        run: npm run build -w @seclayer/mcp
+
+      # A tag push must match the package version, so a release is never cut from
+      # a stale version number.
+      - name: Verify tag matches package version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#mcp-v}"
+          PKG_VERSION="$(node -p "require('./mcp-server/package.json').version")"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::Tag ($TAG_VERSION) does not match mcp-server/package.json version ($PKG_VERSION)."
+            exit 1
+          fi
+          echo "Publishing @seclayer/mcp@$PKG_VERSION"
+
+      - name: Publish to npm (dry run)
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+        run: npm publish -w @seclayer/mcp --access public --dry-run
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish to npm
+        if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && !inputs.dry_run)
+        run: npm publish -w @seclayer/mcp --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

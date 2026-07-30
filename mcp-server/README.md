@@ -173,3 +173,28 @@ To exercise the server interactively against a local Seclayer instance:
 ```bash
 npx @modelcontextprotocol/inspector node mcp-server/dist/index.js --key <key> --url http://localhost:3000
 ```
+
+## Publishing a release
+
+Publishing is automated by `.github/workflows/publish-mcp.yml`.
+
+**One-time setup:** create an npm **Automation** access token (npmjs.com → Access
+Tokens) for an account with publish rights to the `@seclayer` scope, and add it
+as the `NPM_TOKEN` repository secret in GitHub.
+
+**Cut a release:**
+
+1. Bump the version in `mcp-server/package.json` (e.g. `0.1.0` → `0.1.1`).
+2. Commit, then tag it to match: `git tag mcp-v0.1.1 && git push origin mcp-v0.1.1`.
+   The workflow verifies the tag equals the package version, runs typecheck +
+   tests + build, and publishes.
+
+You can also trigger it manually from the **Actions** tab — leave `dry_run`
+checked to validate the publish without releasing.
+
+**Publishing manually instead** (from a machine logged in with `npm login`):
+
+```bash
+npm run build -w @seclayer/mcp
+npm publish -w @seclayer/mcp --access public
+```
