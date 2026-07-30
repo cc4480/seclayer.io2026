@@ -10,6 +10,7 @@ import { createOobCollaborator } from './server/oob.js';
 import { makeProcessScanJob } from './server/scanWorker.js';
 import { startMonitorWorker } from './server/monitorWorker.js';
 import { startDigestWorker } from './server/digestWorker.js';
+import { startBackupWorker } from './server/backupWorker.js';
 import { registerAuthRoutes } from './server/routes/auth.js';
 import { registerScanRoutes } from './server/routes/scans.js';
 import { registerAccountRoutes } from './server/routes/account.js';
@@ -142,6 +143,7 @@ async function startServer() {
   // Continuous-monitoring worker (60s tick).
   startMonitorWorker(processScanJob);
   startDigestWorker();
+  startBackupWorker();
 
   // Unknown API routes return JSON 404 (not the SPA shell).
   app.use('/api', (req, res) => {

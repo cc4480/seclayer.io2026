@@ -112,14 +112,16 @@ Override the backend with `--url` / `SECLAYER_API_URL` for self-hosted installs.
 - [ ] Required env vars set (`NODE_ENV`, `APP_URL`, `RESEND_API_KEY`); optional
       keys set for any feature you want live (AI reports, payments).
 - [ ] `DB_PATH` points at a persistent volume that survives redeploys.
+- [ ] Database backups: automated `VACUUM INTO` snapshots run on a cadence
+      (default daily, keeping 7) to `BACKUP_DIR` (defaults next to `DB_PATH`).
+      Point `BACKUP_DIR` at durable storage and/or copy snapshots off-box
+      (they are single self-contained files); set `BACKUP_ENABLED=false` to
+      opt out.
 - [ ] Behind TLS + a proxy/load balancer (the app sets `trust proxy` and
       derives Secure cookies / client IP from `X-Forwarded-*` in production).
 - [ ] Stripe webhook configured (if payments are enabled).
 - [ ] `@seclayer/mcp` published (if you advertise the MCP integration).
-- [ ] `npm audit` reviewed. Remaining advisories at time of writing are 2
-      moderate in a transitive dep of the MCP SDK (`@hono/node-server`
-      serve-static, Windows-only) that the stdio server does not exercise;
-      fixing requires a breaking SDK downgrade, so it is intentionally deferred.
+- [ ] `npm audit` reviewed — clean at time of writing (0 advisories).
 - [ ] One real Docker image build + smoke test in the target environment
       (CI builds the app and both test suites, but does not build the image).
 - [ ] Note: the frontend is verified manually (browser) — there is no automated

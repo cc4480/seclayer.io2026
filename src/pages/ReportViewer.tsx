@@ -9,7 +9,6 @@ import { deriveSecurityPosture, bannerForPosture } from '../../server/scoring.js
 import { tokenForRiskLabel } from '../lib/severity.js';
 import ScoreGauge from '../components/ScoreGauge.js';
 import SeverityBar from '../components/SeverityBar.js';
-import { downloadReportPdf } from '../lib/reportPdf.js';
 import { useSuppression } from '../hooks/useSuppression.js';
 import { type SecCategory } from '../components/report/categories.js';
 import CategoryTabBar from '../components/report/CategoryTabBar.js';
@@ -38,6 +37,7 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
   const [copiedFixPrompt, setCopiedFixPrompt] = useState(false);
   const [copiedCodeId, setCopiedCodeId] = useState<string | null>(null);
   const [expandedApiRows, setExpandedApiRows] = useState<Record<string, boolean>>({});
+  const [isExporting, setIsExporting] = useState(false);
 
   // Suppression / false-positive form state + handlers.
   const {
@@ -88,7 +88,21 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
     setTimeout(() => setCopiedCodeId(null), 2000);
   };
 
-  const handleDownloadPdf = () => downloadReportPdf(scan, posture, findings);
+  // The jsPDF/autoTable bundle is large and only needed the moment a user
+  // actually exports. Load it lazily on click (its own code-split chunk) so it
+  // stays out of the initial app bundle.
+  const handleDownloadPdf = async () => {
+    if (isExporting) return;
+    setIsExporting(true);
+    try {
+      const { downloadReportPdf } = await import('../lib/reportPdf.js');
+      downloadReportPdf(scan, posture, findings);
+    } catch (err) {
+      console.error('[report] PDF export failed:', err);
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   // One consolidated, agent-ready remediation prompt covering every actionable
   // finding — the single "Complete Fix Prompt" hand-off (replaces per-finding ones).
@@ -191,11 +205,12 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
             )}
             <button
               onClick={handleDownloadPdf}
-              className="px-3.5 py-1.5 bg-[#18181b] border border-[#27272a] hover:border-[#3f3f46] text-[#a1a1aa] hover:text-white text-xs font-mono transition-all flex items-center space-x-1.5 cursor-pointer"
+              disabled={isExporting}
+              className="px-3.5 py-1.5 bg-[#18181b] border border-[#27272a] hover:border-[#3f3f46] text-[#a1a1aa] hover:text-white text-xs font-mono transition-all flex items-center space-x-1.5 cursor-pointer disabled:opacity-60 disabled:cursor-wait"
               id="report-download-btn"
             >
               <Download className="w-3.5 h-3.5 text-[#52525b]" />
-              <span>Export Audit Findings</span>
+              <span>{isExporting ? 'Preparing…' : 'Export Audit Findings'}</span>
             </button>
           </div>
         </div>

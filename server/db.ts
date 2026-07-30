@@ -555,6 +555,17 @@ class SqliteDb {
     }
   }
 
+  // Writes a consistent, compacted snapshot of the database to `destPath` using
+  // SQLite's `VACUUM INTO`. This runs inside a transaction, so it is safe against
+  // concurrent writes and produces a single clean file (no separate -wal/-shm) —
+  // ideal for off-box backup. `destPath` is operator-controlled (never user
+  // input); single quotes are still escaped for SQL safety since VACUUM does not
+  // accept a bound parameter for the target.
+  backupTo(destPath: string): void {
+    const escaped = destPath.replace(/'/g, "''");
+    this.db.exec(`VACUUM INTO '${escaped}'`);
+  }
+
   // Checkpoints the WAL and releases the file lock. Called from the graceful
   // shutdown path so a container redeploy leaves a clean, fully-flushed database
   // file behind instead of a hot -wal/-shm pair. Idempotent and never throws:
