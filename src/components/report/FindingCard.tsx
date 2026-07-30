@@ -108,6 +108,11 @@ export default function FindingCard(props: FindingCardProps) {
             <strong className="text-amber-400 font-semibold">Impact:</strong> {finding.impact}
           </p>
         )}
+        {finding.verification && !finding.isFalsePositive && (
+          <p className="text-[11px] font-mono leading-relaxed mt-2 pl-1 text-[#71717a]">
+            <span className="text-[#52525b] uppercase tracking-wider">How verified:</span> {finding.verification}
+          </p>
+        )}
       </div>
 
       {!finding.isFalsePositive && finding.evidence && (

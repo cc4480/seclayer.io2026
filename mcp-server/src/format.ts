@@ -30,6 +30,11 @@ function formatFinding(finding: Finding, index: number): string {
     lines.push(`**Impact:** ${finding.impact}`);
   }
 
+  if (finding.verification) {
+    lines.push("");
+    lines.push(`**How verified:** ${finding.verification}`);
+  }
+
   lines.push("");
   lines.push(`**Fix:** ${finding.fix}`);
 

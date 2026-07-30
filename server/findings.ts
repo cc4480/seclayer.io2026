@@ -19,6 +19,37 @@ function fid(prefix = "f_"): string {
   return prefix + crypto.randomBytes(4).toString("hex");
 }
 
+// Transparency: a plain-English statement of HOW a finding was confirmed, so a
+// reader can weigh the basis behind the verdict. Prefers the strongest evidence
+// available (a replayable exploit receipt), then falls back to the detection
+// method for the finding's category. Applied as a guaranteed default in the
+// compile loop; a specific builder may set its own note to override this.
+function verificationNote(f: Finding): string {
+  if (f.evidence) {
+    return "Confirmed by active exploitation — a request/response receipt was captured and is replayable (see evidence).";
+  }
+  if (f.severity === "info") {
+    return "Informational scan-coverage context — not a detected vulnerability.";
+  }
+  switch (f.category) {
+    case "SAST":
+      return "Signature match in the client-served markup, screened against known placeholder/example credentials.";
+    case "SCA":
+      return "Version identified in a script/link resource the page loads, matched to a known-vulnerable range.";
+    case "IAST":
+      return "Observed directly from the response headers and cookie attributes on the scanned URL.";
+    case "EASM":
+      return "Observed from the target's response headers and TLS state.";
+    case "DAST":
+      return "Confirmed by fetching the path and matching the file's signature in the response body — not a status code alone.";
+    case "RED_TEAM":
+    case "API_SEC":
+      return "Detected by an active exploit probe against the target.";
+    default:
+      return "Derived from the scan diagnostics.";
+  }
+}
+
 // 0. Surface mapping + skipped-probe notices (informational, zero score impact).
 function buildSurfaceFindings(diag: DiagnosticResult): Finding[] {
   const findings: Finding[] = [];
@@ -98,7 +129,11 @@ function buildHeaderFindings(diag: DiagnosticResult): Finding[] {
     });
   }
 
-  if (diag.missingHeaders.includes("strict-transport-security")) {
+  // HSTS is only meaningful over HTTPS. On a plaintext-HTTP target the absence of
+  // HSTS is both redundant with the "Insecure Connection Protocol (HTTP)" finding
+  // above and not independently actionable (you fix it by adding TLS, not the
+  // header), so flagging it here would be double-counted noise.
+  if (diag.sslSecure && diag.missingHeaders.includes("strict-transport-security")) {
     findings.push({
       id: fid(),
       title: "Missing Strict-Transport-Security (HSTS) Policy",
@@ -261,6 +296,7 @@ export function compileStaticFindings(diag: DiagnosticResult): {
     if (!f.owasp) f.owasp = mapOwasp(f.category, f.title);
     if (!f.impact) f.impact = buildImpactFallback(f.severity);
     if (!f.agentPrompt) f.agentPrompt = buildAgentPrompt(f, diag.url);
+    if (!f.verification) f.verification = verificationNote(f);
   }
 
   // Score via the shared scoring module so the initial score and any later
@@ -277,6 +313,22 @@ const TRACKED_SECURITY_HEADERS = [
   "x-content-type-options",
   "referrer-policy",
 ];
+
+// Advisory (informational) headers: their absence is NOT treated as a defensive
+// gap because the browser default is already safe — Referrer-Policy defaults to
+// strict-origin-when-cross-origin. They're still shown as present/absent in the
+// evidence panel for completeness, but they never become a scored finding and are
+// excluded from the "essential headers missing" narrative. Same reasoning that
+// omits SameSite from cookie flagging: no score impact, no false-positive noise.
+export const ADVISORY_SECURITY_HEADERS = ["referrer-policy"];
+
+// Splits observed-missing headers into the essential gaps (worth surfacing as
+// defensive weaknesses) and the advisory ones (informational only).
+export function splitMissingHeaders(missing: string[]): { essential: string[]; advisory: string[] } {
+  const advisory = missing.filter((h) => ADVISORY_SECURITY_HEADERS.includes(h));
+  const essential = missing.filter((h) => !ADVISORY_SECURITY_HEADERS.includes(h));
+  return { essential, advisory };
+}
 
 // Distils the raw diagnostics into the compact, display-oriented evidence the
 // report renders — real resolved IP, nameserver, live subdomains, per-path

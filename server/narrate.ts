@@ -1,6 +1,7 @@
 import { Finding, Severity } from "../src/types.js";
 import { DiagnosticResult } from "./scanner.js";
 import { callDeepSeek, resolveApiKey } from "./deepseekClient.js";
+import { splitMissingHeaders } from "./findings.js";
 import type { LiveEvent } from "./scanEvents.js";
 
 // Fast, cheap narration of scan progress for the live progress UI — distinct
@@ -59,7 +60,7 @@ Return JSON: {"lines": ["...", "..."]}.
 FACTS:
 - Fetched ${url} → HTTP ${diag.responseStatus}; transport ${diag.sslSecure ? 'HTTPS/TLS' : 'PLAINTEXT HTTP (no TLS)'}
 - Server/tech signatures disclosed: ${diag.techLeaked.join(', ') || 'none'}
-- Missing security headers (${diag.missingHeaders.length}): ${diag.missingHeaders.join(', ') || 'none'}
+- Missing essential security headers (${splitMissingHeaders(diag.missingHeaders).essential.length}): ${splitMissingHeaders(diag.missingHeaders).essential.join(', ') || 'none'}
 - Cookie flag issues: ${diag.cookieIssues.join('; ') || 'none'}
 - Exposed secret signatures (${secretIssues.length}): ${secretIssues.slice(0, 5).join('; ') || 'none'}
 - Vulnerable libraries: ${vulnLibs.join(', ') || 'none'}
@@ -168,10 +169,12 @@ function localScanningNarration(diag: DiagnosticResult): string[] {
   // Server/tech fingerprint.
   if (diag.techLeaked.length) lines.push(`Server/tech fingerprint disclosed: ${diag.techLeaked.join(', ')}.`);
 
-  // Defensive headers (name them).
-  lines.push(diag.missingHeaders.length
-    ? `Response headers: ${diag.missingHeaders.length} defensive header(s) missing — ${diag.missingHeaders.join(', ')}.`
-    : `Response headers: all tracked defensive headers present.`);
+  // Defensive headers (name them). Only essential gaps are narrated; advisory
+  // headers (e.g. Referrer-Policy) are informational and excluded here.
+  const essentialMissing = splitMissingHeaders(diag.missingHeaders).essential;
+  lines.push(essentialMissing.length
+    ? `Response headers: ${essentialMissing.length} defensive header(s) missing — ${essentialMissing.join(', ')}.`
+    : `Response headers: all essential defensive headers present.`);
 
   // Cookie hardening.
   if (diag.cookieIssues.length) lines.push(`Cookie hardening gaps: ${diag.cookieIssues.join('; ')}.`);

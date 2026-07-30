@@ -99,6 +99,10 @@ export interface Finding {
   // specific finding in the user's own codebase — provider-neutral, works on any
   // platform.
   agentPrompt?: string;
+  // Transparency: a one-line, plain-English statement of HOW this finding was
+  // confirmed (signature match, differential proof, replayable exploit receipt,
+  // header inspection, …) so a reader can judge the basis, not just the verdict.
+  verification?: string;
 }
 
 export interface SuppressionRule {

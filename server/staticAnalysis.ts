@@ -74,13 +74,30 @@ export function analyzeSecrets(htmlText: string): DiagnosticResult["sastFindings
   return findings;
 }
 
+// Collects the URLs a page loads code/assets from — the values of every src= and
+// href= attribute. Library detection runs over THESE, not the whole document, so
+// a version string that merely appears in prose, a changelog, or a code comment
+// (e.g. "migrated off jquery-1.9") can't be misread as a loaded dependency. A
+// real library is loaded via <script src> / <link href>, so this keeps true
+// detections while removing the dominant SCA false positive.
+export function extractResourceRefs(htmlText: string): string {
+  const refs: string[] = [];
+  const re = /(?:src|href)\s*=\s*["']([^"']+)["']/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(htmlText)) !== null) refs.push(m[1]);
+  return refs.join("\n");
+}
+
 // --- SCA: vulnerable-library footprints in markup -----------------------------
 // A library is only flagged when its version regex actually matches a known
-// vulnerable range in the served markup. The reported version is the one
-// captured from the page, and advisories are attributed per-library.
+// vulnerable range in a RESOURCE URL the page loads (src/href), not merely
+// anywhere in the served markup. The reported version is the one captured from
+// the URL, and advisories are attributed per-library.
 export function analyzeLibraries(htmlText: string): DiagnosticResult["scaLibraries"] {
   const libs: DiagnosticResult["scaLibraries"] = [];
   if (!htmlText) return libs;
+  const refs = extractResourceRefs(htmlText);
+  if (!refs) return libs;
 
   const libraries = [
     {
@@ -109,16 +126,20 @@ export function analyzeLibraries(htmlText: string): DiagnosticResult["scaLibrari
     },
     {
       name: "Lodash",
-      match: /lodash[@/-](4\.(?:[0-9]|1[0-6])\.\d+)\b/i,
+      // Vulnerable range is lodash < 4.17.21 (the fix floor for the CVEs below).
+      // Matches 4.0.0–4.16.x (any patch) and 4.17.0–4.17.20, but NOT 4.17.21+.
+      // The previous pattern stopped at 4.16.x, missing the entire — and most
+      // common — vulnerable 4.17.0–4.17.20 line.
+      match: /lodash[@/-](4\.(?:[0-9]|1[0-6])\.\d+|4\.17\.(?:20|1[0-9]|[0-9]))\b/i,
       severity: "high" as Severity,
-      advisories: ["CVE-2019-10744"],
-      desc: "lodash before 4.17.12 is vulnerable to prototype pollution via defaultsDeep.",
+      advisories: ["CVE-2019-10744", "CVE-2020-8203", "CVE-2021-23337"],
+      desc: "lodash before 4.17.21 is affected by prototype pollution (CVE-2019-10744 in defaultsDeep, CVE-2020-8203 in zipObjectDeep/set) and command injection via template (CVE-2021-23337).",
       fix: "Upgrade lodash to >= 4.17.21.",
     },
   ];
 
   libraries.forEach((lib) => {
-    const m = lib.match.exec(htmlText);
+    const m = lib.match.exec(refs);
     if (m) {
       libs.push({
         name: lib.name,

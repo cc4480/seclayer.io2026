@@ -18,6 +18,9 @@ export interface Finding {
   endpoint?: string;
   impact?: string;
   agentPrompt?: string;
+  // Plain-English statement of how the finding was confirmed (see backend
+  // findings.ts). Surfaced so an agent can weigh the basis, not just the verdict.
+  verification?: string;
   // True when the owner has marked this finding a false positive; such findings
   // are excluded from the score and must never gate a CI build.
   isFalsePositive?: boolean;

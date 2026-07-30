@@ -3,6 +3,7 @@
 // false-positive filtering rules, the strict JSON schema, the active-probe
 // gating language — can be read and tuned on its own.
 import { Finding, Severity } from "../src/types.js";
+import { splitMissingHeaders } from "./findings.js";
 
 export function buildReportPrompt(
   url: string,
@@ -10,6 +11,9 @@ export function buildReportPrompt(
   staticCompiled: { score: number; severity: Severity; findings: Finding[] },
 ): string {
   const findingsSummaryText = staticCompiled.findings.map((f) => `- [${f.severity.toUpperCase()}] ${f.title}: ${f.description} (Fix: ${f.fix})`).join("\n");
+  // Referrer-Policy (advisory) is reported separately as informational, not as an
+  // essential defensive gap, so the model doesn't over-weight it in the report.
+  const { essential: essentialMissing, advisory: advisoryMissing } = splitMissingHeaders(diagnostics.missingHeaders || []);
   const techContext = diagnostics.techLeaked?.length ? diagnostics.techLeaked.join(", ") : "no framework/server signature leaked";
   const activeProbesSkipped = !!diagnostics.activeProbesSkipped;
   // Summarize the sensitive-path probe outcomes so the model treats a
@@ -28,7 +32,8 @@ Generate a structured penetration testing report output in JSON format.
 DIAGNOSTIC DATA:
 Response Status Code: ${diagnostics.responseStatus}
 SSL Encryption Active: ${diagnostics.sslSecure}
-Missing Essential Defensive Security Headers (observed absent on the scanned response; may be served conditionally elsewhere): ${diagnostics.missingHeaders.join(", ") || "none"}
+Missing Essential Defensive Security Headers (observed absent on the scanned response; may be served conditionally elsewhere): ${essentialMissing.join(", ") || "none"}
+Advisory headers absent (INFORMATIONAL ONLY — the browser default is already safe, so do NOT report these as vulnerabilities or let them affect the score): ${advisoryMissing.join(", ") || "none"}
 Technology Framework Signature Leaks: ${techContext}
 Sensitive paths that are LOCKED DOWN (403/404 — these are PASSES, not issues): ${lockedDownPaths.join(", ") || "none"}
 Sensitive paths CONFIRMED EXPOSED (real findings): ${exposedPaths.join(", ") || "none"}

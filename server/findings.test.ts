@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { compileStaticFindings } from './findings.js';
+import { compileStaticFindings, splitMissingHeaders } from './findings.js';
 
 // Minimal DiagnosticResult, mirroring the helper in scanner.test.ts.
 function baseDiag(overrides: any = {}): any {
@@ -39,4 +39,60 @@ test('CSP frame-ancestors matching is case-insensitive and directive-position in
   });
   const r = compileStaticFindings(diag);
   assert.ok(!r.findings.some(isClickjacking), 'frame-ancestors anywhere in the CSP suppresses the finding');
+});
+
+const isHsts = (f: { title: string }) => /strict-transport|hsts/i.test(f.title);
+
+test('missing HSTS is flagged over HTTPS', () => {
+  const diag = baseDiag({ sslSecure: true, missingHeaders: ['strict-transport-security'] });
+  assert.ok(compileStaticFindings(diag).findings.some(isHsts));
+});
+
+test('missing HSTS is NOT double-counted on a plaintext-HTTP target', () => {
+  // The "Insecure Connection Protocol (HTTP)" finding already covers this, and
+  // HSTS is meaningless without TLS — so it must not add a second finding.
+  const diag = baseDiag({ sslSecure: false, missingHeaders: ['strict-transport-security'] });
+  assert.ok(!compileStaticFindings(diag).findings.some(isHsts), 'no HSTS finding on an HTTP target');
+});
+
+test('splitMissingHeaders treats Referrer-Policy as advisory, everything else essential', () => {
+  const { essential, advisory } = splitMissingHeaders([
+    'content-security-policy', 'referrer-policy', 'x-frame-options',
+  ]);
+  assert.deepEqual(advisory, ['referrer-policy']);
+  assert.deepEqual(essential, ['content-security-policy', 'x-frame-options']);
+});
+
+test('Referrer-Policy alone never produces a scored finding', () => {
+  const diag = baseDiag({ missingHeaders: ['referrer-policy'] });
+  const r = compileStaticFindings(diag);
+  assert.equal(r.findings.filter((f) => /referrer/i.test(f.title)).length, 0);
+});
+
+test('every finding carries a plain-English verification note', () => {
+  const diag = baseDiag({
+    sslSecure: false, // EASM no-TLS finding
+    missingHeaders: ['content-security-policy'], // IAST
+    sastFindings: [{ file: 'x', issue: 'Exposed Credential Signature (Stripe Secret Key)', severity: 'critical', confidence: 'high', type: 'hardcoded_secrets', description: 'd', fix: 'f' }],
+    probedPaths: [{ path: '/.env', status: 200, exposed: true }],
+  });
+  const r = compileStaticFindings(diag);
+  assert.ok(r.findings.length > 0);
+  for (const f of r.findings) {
+    assert.ok(typeof f.verification === 'string' && f.verification.length > 0, `missing verification: ${f.title}`);
+  }
+  // Category-appropriate basis, not a generic catch-all.
+  const sast = r.findings.find((f) => f.category === 'SAST');
+  assert.match(sast!.verification!, /signature match/i);
+  const dast = r.findings.find((f) => /\.env/i.test(f.title));
+  assert.match(dast!.verification!, /response body|signature/i);
+});
+
+test('a finding with an exploit receipt is verified as actively confirmed', () => {
+  const diag = baseDiag({
+    redTeamFindings: [{ testName: 'Active SQL Injection Probe', description: 'd', severity: 'critical', fix: 'f', evidence: { method: 'error-signature' } }],
+  });
+  const r = compileStaticFindings(diag);
+  const rt = r.findings.find((f) => /sql injection/i.test(f.title));
+  assert.match(rt!.verification!, /active exploitation|replayable|receipt/i);
 });
