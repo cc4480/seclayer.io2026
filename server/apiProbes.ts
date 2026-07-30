@@ -8,6 +8,10 @@ import { safeFetch } from "./ssrf.js";
 import { buildProbeEvidence, renderRawRequest, renderRawResponse, windowAround } from "./evidence.js";
 import { bolaProbe } from "./bola.js";
 
+// Distinct API-security checks run per scan (for coverage reporting): GraphQL
+// introspection, exposed-object endpoint, and the BOLA/IDOR authorization probe.
+export const API_PROBE_COUNT = 3;
+
 export async function runApiSecProbes(
   url: string,
   host: string,

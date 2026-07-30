@@ -194,6 +194,25 @@ export interface ApiKey {
 // Persisted on the scan and rendered in the report so the "Network & Attack
 // Surface" and raw-log sections show the ACTUAL target data instead of
 // placeholder values.
+// Full-transparency accounting of exactly what a scan ran against a target: one
+// row per check group, the discrete count in each, and whether it executed (some
+// groups are gated behind verified ownership or an aggressive opt-in). This is
+// recorded from the real run — not a marketing figure — so a report can show the
+// precise coverage behind its verdict.
+export interface ScanCoverageItem {
+  label: string;     // human name, e.g. "Sensitive-path probing"
+  category: string;  // AppSec category tag, e.g. "DAST"
+  checks: number;    // discrete checks in this group actually attempted
+  ran: boolean;      // whether the group executed (false when gated off)
+  note?: string;     // why it did/didn't run, e.g. "requires verified ownership"
+}
+export interface ScanCoverage {
+  totalChecks: number;            // sum of `checks` across groups that ran
+  activeProbesRun: boolean;       // exploit probing (ownership-gated)
+  aggressiveProbesRun: boolean;   // invasive opt-in tier
+  items: ScanCoverageItem[];
+}
+
 export interface ScanEvidence {
   scannedAt: string;
   responseStatus: number;
@@ -209,6 +228,7 @@ export interface ScanEvidence {
   detectedLibraries: Array<{ name: string; version: string; vulnerable: boolean }>;
   crawl?: { pagesVisited: number; endpointsDiscovered: number; paramsTested: number; sampleEndpoints: string[] };
   activeProbesRun: boolean; // false when gated off for an unverified domain
+  coverage?: ScanCoverage; // exactly which checks ran, and how many (transparency)
   screenshot?: TargetScreenshot; // headless-browser capture of the target, when enabled
 }
 

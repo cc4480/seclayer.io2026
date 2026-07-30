@@ -11,7 +11,7 @@ import { safeFetch } from "./ssrf.js";
 import { analyzeSecrets, analyzeLibraries } from "./staticAnalysis.js";
 import { scanPerimeter } from "./perimeter.js";
 
-const SECURITY_HEADERS = [
+export const SECURITY_HEADERS = [
   "content-security-policy",
   "strict-transport-security",
   "x-frame-options",

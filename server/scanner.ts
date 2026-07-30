@@ -13,6 +13,7 @@ import { runApiSecProbes } from "./apiProbes.js";
 import { probeJwtAuth } from "./jwtProbe.js";
 import { probeDomXss } from "./domXss.js";
 import { runPassiveScan } from "./passiveScan.js";
+import { buildScanCoverage } from "./coverage.js";
 import type { DiagnosticResult, ScanOptions } from "./scanTypes.js";
 
 // Re-export the SSRF, evidence, and findings-compilation entry points so
@@ -33,6 +34,8 @@ export async function runDiagnostics(
   const allowAggressiveProbes = allowActiveProbes && !!opts.allowAggressiveProbes;
   // Live progress sink for the real-time ticker (no-op when nobody's watching).
   const emit = opts.emit;
+  // How many tech-gated templates were actually selected to run (for coverage).
+  let templatesRun = 0;
   let url = targetUrl.trim();
   if (!/^https?:\/\//i.test(url)) {
     url = "https://" + url;
@@ -229,11 +232,25 @@ export async function runDiagnostics(
       // pack scales without running every stack's checks against every target.
       const techTags = detectTechTags(result.headers, rootHtml);
       const selected = selectTemplates(TEMPLATES, techTags);
+      templatesRun = selected.length;
       result.templateFindings = await runTemplates(host, authedFetch, selected, 6);
     }
   } catch (tplErr) {
     console.warn("Template detection stage encountered an error", tplErr);
   }
+
+  // Full-transparency coverage record: exactly which check groups ran against
+  // this target and how many discrete checks each fired.
+  result.coverage = buildScanCoverage({
+    activeProbesRun: allowActiveProbes,
+    aggressiveProbesRun: allowAggressiveProbes,
+    subdomainsChecked: result.easmPerimeter.subdomains.length,
+    pathsProbed: result.probedPaths.length,
+    templatesRun,
+    crawlPages: result.crawl?.pagesVisited ?? 0,
+    paramsFuzzed: result.crawl?.paramsTested ?? 0,
+    domXssRun: allowActiveProbes && isRenderingEnabled(),
+  });
 
   return result;
 }

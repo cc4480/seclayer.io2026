@@ -12,11 +12,10 @@ import { isLikelyPlaceholderSecret } from "./fpFilters.js";
 // with high confidence. Identifiers that are frequently public by design (e.g.
 // Firebase/Maps browser keys) are reported low/medium so they do not become
 // false positives.
-export function analyzeSecrets(htmlText: string): DiagnosticResult["sastFindings"] {
-  const findings: DiagnosticResult["sastFindings"] = [];
-  if (!htmlText) return findings;
-
-  const patterns = [
+// Exposed-credential signatures. Module-level so SECRET_SIGNATURE_COUNT can be
+// exported for scan-coverage reporting (how many signatures each document is
+// screened against).
+const SECRET_SIGNATURES = [
     {
       name: "Stripe Secret Key",
       regex: /sk_live_[0-9a-zA-Z]{24,}/,
@@ -53,8 +52,13 @@ export function analyzeSecrets(htmlText: string): DiagnosticResult["sastFindings
       note: "Google browser API keys are often intentionally public; verify it is restricted by HTTP referrer/API and not a server key.",
     },
   ];
+export const SECRET_SIGNATURE_COUNT = SECRET_SIGNATURES.length;
 
-  patterns.forEach((p) => {
+export function analyzeSecrets(htmlText: string): DiagnosticResult["sastFindings"] {
+  const findings: DiagnosticResult["sastFindings"] = [];
+  if (!htmlText) return findings;
+
+  SECRET_SIGNATURES.forEach((p) => {
     const m = p.regex.exec(htmlText);
     // Signature match is necessary but not sufficient: skip documented
     // example/placeholder credentials (e.g. AWS's AKIAIOSFODNN7EXAMPLE,
@@ -93,13 +97,9 @@ export function extractResourceRefs(htmlText: string): string {
 // vulnerable range in a RESOURCE URL the page loads (src/href), not merely
 // anywhere in the served markup. The reported version is the one captured from
 // the URL, and advisories are attributed per-library.
-export function analyzeLibraries(htmlText: string): DiagnosticResult["scaLibraries"] {
-  const libs: DiagnosticResult["scaLibraries"] = [];
-  if (!htmlText) return libs;
-  const refs = extractResourceRefs(htmlText);
-  if (!refs) return libs;
-
-  const libraries = [
+// Vulnerable-library footprints. Module-level so LIBRARY_SIGNATURE_COUNT can be
+// exported for scan-coverage reporting.
+const LIBRARY_SIGNATURES = [
     {
       name: "jQuery",
       match: /jquery[-.](1\.\d+\.\d+|2\.\d+\.\d+)/i,
@@ -137,8 +137,15 @@ export function analyzeLibraries(htmlText: string): DiagnosticResult["scaLibrari
       fix: "Upgrade lodash to >= 4.17.21.",
     },
   ];
+export const LIBRARY_SIGNATURE_COUNT = LIBRARY_SIGNATURES.length;
 
-  libraries.forEach((lib) => {
+export function analyzeLibraries(htmlText: string): DiagnosticResult["scaLibraries"] {
+  const libs: DiagnosticResult["scaLibraries"] = [];
+  if (!htmlText) return libs;
+  const refs = extractResourceRefs(htmlText);
+  if (!refs) return libs;
+
+  LIBRARY_SIGNATURES.forEach((lib) => {
     const m = lib.match.exec(refs);
     if (m) {
       libs.push({

@@ -351,5 +351,6 @@ export function compileScanEvidence(diag: DiagnosticResult): ScanEvidence {
     detectedLibraries: diag.scaLibraries.map((l) => ({ name: l.name, version: l.version, vulnerable: l.status === "vuln" })),
     crawl: diag.crawl,
     activeProbesRun: !diag.activeProbesSkipped,
+    coverage: diag.coverage,
   };
 }

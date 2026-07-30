@@ -28,6 +28,9 @@ const PROBES: Probe[] = [
   probeBlindSsrf,
 ];
 
+// Number of distinct root-URL red-team probe types (for scan-coverage reporting).
+export const RED_TEAM_PROBE_COUNT = PROBES.length;
+
 export async function runRedTeamProbes(
   url: string,
   headers: Record<string, string>,

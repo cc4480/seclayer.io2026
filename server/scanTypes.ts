@@ -1,7 +1,7 @@
 // Shared scan data contracts: the DiagnosticResult produced by runDiagnostics
 // and the ScanOptions that configure it. Extracted so the probe/analysis modules
 // can depend on the shapes without importing the scanner entry point.
-import type { Finding, Severity, ExploitEvidence, BolaIdentity } from "../src/types.js";
+import type { Finding, Severity, ExploitEvidence, BolaIdentity, ScanCoverage } from "../src/types.js";
 import type { OobCollaborator } from "./oob.js";
 import type { EmitFn } from "./scanEvents.js";
 
@@ -76,6 +76,9 @@ export interface DiagnosticResult {
   // True when active exploit probing (SQLi/XSS/cmd-injection/SSRF/GraphQL/BOLA
   // fuzzing) was skipped because the target's domain ownership isn't verified.
   activeProbesSkipped?: boolean;
+  // Full-transparency record of exactly which check groups ran and how many
+  // discrete checks each fired against this target (see server/coverage.ts).
+  coverage?: ScanCoverage;
 }
 
 export interface ScanOptions {

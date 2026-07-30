@@ -5,6 +5,7 @@ import SeverityBar from '../SeverityBar.js';
 import BrowserFrame from '../BrowserFrame.js';
 import { categoryTabLabels, getCategoryCount, getCategorySeverity, getCategoryColor, type SecCategory } from './categories.js';
 import EvidencePanels from './EvidencePanels.js';
+import ScanCoveragePanel from './ScanCoveragePanel.js';
 
 interface Props {
   scan: Scan;
@@ -137,6 +138,9 @@ export default function OverviewTab({ scan, banner, findings, showReasoning, set
 
       {/* Real diagnostic evidence behind the findings. */}
       <EvidencePanels scan={scan} />
+
+      {/* Full-transparency coverage: exactly which checks ran against the target. */}
+      <ScanCoveragePanel scan={scan} />
 
       {/* Visual recon — a headless-browser screenshot of the target's landing page. */}
       {scan.evidence?.screenshot && (

@@ -30,6 +30,9 @@ const PROBES: Probe[] = [
   probeHostHeaderInjection,
 ];
 
+// Number of aggressive-tier probe types (for scan-coverage reporting).
+export const AGGRESSIVE_PROBE_COUNT = PROBES.length;
+
 export async function runAggressiveProbes(
   url: string,
   headers: Record<string, string>,

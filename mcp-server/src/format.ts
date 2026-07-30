@@ -89,6 +89,19 @@ export function formatScanReport(data: ScanReport): string {
     lines.push("");
   }
 
+  // Full-transparency coverage: exactly which checks ran against the target.
+  const coverage = data.evidence?.coverage;
+  if (coverage) {
+    lines.push(`## Checks performed (${coverage.totalChecks} total)`);
+    const ran = coverage.items.filter((i) => i.ran);
+    const skipped = coverage.items.filter((i) => !i.ran);
+    for (const i of ran) lines.push(`- ✓ ${i.label} — ${i.checks} check(s) [${i.category}]`);
+    for (const i of skipped) {
+      lines.push(`- ○ ${i.label} — ${i.checks} available, not run${i.note ? ` (${i.note})` : ""} [${i.category}]`);
+    }
+    lines.push("");
+  }
+
   const findings = data.securityFindings || [];
   lines.push(`## Findings (${findings.length})`);
   lines.push("");

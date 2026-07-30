@@ -46,6 +46,22 @@ export interface ExecutiveBreakdown {
 // the same shape for both, so one formatter renders either. The fields that
 // differ are optional: creditsRemaining is present only on a fresh (paid) scan;
 // createdAt/completedAt are present only on a retrieved historical report.
+// Full-transparency accounting of which check groups ran against the target and
+// how many discrete checks each fired (mirrors the backend's ScanEvidence.coverage).
+export interface ScanCoverageItem {
+  label: string;
+  category: string;
+  checks: number;
+  ran: boolean;
+  note?: string;
+}
+export interface ScanCoverage {
+  totalChecks: number;
+  activeProbesRun: boolean;
+  aggressiveProbesRun: boolean;
+  items: ScanCoverageItem[];
+}
+
 export interface ScanReport {
   success: true;
   targetUrl: string;
@@ -54,7 +70,7 @@ export interface ScanReport {
   analysisSummary: string;
   executiveBreakdown: ExecutiveBreakdown;
   securityFindings: Finding[];
-  evidence?: unknown;
+  evidence?: { coverage?: ScanCoverage; [key: string]: unknown };
   creditsRemaining?: number;
   createdAt?: string;
   completedAt?: string;
