@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { ArrowLeft, Download, Share2, Clock, Check, AlertTriangle, Sparkles } from 'lucide-react';
+import { useState, useMemo, useEffect } from 'react';
+import { ArrowLeft, Download, Share2, Clock, Check, AlertTriangle, Sparkles, Eye, X, Clipboard } from 'lucide-react';
 import { Scan } from '../types.js';
 import { buildScanFixPrompt, actionableFindings } from '../lib/scanFixPrompt.js';
 // Single source of truth for every risk figure/label shown here — the same
@@ -38,6 +38,7 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
   const [copiedCodeId, setCopiedCodeId] = useState<string | null>(null);
   const [expandedApiRows, setExpandedApiRows] = useState<Record<string, boolean>>({});
   const [isExporting, setIsExporting] = useState(false);
+  const [showFixPrompt, setShowFixPrompt] = useState(false);
 
   // Suppression / false-positive form state + handlers.
   const {
@@ -106,12 +107,23 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
 
   // One consolidated, agent-ready remediation prompt covering every actionable
   // finding — the single "Complete Fix Prompt" hand-off (replaces per-finding ones).
+  // Built once and reused by both the quick-copy button and the preview modal, so
+  // what a user reads is exactly what gets copied.
   const fixableCount = actionableFindings(findings).length;
+  const fixPromptText = useMemo(() => buildScanFixPrompt(scan), [scan]);
   const handleCopyFixPrompt = () => {
-    navigator.clipboard.writeText(buildScanFixPrompt(scan));
+    navigator.clipboard.writeText(fixPromptText);
     setCopiedFixPrompt(true);
     setTimeout(() => setCopiedFixPrompt(false), 2000);
   };
+
+  // Close the fix-prompt preview on Escape for keyboard users.
+  useEffect(() => {
+    if (!showFixPrompt) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowFixPrompt(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showFixPrompt]);
 
   // A scan that never completed has no real findings/score to report — showing
   // the normal report for it would misrepresent an empty findings list (from a
@@ -165,15 +177,26 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
 
           <div className="flex items-center space-x-3">
             {fixableCount > 0 && (
-              <button
-                onClick={handleCopyFixPrompt}
-                title={`One complete prompt to fix all ${fixableCount} issue(s) — paste into Claude Code, Codex, Replit, Cursor, or Windsurf`}
-                className="px-3.5 py-1.5 bg-purple-500/10 border border-purple-500/40 hover:border-purple-400 text-purple-200 hover:text-white text-xs font-mono transition-all flex items-center space-x-1.5 cursor-pointer"
-                id="report-fixprompt-btn"
-              >
-                {copiedFixPrompt ? <Check className="w-3.5 h-3.5 text-purple-300" /> : <Sparkles className="w-3.5 h-3.5 text-purple-300" />}
-                <span>{copiedFixPrompt ? 'Copied Fix Prompt' : `Copy Fix Prompt (${fixableCount})`}</span>
-              </button>
+              <div className="flex items-center">
+                <button
+                  onClick={() => setShowFixPrompt(true)}
+                  title="Preview the complete fix prompt before copying"
+                  className="px-2.5 py-1.5 bg-purple-500/10 border border-r-0 border-purple-500/40 hover:border-purple-400 text-purple-200 hover:text-white text-xs font-mono transition-all flex items-center space-x-1.5 cursor-pointer rounded-l"
+                  id="report-fixprompt-view-btn"
+                >
+                  <Eye className="w-3.5 h-3.5 text-purple-300" />
+                  <span>View</span>
+                </button>
+                <button
+                  onClick={handleCopyFixPrompt}
+                  title={`One complete prompt to fix all ${fixableCount} issue(s) — paste into Claude Code, Codex, Cursor, or Windsurf`}
+                  className="px-3.5 py-1.5 bg-purple-500/10 border border-purple-500/40 hover:border-purple-400 text-purple-200 hover:text-white text-xs font-mono transition-all flex items-center space-x-1.5 cursor-pointer rounded-r"
+                  id="report-fixprompt-btn"
+                >
+                  {copiedFixPrompt ? <Check className="w-3.5 h-3.5 text-purple-300" /> : <Sparkles className="w-3.5 h-3.5 text-purple-300" />}
+                  <span>{copiedFixPrompt ? 'Copied Fix Prompt' : `Copy Fix Prompt (${fixableCount})`}</span>
+                </button>
+              </div>
             )}
             {isPublic ? (
               <span className="px-3.5 py-1.5 bg-[#18181b] border border-[#27272a] text-[#52525b] text-xs font-mono flex items-center space-x-1.5">
@@ -316,6 +339,50 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
         <HeadersDrawer scan={scan} findings={findings} showRaw={showRaw} setShowRaw={setShowRaw} />
 
       </div>
+
+      {/* Fix-prompt preview: read the full remediation prompt before copying it. */}
+      {showFixPrompt && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in"
+          onClick={() => setShowFixPrompt(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Complete fix prompt"
+        >
+          <div
+            className="bg-[#0c0c0e] border border-[#27272a] rounded-lg shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-[#27272a] shrink-0">
+              <div className="flex items-center space-x-2">
+                <Sparkles className="w-4 h-4 text-purple-300" />
+                <h3 className="text-sm font-mono font-bold text-white">Complete Fix Prompt</h3>
+                <span className="text-[10px] font-mono text-[#52525b] uppercase tracking-wider">{fixableCount} issue(s)</span>
+              </div>
+              <button
+                onClick={() => setShowFixPrompt(false)}
+                className="text-[#52525b] hover:text-white transition-colors cursor-pointer"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="overflow-y-auto p-5 scrollbar-thin">
+              <pre className="text-[11px] font-mono text-zinc-300 whitespace-pre-wrap break-words leading-relaxed">{fixPromptText}</pre>
+            </div>
+            <div className="flex items-center justify-between px-5 py-3 border-t border-[#27272a] shrink-0">
+              <span className="text-[10px] font-mono text-[#52525b]">Paste into Claude Code, Codex, Cursor, or Windsurf</span>
+              <button
+                onClick={handleCopyFixPrompt}
+                className="px-3.5 py-1.5 bg-purple-500/10 border border-purple-500/40 hover:border-purple-400 text-purple-200 hover:text-white text-xs font-mono transition-all flex items-center space-x-1.5 cursor-pointer rounded"
+              >
+                {copiedFixPrompt ? <Check className="w-3.5 h-3.5 text-purple-300" /> : <Clipboard className="w-3.5 h-3.5 text-purple-300" />}
+                <span>{copiedFixPrompt ? 'Copied' : 'Copy Fix Prompt'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
