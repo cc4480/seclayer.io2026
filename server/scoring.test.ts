@@ -61,12 +61,20 @@ test('score never drops below the floor', () => {
   assert.equal(scoreFindings(many).score, SCORE_FLOOR);
 });
 
-test('info findings carry a small weight so any finding dents the score', () => {
-  const r = scoreFindings([{ severity: 'info' } as any, { severity: 'info' } as any]);
-  // A scan with N>0 findings must never present as a flawless 100/100.
-  assert.equal(r.score, 100 - 2 * SEVERITY_WEIGHTS.info);
-  assert.ok(r.score < 100);
+test('info findings never affect the score — only critical/high/medium/low do', () => {
+  // Info notices are scan context (surface mapped, probing skipped), not
+  // weaknesses, so a site whose only findings are informational scores a true 100.
+  const r = scoreFindings([{ severity: 'info' } as any, { severity: 'info' } as any, { severity: 'info' } as any]);
+  assert.equal(SEVERITY_WEIGHTS.info, 0);
+  assert.equal(r.score, 100);
   assert.equal(r.severity, 'info');
+});
+
+test('info findings alongside a real finding contribute nothing extra to the deduction', () => {
+  const withInfo = scoreFindings([{ severity: 'medium' } as any, { severity: 'info' } as any, { severity: 'info' } as any]);
+  const withoutInfo = scoreFindings([{ severity: 'medium' } as any]);
+  assert.equal(withInfo.score, withoutInfo.score, 'info notices must not change the score');
+  assert.equal(withInfo.score, 100 - SEVERITY_WEIGHTS.medium);
 });
 
 test('posture: score, grade, posture rating and counts agree for the same findings', () => {

@@ -18,11 +18,11 @@ export const SEVERITY_WEIGHTS: Record<Severity, number> = {
   high: 25,
   medium: 15,
   low: 5,
-  // Informational findings still nudge the score below a perfect 100 so a scan
-  // with any real findings can never present as a flawless "100/100 — no issues"
-  // result next to a list of findings. The nudge is deliberately small so a
-  // hardened site covered only in info notes still grades an A.
-  info: 2,
+  // Informational findings never affect the grade. They are scan context (surface
+  // mapped, active probing skipped, tech signature notes), not weaknesses — so a
+  // site whose only findings are info notices scores a true 100/100. Only
+  // critical/high/medium/low deduct from the score.
+  info: 0,
 };
 
 // The worst possible site still reports a small non-zero score so the UI gauge
