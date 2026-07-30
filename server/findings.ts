@@ -111,7 +111,13 @@ function buildHeaderFindings(diag: DiagnosticResult): Finding[] {
     });
   }
 
-  if (diag.missingHeaders.includes("x-frame-options")) {
+  // CSP frame-ancestors is the modern replacement for X-Frame-Options. When it
+  // is present, the page IS protected against framing, so flagging a missing
+  // X-Frame-Options header would be a false positive — and would directly
+  // contradict this finding's own text ("X-Frame-Options or CSP frame-ancestors").
+  // Only report clickjacking exposure when NEITHER control is in place.
+  const cspHasFrameAncestors = /frame-ancestors/i.test(diag.headers["content-security-policy"] || "");
+  if (diag.missingHeaders.includes("x-frame-options") && !cspHasFrameAncestors) {
     findings.push({
       id: fid(),
       title: "Missing X-Frame-Options / Clickjacking Immunity",
