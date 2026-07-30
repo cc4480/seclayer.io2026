@@ -183,7 +183,7 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
                 </button>
                 <button
                   onClick={handleCopyFixPrompt}
-                  title={`One complete prompt to fix all ${fixableCount} issue(s) — paste into Claude Code, Codex, Cursor, or Windsurf`}
+                  title={`One complete prompt to fix all ${fixableCount} issue(s) — paste into any AI coding agent`}
                   className="px-3.5 py-1.5 bg-purple-500/10 border border-purple-500/40 hover:border-purple-400 text-purple-200 hover:text-white text-xs font-mono transition-all flex items-center space-x-1.5 cursor-pointer rounded-r"
                   id="report-fixprompt-btn"
                 >
@@ -244,7 +244,7 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
               <div className="flex items-center space-x-2">
                 <Sparkles className="w-4 h-4 text-purple-300" />
                 <h3 className="text-xs font-mono font-bold text-white uppercase tracking-wider">Complete Fix Prompt</h3>
-                <span className="text-[10px] font-mono text-[#52525b]">{fixableCount} issue(s) · paste into Claude Code, Codex, Cursor, or Windsurf</span>
+                <span className="text-[10px] font-mono text-[#52525b]">{fixableCount} issue(s) · paste into any AI coding agent</span>
               </div>
               <div className="flex items-center space-x-2">
                 <button

@@ -32,8 +32,12 @@ test('buildAgentPrompt emits the full master-prompt structure', () => {
   for (const heading of ['# Security Fix Task', '## The issue', '## Recommended fix', '## Work it in this order', '## Guardrails', '## Done when']) {
     assert.ok(prompt.includes(heading), `expected section: ${heading}`);
   }
-  // Provider-neutral: names the agents it must work across.
-  assert.match(prompt, /Claude Code, Codex, Replit Agent, Cursor, or Windsurf/);
+  // Provider-neutral: portable across any AI coding agent, with no vendor names
+  // baked into the prompt handed to the agent.
+  assert.match(prompt, /any AI coding agent on any platform/);
+  for (const vendor of ['Claude Code', 'Codex', 'Replit', 'Cursor', 'Windsurf']) {
+    assert.ok(!prompt.includes(vendor), `prompt must not name a specific agent (${vendor})`);
+  }
   // The workflow forces confirm-before-change (false-positive guard) and a test.
   assert.match(prompt, /false positive/i);
   assert.match(prompt, /regression test/i);

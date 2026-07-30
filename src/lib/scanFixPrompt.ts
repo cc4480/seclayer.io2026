@@ -6,8 +6,8 @@ import { deriveSecurityPosture } from '../../server/scoring.js';
 // "Complete Fix Prompt" the report hands off in a single copy. It replaces the
 // old per-finding prompts in the UI: the shared role framing, workflow, and
 // guardrails are stated ONCE, then every actionable finding is listed as a
-// compact, prioritized section. Portable across Claude Code, Codex, Replit Agent,
-// Cursor, and Windsurf (plain, provider-neutral markdown only).
+// compact, prioritized section. Portable across any AI coding agent on any
+// platform (plain, provider-neutral markdown only).
 //
 // Kept client-side and self-contained: it composes directly from the findings the
 // report already holds, so there's no server round-trip or schema change. The
@@ -80,8 +80,8 @@ export function buildScanFixPrompt(scan: Scan): string {
     `repository. A black-box security scan of ${scan.url} found ${findings.length} issue(s) to fix.`,
     'Work through them IN THE ORDER LISTED (most severe first), fixing each at the',
     'root cause without regressions or weakening any other control. This prompt is',
-    'self-contained and portable: it works the same in Claude Code, Codex, Replit',
-    'Agent, Cursor, or Windsurf.',
+    'self-contained, provider-neutral, and portable: it works the same with any AI',
+    'coding agent on any platform.',
     '',
     'Scan context:',
     `- Target (black-box): ${scan.url}`,

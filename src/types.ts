@@ -95,9 +95,9 @@ export interface Finding {
   // finding to the PROVEN tier and carries the raw request/response exchange(s).
   evidence?: ExploitEvidence;
   impact?: string; // plain-English consequence if this is exploited
-  // Ready-to-paste instructions for an AI coding agent (Cursor, Claude Code,
-  // Windsurf, etc.) to locate and fix this specific finding in the user's own
-  // codebase.
+  // Ready-to-paste instructions for any AI coding agent to locate and fix this
+  // specific finding in the user's own codebase — provider-neutral, works on any
+  // platform.
   agentPrompt?: string;
 }
 

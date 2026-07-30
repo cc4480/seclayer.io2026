@@ -46,6 +46,19 @@ test('buildScanFixPrompt lists findings in priority order with role framing and 
   assert.match(prompt, /## Done when/);
 });
 
+test('buildScanFixPrompt is universal — portable across any agent, no vendor names', () => {
+  const prompt = buildScanFixPrompt(scan([
+    f({ title: 'SQL Injection', severity: 'critical' }),
+  ]));
+  // States its portability in provider-neutral terms (the prompt is hard-wrapped,
+  // so the phrase may span a line break).
+  assert.match(prompt, /any AI\s+coding agent on any platform/);
+  // And bakes no specific vendor into the text handed to the agent.
+  for (const vendor of ['Claude Code', 'Codex', 'Replit', 'Cursor', 'Windsurf']) {
+    assert.ok(!prompt.includes(vendor), `prompt must not name a specific agent (${vendor})`);
+  }
+});
+
 test('buildScanFixPrompt folds in a reproduction line when a proven receipt exists', () => {
   const proven = f({
     title: 'SQL Injection', severity: 'critical',

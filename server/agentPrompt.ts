@@ -1,8 +1,8 @@
 import { Finding, Severity } from "../src/types.js";
 
 // Builds the "hand this to your AI coding agent" prompt for a finding — a single,
-// structured, agent-agnostic MASTER PROMPT that behaves the same in Claude Code,
-// Codex, Replit Agent, Cursor, or Windsurf. Shared by the static compiler
+// structured, agent-agnostic MASTER PROMPT that behaves the same for any AI
+// coding agent on any platform. Shared by the static compiler
 // (server/findings.ts, used whenever DeepSeek is not configured or a given
 // finding doesn't come back with its own prompt) and the DeepSeek report
 // generator (server/deepseek.ts, which asks the model to write a sharper,
@@ -26,8 +26,8 @@ export function buildAgentPrompt(finding: AgentPromptInput, targetUrl: string): 
     "You are a senior application security engineer with full write access to this",
     "repository. Resolve ONE confirmed security issue end-to-end: find it, fix the",
     "root cause, and prove it's gone — without regressions or weakening any other",
-    "control. This prompt is self-contained and portable: it works the same in",
-    "Claude Code, Codex, Replit Agent, Cursor, or Windsurf.",
+    "control. This prompt is self-contained, provider-neutral, and portable: it",
+    "works the same with any AI coding agent on any platform.",
     "",
   );
 

@@ -20,7 +20,7 @@ export function buildReportPrompt(
   return `You are Seclayer's automated penetration testing AI, reviewing a completed black-box scan
 before it ships to a developer as their audit report. Think through the evidence carefully — this
 report is what the developer's team will act on directly, including handing pieces of it straight
-to an AI coding agent (Cursor, Claude Code, Windsurf) to implement the fixes.
+to an AI coding agent to implement the fixes.
 
 Analyze the following black-box scanner diagnostics for target web url: "${url}" and the compiled issues listed below.
 Generate a structured penetration testing report output in JSON format.
@@ -61,7 +61,7 @@ Please return a JSON object containing exactly these keys:
    - "category": strictly one of "DAST", "SAST", "IAST", "SCA", "EASM", "RED_TEAM".
    - "fix": exactly how a developer would remediate this — concrete, and tailored to the detected stack (${techContext}) where that narrows it down.
    - "impact": one plain-English sentence on the real-world consequence if this is exploited (data/access/business impact) — do not just restate the description.
-   - "agentPrompt": a ready-to-paste MASTER PROMPT a developer hands straight to their own AI coding agent — it must work identically in Claude Code, Codex, Replit Agent, Cursor, or Windsurf, so use only plain, provider-neutral markdown (no agent-specific syntax, slash commands, or XML tags). Write it as a self-contained engineering instruction and do NOT mention Seclayer, "the scan", or this report inside the prompt text. Follow this exact section structure, in order:
+   - "agentPrompt": a ready-to-paste MASTER PROMPT a developer hands straight to their own AI coding agent — it must work identically with any AI coding agent on any platform, so use only plain, provider-neutral markdown (no agent-specific syntax, slash commands, or XML tags). Write it as a self-contained engineering instruction and do NOT mention Seclayer, "the scan", or this report inside the prompt text. Follow this exact section structure, in order:
        "# Security Fix Task — <finding title>"
        A 2-3 sentence framing line casting the agent as a senior application security engineer with repo access, told to fix ONE issue end-to-end (locate → fix root cause → prove it's gone) without regressions or weakening other controls.
        "## The issue" — bullet the finding title, severity, classification (category + OWASP), the affected endpoint if known, then a short paragraph of how an attacker exploits it against "${url}", then an "Impact if left unfixed:" line.
