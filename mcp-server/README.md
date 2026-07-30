@@ -4,32 +4,94 @@ A [Model Context Protocol](https://modelcontextprotocol.io) stdio server for [Se
 
 ## Setup
 
-1. Generate an API key from the Seclayer dashboard's **Developer API Keys** panel (the raw key is shown once — copy it immediately).
-2. Add this server to your MCP client as a `command`-type stdio server:
+This is a standard **stdio** MCP server — it speaks the Model Context Protocol
+over stdin/stdout and does nothing client-specific, so it works in **any
+MCP-compatible coding CLI or editor** (Claude Code, OpenAI Codex, Cursor,
+Windsurf, Gemini CLI, VS Code / Copilot, Cline, Zed, and others). The only thing
+that differs between clients is *where* the config lives and its exact syntax —
+the launch command is always the same:
 
 ```
-npx -y @seclayer/mcp --key YOUR_API_KEY
+npx -y @seclayer/mcp
 ```
 
-### Claude Code
+**1. Get an API key.** Generate one from the Seclayer dashboard's **Developer API
+Keys** panel (the raw key is shown once — copy it immediately).
 
+**2. Provide the key one of two ways:**
+- As an env var — **`SECLAYER_API_KEY`** (recommended: keeps the secret out of
+  process listings and shell history), or
+- As a flag — **`--key YOUR_API_KEY`**.
+
+**3. Register the server** using whichever config your client uses below.
+
+### Generic config (Claude Code, Cursor, Windsurf, Cline, Gemini CLI, …)
+
+Most clients read a JSON file with an `mcpServers` object. Add:
+
+```json
+{
+  "mcpServers": {
+    "seclayer": {
+      "command": "npx",
+      "args": ["-y", "@seclayer/mcp"],
+      "env": { "SECLAYER_API_KEY": "YOUR_API_KEY" }
+    }
+  }
+}
 ```
-claude mcp add seclayer -- npx -y @seclayer/mcp --key YOUR_API_KEY
-```
 
-### Cursor
+Where that JSON lives per client:
 
-Settings → Features → MCP → Add New Server:
-
-| Field | Value |
+| Client | Config location |
 |---|---|
-| Name | `seclayer` |
-| Type | `command` |
-| Command | `npx -y @seclayer/mcp --key YOUR_API_KEY` |
+| Claude Code | project `.mcp.json`, or run the CLI command below |
+| Cursor | `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global) |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` |
+| Gemini CLI | `~/.gemini/settings.json` |
+| Cline | `cline_mcp_settings.json` (via the extension's MCP settings) |
 
-### Windsurf
+### Claude Code (CLI)
 
-Same `command`-type stdio configuration as Cursor, using the same `npx -y @seclayer/mcp --key YOUR_API_KEY` command.
+```
+claude mcp add seclayer --env SECLAYER_API_KEY=YOUR_API_KEY -- npx -y @seclayer/mcp
+```
+
+### OpenAI Codex CLI
+
+Codex uses TOML, not JSON. Add to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.seclayer]
+command = "npx"
+args = ["-y", "@seclayer/mcp"]
+env = { SECLAYER_API_KEY = "YOUR_API_KEY" }
+```
+
+### VS Code (GitHub Copilot / native MCP)
+
+VS Code uses a `servers` key (not `mcpServers`) with an explicit `type`. Add to
+`.vscode/mcp.json`:
+
+```json
+{
+  "servers": {
+    "seclayer": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@seclayer/mcp"],
+      "env": { "SECLAYER_API_KEY": "YOUR_API_KEY" }
+    }
+  }
+}
+```
+
+### Any other MCP client
+
+If your client isn't listed, configure a **stdio / `command`-type** server with
+command `npx` and args `["-y", "@seclayer/mcp"]`, and supply the API key via the
+`SECLAYER_API_KEY` environment variable (or a `--key YOUR_API_KEY` arg). That's
+all this server needs.
 
 ## Configuration
 
