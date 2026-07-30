@@ -15,6 +15,8 @@ import { registerScanRoutes } from './server/routes/scans.js';
 import { registerAccountRoutes } from './server/routes/account.js';
 import { registerDomainRoutes } from './server/routes/domains.js';
 import { registerMcpRoutes } from './server/routes/mcp.js';
+import { registerWellKnownRoutes } from './server/routes/wellKnown.js';
+import { accessLog } from './server/accessLog.js';
 import type { RouteContext } from './server/routes/context.js';
 
 async function startServer() {
@@ -44,6 +46,10 @@ async function startServer() {
   // Behind a proxy/load balancer in production so req.protocol, req.ip and
   // Secure cookies are derived from the X-Forwarded-* headers.
   if (config.isProd) app.set('trust proxy', 1);
+
+  // Per-request access log (skips the health probe so orchestrator polling
+  // doesn't flood the log). One structured line per finished response.
+  app.use(accessLog());
 
   // Baseline security headers on every response (including API + errors).
   app.use((req, res, next) => {
@@ -130,6 +136,9 @@ async function startServer() {
   registerDomainRoutes(app, ctx);
   registerMcpRoutes(app, ctx);
 
+  // Public site-policy files: robots.txt + RFC 9116 security.txt.
+  registerWellKnownRoutes(app);
+
   // Continuous-monitoring worker (60s tick).
   startMonitorWorker(processScanJob);
   startDigestWorker();
@@ -167,9 +176,17 @@ async function startServer() {
   });
 
   // Graceful shutdown for containerized deployments.
+  let shuttingDown = false;
   const shutdown = (signal: string) => {
+    if (shuttingDown) return; // ignore a second signal while already draining
+    shuttingDown = true;
     console.log(`[server] ${signal} received — shutting down gracefully.`);
-    server.close(() => process.exit(0));
+    server.close(() => {
+      // Checkpoint the WAL and release the SQLite file lock so a container
+      // redeploy leaves a clean database behind, then exit.
+      db.close();
+      process.exit(0);
+    });
     setTimeout(() => process.exit(1), 10000).unref();
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));

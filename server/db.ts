@@ -542,6 +542,32 @@ class SqliteDb {
   // Read-model: returns a scan with suppression rules applied and the score
   // recalculated. This is a PURE transform — it never writes to the database,
   // so reads have no side effects.
+  // Liveness/readiness probe: a trivial query that proves the SQLite handle is
+  // open and the file is reachable. Returns true on success, false on any error
+  // (a corrupt/locked/closed handle) so the health endpoint can answer 503
+  // instead of a misleading 200 when the datastore is actually down.
+  healthy(): boolean {
+    try {
+      this.db.prepare('SELECT 1').get();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // Checkpoints the WAL and releases the file lock. Called from the graceful
+  // shutdown path so a container redeploy leaves a clean, fully-flushed database
+  // file behind instead of a hot -wal/-shm pair. Idempotent and never throws:
+  // shutdown must not be blocked by a close error.
+  close(): void {
+    try {
+      this.db.pragma('wal_checkpoint(TRUNCATE)');
+      this.db.close();
+    } catch (err: any) {
+      console.warn('[db] Error while closing database:', err?.message || err);
+    }
+  }
+
   getScanWithSuppressedFindings(scan: Scan): Scan {
     if (!scan || !scan.findings) return scan;
     const rules = this.listSuppressions(scan.userId);

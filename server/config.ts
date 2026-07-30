@@ -21,6 +21,9 @@ const freeMode = freeModeEnv === 'true' ? true : freeModeEnv === 'false' ? false
 export const config = {
   port: Number(process.env.PORT) || 3000,
   isProd: process.env.NODE_ENV === 'production',
+  // Surfaced by the health endpoint. Set APP_VERSION at build/deploy time (e.g.
+  // to the git SHA or release tag) so operators can confirm which build is live.
+  appVersion: clean(process.env.APP_VERSION) || 'dev',
   appUrl: clean(process.env.APP_URL, 'MY_APP_URL')?.replace(/\/+$/, ''),
   deepseekConfigured: !!clean(process.env.DEEPSEEK_API_KEY, 'MY_DEEPSEEK_API_KEY'),
   emailConfigured: !!clean(process.env.RESEND_API_KEY, 'MY_RESEND_API_KEY'),

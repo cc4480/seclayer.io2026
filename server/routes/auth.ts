@@ -11,8 +11,19 @@ import type { RouteContext } from "./context.js";
 export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
   const { requireAuth, getUserId, cookieOptions, sessionCookie } = ctx;
 
+  // Liveness + readiness probe. Actually pings the datastore rather than
+  // reporting a hardcoded "Online", so an orchestrator (or the Docker
+  // HEALTHCHECK) can detect a process that is up but has lost its database and
+  // pull it out of rotation. Returns 503 when the DB is unreachable.
   app.get("/api/system/health", (req, res) => {
-    res.json({ status: "Online", version: "v2.1.2-stable", timestamp: new Date().toISOString() });
+    const dbOk = db.healthy();
+    res.status(dbOk ? 200 : 503).json({
+      status: dbOk ? "Online" : "Degraded",
+      version: config.appVersion,
+      checks: { database: dbOk ? "ok" : "error" },
+      uptimeSeconds: Math.round(process.uptime()),
+      timestamp: new Date().toISOString(),
+    });
   });
 
   // --- Out-of-band collaborator listener ---

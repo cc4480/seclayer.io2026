@@ -252,3 +252,9 @@ test('cancelScan is scoped to the owning user', () => {
   assert.equal(db.cancelScan(other.id, scan.id), null, 'another user cannot cancel someone else\'s scan');
   assert.equal(db.getScan(scan.id)!.status, 'queued');
 });
+
+test('healthy() returns true against a live database handle', () => {
+  // Backs the /api/system/health readiness probe: a trivial round-trip to the
+  // datastore that must succeed while the handle is open.
+  assert.equal(db.healthy(), true);
+});
