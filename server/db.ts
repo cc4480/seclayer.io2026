@@ -287,6 +287,21 @@ class SqliteDb {
     return this.getScan(id)!;
   }
 
+  // Deletes every scan belonging to a user — a deliberate "clear my history /
+  // start fresh". Findings live inline on the scan row (findings TEXT), so this
+  // removes them too. Also clears each of the user's monitors' lastScannedAt, so
+  // a monitor with no remaining scans reads "No scans run yet" instead of showing
+  // a dangling last-run date that links to a report that no longer exists. Scoped
+  // strictly to the given user. Returns the number of scans removed.
+  deleteAllScans(userId: string): number {
+    const tx = this.db.transaction(() => {
+      const info = this.db.prepare('DELETE FROM scans WHERE userId = ?').run(userId);
+      this.db.prepare('UPDATE monitored_targets SET lastScannedAt = NULL WHERE userId = ?').run(userId);
+      return info.changes as number;
+    });
+    return tx();
+  }
+
   // Resilience: the job model is in-process and fire-and-forget (see
   // scanWorker.ts), not backed by a persisted queue, so a scan left in
   // queued/scanning/analyzing when the process dies (crash, redeploy, OOM

@@ -123,6 +123,13 @@ export function registerScanRoutes(app: express.Express, ctx: RouteContext) {
     res.json({ status: "ok", scan });
   });
 
+  // Clear the caller's entire scan history — a deliberate "start fresh". Only
+  // ever affects the authenticated user's own scans (see db.deleteAllScans).
+  app.delete("/api/scans", requireAuth, (req, res) => {
+    const deleted = db.deleteAllScans(getUserId(req));
+    res.json({ status: "ok", deleted });
+  });
+
   app.get("/api/scans/:id", requireAuth, (req, res) => {
     let scan = db.getScan(req.params.id);
     // Enforce ownership: a scan ID alone must not grant access to another
