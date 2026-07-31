@@ -49,7 +49,7 @@ export function buildScanCoverage(p: CoverageInputs): ScanCoverage {
       category: "RED_TEAM", checks: RED_TEAM_PROBE_COUNT, ran: active, note: active ? undefined : OWNERSHIP_NOTE,
     },
     {
-      label: "Discovered-parameter injection fuzzing",
+      label: "Discovered + mined parameter injection fuzzing",
       category: "RED_TEAM", checks: p.paramsFuzzed, ran: active && p.paramsFuzzed > 0,
       note: active ? undefined : OWNERSHIP_NOTE,
     },
