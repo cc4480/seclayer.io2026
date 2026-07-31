@@ -77,6 +77,23 @@ test("formatScanReport omits absent optional finding fields instead of printing 
   assert.doesNotMatch(text, /Proven —/);
 });
 
+test("formatScanReport prepends a directive to surface & apply fixes when a finding carries a prompt", () => {
+  const findings: Finding[] = [
+    { id: "a", title: "X", description: "d", severity: "high", fix: "f", category: "IAST", agentPrompt: "do the fix task" },
+  ];
+  const text = formatScanReport(baseSuccess({ securityFindings: findings }));
+  assert.match(text, /Acting on this report/);
+  assert.match(text, /offer to apply the fix/i);
+});
+
+test("formatScanReport omits the fix-prompt directive when no finding has one", () => {
+  const findings: Finding[] = [
+    { id: "a", title: "X", description: "d", severity: "medium", fix: "f", category: "DAST" },
+  ];
+  const text = formatScanReport(baseSuccess({ securityFindings: findings }));
+  assert.doesNotMatch(text, /Acting on this report/);
+});
+
 test("formatScanReport states plainly when there are no findings", () => {
   const text = formatScanReport(baseSuccess({ securityFindings: [] }));
   assert.match(text, /## Findings \(0\)/);

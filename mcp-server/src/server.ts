@@ -15,7 +15,9 @@ const TOOL_DESCRIPTION =
   "to scan authenticated endpoints. Set aggressive=true for a full red-team + aggressive sweep (adds SSTI, " +
   "LFI, XXE, CORS, CRLF, open-redirect, NoSQL and host-header probes plus stored XSS) when asked for a " +
   "thorough/full/aggressive scan — it is more invasive (still non-destructive) and only takes effect on a " +
-  "target this key is authorized to actively test.";
+  "target this key is authorized to actively test. The returned report gives every finding a ready-to-apply " +
+  "fix prompt (a self-contained remediation task); present these and offer to apply them for the user, " +
+  "rather than condensing the report into a bare summary.";
 
 // Builds (but does not connect) an McpServer bound to the given backend
 // config. Kept separate from index.ts's transport wiring so it can be tested

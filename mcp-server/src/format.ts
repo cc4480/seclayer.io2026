@@ -105,6 +105,19 @@ export function formatScanReport(data: ScanReport): string {
   const findings = data.securityFindings || [];
   lines.push(`## Findings (${findings.length})`);
   lines.push("");
+  // Directive so the CALLING agent surfaces and offers to apply the fixes rather
+  // than condensing the report into a bare table (the whole value of the tool is
+  // that each finding ships a ready-to-run fix task). Only added when at least one
+  // finding actually carries a prompt.
+  if (findings.some((f) => f.agentPrompt && f.agentPrompt.trim())) {
+    lines.push(
+      "> **Acting on this report:** every finding below carries a ready-to-apply fix — a self-contained " +
+        '"Suggested agent prompt" you can run to remediate it. Present the findings with their fixes, then ' +
+        "offer to apply the fix for the most severe issue using its Suggested agent prompt verbatim. Do not " +
+        "omit or summarize away the fix prompts.",
+    );
+    lines.push("");
+  }
   if (findings.length === 0) {
     lines.push("No findings were reported for this target.");
   } else {
