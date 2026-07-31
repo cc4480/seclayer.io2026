@@ -6,6 +6,7 @@ import ScanProgress from './pages/ScanProgress.js';
 import PublicReport from './pages/PublicReport.js';
 import LoginModal from './components/LoginModal.js';
 import { useSeclayer } from './hooks/useSeclayer.js';
+import { sameTarget } from './lib/targetUrl.js';
 
 // A public shared-report deep link: /r/<token>. Detected before any auth flow so
 // a logged-out visitor sees the read-only report, not the login/dashboard app.
@@ -116,7 +117,7 @@ function AuthedApp() {
         {currentView === 'report' && activeScan && (
           <ReportViewer
             scan={activeScan}
-            previousScan={scans.filter(s => s.url === activeScan.url && s.id !== activeScan.id && s.status === 'complete' && new Date(s.createdAt).getTime() < new Date(activeScan.createdAt).getTime()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]}
+            previousScan={scans.filter(s => sameTarget(s.url, activeScan.url) && s.id !== activeScan.id && s.status === 'complete' && new Date(s.createdAt).getTime() < new Date(activeScan.createdAt).getTime()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]}
             onBack={() => handleNavigate('dashboard')}
             onRefreshScans={() => loadUserContext()}
           />
