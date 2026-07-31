@@ -76,6 +76,33 @@ export function useMonitoring(user: User, scans: Scan[], onDataChanged?: () => v
     fetchMonitoredTargets();
   }, [user.id, scans]);
 
+  // While any monitored target has a scan still in flight, keep refreshing until
+  // it resolves. "Scan now" only nudges a few refetches in its first 20s, but a
+  // real scan runs for minutes — without this the row would sit on "Scanning
+  // now…" until a manual reload even though the scan has long since completed.
+  // fetchMonitoredTargets updates the row (the monitor payload embeds lastScan),
+  // and onDataChanged syncs the scan history so "View report" works on completion.
+  useEffect(() => {
+    const inFlight = monitoredTargets.some(
+      (t: any) => t.lastScan && ['queued', 'scanning', 'analyzing'].includes(t.lastScan.status),
+    );
+    if (!inFlight) return;
+    const timer = setInterval(() => {
+      fetchMonitoredTargets();
+      onDataChanged?.();
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [monitoredTargets]);
+
+  // Once a "Scan now" scan resolves, drop the transient "Scan started…" notice —
+  // the row's LastScanResult now shows the real outcome, so the notice is stale.
+  useEffect(() => {
+    if (!rowNotice || rowNotice.tone !== 'ok' || !rowNotice.message.startsWith('Scan started')) return;
+    const t: any = monitoredTargets.find((x: any) => x.id === rowNotice.id);
+    const running = t?.lastScan && ['queued', 'scanning', 'analyzing'].includes(t.lastScan.status);
+    if (t && !running) setRowNotice(null);
+  }, [monitoredTargets, rowNotice]);
+
   const saveWebhook = async () => {
     setWebhookSaving(true);
     setWebhookSaved(false);
