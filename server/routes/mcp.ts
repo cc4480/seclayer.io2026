@@ -24,7 +24,7 @@ export function registerMcpRoutes(app: express.Express, ctx: RouteContext) {
     message: "MCP scan rate limit reached. Please wait a moment before the next call.",
   });
   app.post("/api/mcp/scan", mcpLimiter, async (req, res) => {
-    const { url, apiKey, authHeader } = req.body;
+    const { url, apiKey, authHeader, aggressiveProbes } = req.body;
     if (!url || !apiKey) {
       return res.status(400).json({ error: "Missing parameters. required: url, apiKey" });
     }
@@ -60,9 +60,14 @@ export function registerMcpRoutes(app: express.Express, ctx: RouteContext) {
       // Active exploit probing only runs once this key's owner has verified
       // ownership of the target's domain; otherwise passive recon only.
       const allowActiveProbes = activeProbesUnlocked(user.id, url);
+      // Aggressive tier (SSTI/LFI/XXE/CORS/CRLF/open-redirect/NoSQL/host-header +
+      // stored XSS) is a more-invasive OPT-IN — the caller must ask for it, and it
+      // still requires active probing to be unlocked, exactly like the dashboard's
+      // "Full Attack" toggle (see server/routes/scans.ts).
+      const allowAggressiveProbes = allowActiveProbes && aggressiveProbes === true;
 
       // Runs scan diagnostic synchronously for MCP tools context
-      const diagnostics = await runDiagnostics(url, authHeader, { allowActiveProbes, oob: ctx.oobCollaborator, scanId: scan.id });
+      const diagnostics = await runDiagnostics(url, authHeader, { allowActiveProbes, allowAggressiveProbes, oob: ctx.oobCollaborator, scanId: scan.id });
       const staticCompiled = compileStaticFindings(diagnostics);
       // Use the key owner's personal DeepSeek key (BYOK) when set.
       const aiReport = await generateAiReport(url, diagnostics, staticCompiled, db.getUserDeepseekKey(user.id));

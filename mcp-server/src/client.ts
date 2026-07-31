@@ -3,6 +3,10 @@ import type { ScanErrorBody, ScanListSuccess, ScanReport, ScanSuccess } from "./
 export interface ScanRequest {
   url: string;
   authHeader?: string;
+  // Opt into the more-invasive aggressive tier (SSTI/LFI/XXE/CORS/CRLF/
+  // open-redirect/NoSQL/host-header + stored XSS). Still non-destructive; still
+  // gated on the same domain-ownership unlock as active probing.
+  aggressive?: boolean;
 }
 
 export type ScanOutcome =
@@ -19,6 +23,13 @@ export type ScanOutcome =
 // param fuzzing, then a thinking-mode AI report) — a real scan can
 // legitimately take well over a minute, so this needs a generous bound.
 export const DEFAULT_TIMEOUT_MS = 180_000;
+
+// The aggressive tier adds more probes, more out-of-band waits, and heavier
+// discovered-parameter fuzzing, so an aggressive scan legitimately runs longer
+// than a standard one. It gets a larger bound so the client doesn't abort a scan
+// the backend will still complete (which would surface a misleading timeout even
+// though the result is retrievable via seclayer_get_report).
+export const AGGRESSIVE_TIMEOUT_MS = 300_000;
 
 // Calls POST /api/mcp/scan and never throws — every failure mode (HTTP error,
 // network error, timeout, malformed response) is returned as a typed outcome
@@ -38,7 +49,7 @@ export async function scan(
     response = await fetch(`${baseUrl}/api/mcp/scan`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: request.url, apiKey, authHeader: request.authHeader }),
+      body: JSON.stringify({ url: request.url, apiKey, authHeader: request.authHeader, aggressiveProbes: request.aggressive }),
       signal: ctl.signal,
     });
   } catch (err: any) {

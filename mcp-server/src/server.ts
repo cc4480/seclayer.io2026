@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { scan, listScans, getReport } from "./client.js";
+import { scan, listScans, getReport, DEFAULT_TIMEOUT_MS, AGGRESSIVE_TIMEOUT_MS } from "./client.js";
 import { formatScanReport, formatScanList } from "./format.js";
 import { VERSION } from "./version.js";
 import type { ResolvedConfig } from "./cli.js";
@@ -12,7 +12,10 @@ const TOOL_DESCRIPTION =
   "impact, and a ready-to-apply fix. Use this before deploying, when reviewing a staging or production " +
   "endpoint's security, or when asked to check a URL for vulnerabilities. Each scan consumes one credit " +
   "from the account tied to this server's API key. Provide the target url; optionally provide authHeader " +
-  "to scan authenticated endpoints.";
+  "to scan authenticated endpoints. Set aggressive=true for a full red-team + aggressive sweep (adds SSTI, " +
+  "LFI, XXE, CORS, CRLF, open-redirect, NoSQL and host-header probes plus stored XSS) when asked for a " +
+  "thorough/full/aggressive scan — it is more invasive (still non-destructive) and only takes effect on a " +
+  "target this key is authorized to actively test.";
 
 // Builds (but does not connect) an McpServer bound to the given backend
 // config. Kept separate from index.ts's transport wiring so it can be tested
@@ -38,6 +41,16 @@ export function buildServer(config: ResolvedConfig): McpServer {
           .string()
           .optional()
           .describe("Optional raw Authorization header value for authenticated targets, e.g. 'Bearer eyJ...'."),
+        aggressive: z
+          .boolean()
+          .optional()
+          .describe(
+            "Run the more-invasive aggressive tier in addition to the standard red-team probes: SSTI, " +
+              "LFI/path-traversal, XXE, CORS, CRLF, open-redirect, NoSQL and host-header injection, plus " +
+              "stored XSS. Still non-destructive (oracle/signature/out-of-band proven, never writes or " +
+              "degrades the target). Defaults to false; set true for a full/thorough/aggressive scan. Only " +
+              "takes effect when this key is authorized to actively test the target.",
+          ),
       },
       annotations: {
         readOnlyHint: false,
@@ -45,8 +58,13 @@ export function buildServer(config: ResolvedConfig): McpServer {
         destructiveHint: false,
       },
     },
-    async ({ url, authHeader }) => {
-      const outcome = await scan(config.baseUrl, config.apiKey, { url, authHeader });
+    async ({ url, authHeader, aggressive }) => {
+      const outcome = await scan(
+        config.baseUrl,
+        config.apiKey,
+        { url, authHeader, aggressive },
+        aggressive ? AGGRESSIVE_TIMEOUT_MS : DEFAULT_TIMEOUT_MS,
+      );
       if (outcome.ok) {
         return { content: [{ type: "text", text: formatScanReport(outcome.data) }] };
       }
