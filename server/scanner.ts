@@ -6,6 +6,7 @@ import { renderPage, isRenderingEnabled } from "./render.js";
 import { safeFetch, assertTargetIsScannable } from "./ssrf.js";
 import { parseAuthHeader } from "./evidence.js";
 import { fuzzDiscoveredTargets } from "./paramFuzzer.js";
+import { buildGuessedTargets } from "./paramMiner.js";
 import { probeStoredXss } from "./storedXss.js";
 import { runRedTeamProbes } from "./redTeamProbes.js";
 import { runAggressiveProbes } from "./aggressiveProbes.js";
@@ -189,8 +190,35 @@ export async function runDiagnostics(
         // The fuzzer sends each payload with the target's own method (query string
         // for GET, form-encoded body for POST), so discovered forms are no longer
         // mapped-but-skipped.
-        const fuzzTargets = allTargets.filter((t) => t.params.length > 0);
-        if (fuzzTargets.length) emit?.("system", `Fuzzing ${fuzzTargets.length} discovered parameterized endpoint(s) with injection payloads…`);
+        const discovered = allTargets.filter((t) => t.params.length > 0);
+
+        // Parameter MINING: on the root and any crawled pages that linked no
+        // parameters, guess common injectable names and keep the ones the app
+        // reflects (plus a small always-test set), so injection probing reaches a
+        // surface even on SPAs / JSON APIs that link or form nothing — the case
+        // where the crawl otherwise yields zero fuzzable parameters. See
+        // server/paramMiner.ts.
+        const pathOf = (u: string) => { try { const p = new URL(u); return p.origin + p.pathname; } catch { return u; } };
+        const paramPaths = new Set(discovered.map((t) => pathOf(t.url)));
+        const mineBases = [url, ...crawl.pages].filter((p) => !paramPaths.has(pathOf(p)));
+        emit?.("system", "Parameter mining: guessing common injectable parameter names on paths that linked none…");
+        const guessed = await buildGuessedTargets(mineBases, { ...headers, "Cache-Control": "no-cache" });
+        if (guessed.length) {
+          const total = guessed.reduce((n, g) => n + g.params.length, 0);
+          emit?.("recon", `Parameter mining: ${guessed.length} path(s), ${total} candidate parameter(s) to fuzz.`);
+        }
+
+        // Fuzz discovered + mined parameters. Add a JSON-body twin for API-looking
+        // endpoints so injection is exercised over application/json, not only
+        // form-encoded bodies (many APIs accept only JSON).
+        let fuzzTargets = dedupeTargets([...discovered, ...guessed]);
+        const apiRe = /\/(api|graphql|rest|v\d)(\/|$)/i;
+        const jsonTwins = fuzzTargets
+          .filter((t) => apiRe.test(pathOf(t.url)))
+          .map((t) => ({ url: t.url, method: "POST" as const, params: t.params, source: "script" as const, contentType: "json" as const }));
+        fuzzTargets = [...fuzzTargets, ...jsonTwins];
+
+        if (fuzzTargets.length) emit?.("system", `Fuzzing ${fuzzTargets.length} parameterized endpoint(s) (discovered + mined) with injection payloads…`);
         fuzz = await fuzzDiscoveredTargets(fuzzTargets, { ...headers, "Cache-Control": "no-cache" }, { aggressive: allowAggressiveProbes, emit });
         result.redTeamFindings = [...(result.redTeamFindings || []), ...fuzz.findings];
       }

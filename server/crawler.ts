@@ -12,6 +12,9 @@ export interface InjectableTarget {
   method: HttpMethod;
   params: string[]; // parameter names available to fuzz
   source: "query" | "form" | "script";
+  // POST body encoding. Defaults to form-urlencoded; "json" makes the fuzzer send
+  // an application/json body (for API endpoints that only accept JSON).
+  contentType?: "form" | "json";
 }
 
 export interface CrawlResult {

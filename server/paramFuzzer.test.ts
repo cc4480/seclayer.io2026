@@ -119,6 +119,72 @@ test('fuzzer still confirms reflected XSS in a GET query parameter (regression)'
   });
 });
 
+test('aggressive tier confirms TIME-BASED BLIND SQLi via a response-time differential', async () => {
+  // A blind endpoint: no SQL error, no reflection — the ONLY signal is that a
+  // response is delayed by however many seconds the injected SLEEP(n) asked for.
+  // The probe must confirm via the scaling differential (4s clearly > 1s > base).
+  await withServer((req, res) => {
+    const u = new URL(req.url || '/', 'http://127.0.0.1');
+    const id = u.searchParams.get('id') || '';
+    const m = /SLEEP\((\d+)\)/i.exec(id); // simulate a DB sleep that tracks the payload
+    const delayMs = m ? Math.min(Number(m[1]), 8) * 1000 : 0;
+    setTimeout(() => {
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end('<!doctype html><html><body>ok</body></html>'); // nothing reflected, no error
+    }, delayMs);
+  }, async (port) => {
+    const targets: InjectableTarget[] = [
+      { url: `http://127.0.0.1:${port}/data`, method: 'GET', params: ['id'], source: 'query' },
+    ];
+    const { findings } = await fuzzDiscoveredTargets(targets, HEADERS, { aggressive: true });
+    const timed = findings.find((f) => /time-based blind/i.test(f.testName));
+    assert.ok(timed, 'expected a time-based blind SQLi finding on the delaying parameter');
+    assert.equal(timed.severity, 'critical');
+    assert.ok(!timed.evidence, 'a time-based finding carries no inline receipt — the proof is the timing');
+  });
+});
+
+test('time-based blind SQLi does NOT false-positive on a uniformly slow endpoint', async () => {
+  // Every response is slow by a FIXED amount regardless of payload. The delay does
+  // not scale with the injected sleep, so the scaling confirmation must reject it.
+  await withServer((req, res) => {
+    setTimeout(() => {
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end('<!doctype html><html><body>ok</body></html>');
+    }, 300); // constant latency, unrelated to any SLEEP(n) — must not read as a delay
+  }, async (port) => {
+    const targets: InjectableTarget[] = [
+      { url: `http://127.0.0.1:${port}/slow`, method: 'GET', params: ['id'], source: 'query' },
+    ];
+    const { findings } = await fuzzDiscoveredTargets(targets, HEADERS, { aggressive: true });
+    assert.ok(!findings.some((f) => /time-based blind/i.test(f.testName)), 'fixed latency must not be reported as time-based SQLi');
+  });
+});
+
+test('fuzzer confirms SQLi injected into a JSON request body (application/json)', async () => {
+  // An API endpoint that only accepts JSON. The fuzzer must send a JSON body and
+  // the receipt must reflect the real application/json POST, not a form body.
+  await withServer(async (req, res) => {
+    const body = await readBody(req);
+    let id = '';
+    try { id = String(JSON.parse(body).id ?? ''); } catch { /* not json */ }
+    let html = '<!doctype html><html><body>orders';
+    if (/['"]/.test(id)) html += `<pre>You have an error in your SQL syntax; near '${id}'</pre>`;
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(html + '</body></html>');
+  }, async (port) => {
+    const targets: InjectableTarget[] = [
+      { url: `http://127.0.0.1:${port}/api/orders`, method: 'POST', params: ['id'], source: 'script', contentType: 'json' },
+    ];
+    const { findings } = await fuzzDiscoveredTargets(targets, HEADERS);
+    const sqli = findings.find((f) => /SQL Injection/i.test(f.testName));
+    assert.ok(sqli, 'expected a SQLi finding via the JSON body');
+    assert.ok(sqli.evidence.attack.response.includes(sqli.evidence.signal.quote));
+    assert.match(sqli.evidence.attack.request, /^POST \/api\/orders/m, 'raw request must be a POST');
+    assert.match(sqli.evidence.attack.request, /Content-Type: application\/json/i, 'body must be sent as JSON');
+  });
+});
+
 test('aggressive tier confirms SSTI in a POST form field (arithmetic oracle)', async () => {
   // Evaluates the posted `name` as a template only when it is a {{a*b}} form,
   // returning the computed product (which the literal payload never contains).

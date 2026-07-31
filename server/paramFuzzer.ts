@@ -27,9 +27,11 @@ export async function fuzzDiscoveredTargets(
   // gets a larger request budget and a longer wall-clock cap.
   const aggressive = !!opts.aggressive;
   const emit = opts.emit;
-  const MAX_REQUESTS = aggressive ? 160 : 64;
-  const MAX_PARAMS_PER_TARGET = 6;
-  const DEADLINE = Date.now() + (aggressive ? 30000 : 20000); // wall-clock self-cap for slow targets
+  // Budgets are a touch higher in aggressive mode to leave room for mined
+  // (wordlist-guessed) parameters and the slow-but-bounded time-based SQLi pass.
+  const MAX_REQUESTS = aggressive ? 200 : 72;
+  const MAX_PARAMS_PER_TARGET = 8;
+  const DEADLINE = Date.now() + (aggressive ? 40000 : 22000); // wall-clock self-cap for slow targets
   const findings: any[] = [];
   const reported = new Set<string>(); // dedupe by testName+endpoint+param
   let budget = MAX_REQUESTS;
@@ -79,6 +81,20 @@ export async function fuzzDiscoveredTargets(
     for (const p of names) usp.set(p, p === injectParam ? value : FILLER);
     return usp.toString();
   };
+  // JSON body carrying every field (injected one = payload, rest = filler), for
+  // API endpoints that only accept application/json rather than a form body. The
+  // response-side proofs (error signature / reflection / timing) are body-agnostic,
+  // so every probe below works identically over a JSON POST.
+  const jsonBody = (allParams: string[], injectParam: string, value: string): string => {
+    const obj: Record<string, string> = {};
+    const names = allParams.includes(injectParam) ? allParams : [...allParams, injectParam];
+    for (const p of names) obj[p] = p === injectParam ? value : FILLER;
+    return JSON.stringify(obj);
+  };
+  const postContentType = (t: InjectableTarget): string =>
+    t.contentType === "json" ? "application/json" : "application/x-www-form-urlencoded";
+  const postBody = (t: InjectableTarget, param: string, value: string): string =>
+    t.contentType === "json" ? jsonBody(t.params, param, value) : formBody(t.params, param, value);
 
   // A single (param=value) injection sent with the target's own method. Returns
   // the exchange plus the exact request shape, so the PROVEN receipt shows the
@@ -94,8 +110,8 @@ export async function fuzzDiscoveredTargets(
   };
   const sendInjection = async (t: InjectableTarget, param: string, value: string): Promise<Sent> => {
     if (t.method === "POST") {
-      const body = formBody(t.params, param, value);
-      const contentType = "application/x-www-form-urlencoded";
+      const body = postBody(t, param, value);
+      const contentType = postContentType(t);
       const ctl = new AbortController();
       const id = setTimeout(() => ctl.abort(), 4000);
       try {
@@ -113,6 +129,41 @@ export async function fuzzDiscoveredTargets(
     const url = buildUrl(t.url, param, value);
     const { res, text } = await probe(url);
     return { res, text, attackUrl: url, reqMethod: "GET" };
+  };
+
+  // A single injection sent purely to MEASURE RESPONSE TIME (for the time-based
+  // blind SQLi oracle). Longer timeout than the signal probes so a legitimate
+  // multi-second SQL sleep can complete. Returns whether the request actually
+  // finished (ok=false on abort/error) so a hung/aborted request is never
+  // mistaken for a slept response.
+  const sendTimed = async (
+    t: InjectableTarget,
+    param: string,
+    value: string,
+    timeoutMs: number,
+  ): Promise<{ elapsed: number; ok: boolean }> => {
+    const start = Date.now();
+    const ctl = new AbortController();
+    const id = setTimeout(() => ctl.abort(), timeoutMs);
+    try {
+      if (t.method === "POST") {
+        const res = await safeFetch(t.url, {
+          method: "POST",
+          headers: { ...fuzzHeaders, "Content-Type": postContentType(t) },
+          body: postBody(t, param, value),
+          signal: ctl.signal,
+        });
+        await res.text().catch(() => "");
+      } else {
+        const res = await safeFetch(buildUrl(t.url, param, value), { headers: fuzzHeaders, signal: ctl.signal });
+        await res.text().catch(() => "");
+      }
+      return { elapsed: Date.now() - start, ok: true };
+    } catch {
+      return { elapsed: Date.now() - start, ok: false };
+    } finally {
+      clearTimeout(id);
+    }
   };
 
   // SQL context-breakers, ordered by error-provoking yield. A bare unbalanced
@@ -184,6 +235,67 @@ export async function fuzzDiscoveredTargets(
           return; // early-exit: confirmed for this param
         }
       } catch { /* probe failed */ }
+    }
+  };
+
+  // Time-based BLIND SQLi. When an app suppresses DB errors and reflects nothing,
+  // the error/reflection probes above miss real injection. This measures a
+  // differential: a benign value returns fast; a payload that makes the DB
+  // sleep(N) delays the response by ~N seconds. To rule out a merely slow/flaky
+  // endpoint, the delay must SCALE with the injected seconds (a 4s sleep is
+  // clearly slower than a 1s sleep, both slower than baseline) — a fixed backend
+  // latency delays every request equally and so fails this test. No inline
+  // receipt: the proof is the timing, not a captured byte.
+  const TIME_DELAY = 4; // seconds the injection asks the DB to sleep
+  const TIME_CONFIRM = 1; // shorter sleep for the scaling confirmation
+  const TIME_TIMEOUT = 8000; // must exceed TIME_DELAY*1000 with headroom
+  const TIME_DIALECTS: Array<{ probe: string; confirm: string }> = [
+    { probe: `1' AND SLEEP(${TIME_DELAY})-- -`, confirm: `1' AND SLEEP(${TIME_CONFIRM})-- -` },
+    { probe: `1') AND SLEEP(${TIME_DELAY})-- -`, confirm: `1') AND SLEEP(${TIME_CONFIRM})-- -` },
+    { probe: `1 AND SLEEP(${TIME_DELAY})`, confirm: `1 AND SLEEP(${TIME_CONFIRM})` },
+    { probe: `1'||pg_sleep(${TIME_DELAY})||'`, confirm: `1'||pg_sleep(${TIME_CONFIRM})||'` },
+    { probe: `1'; WAITFOR DELAY '0:0:${TIME_DELAY}'-- -`, confirm: `1'; WAITFOR DELAY '0:0:${TIME_CONFIRM}'-- -` },
+  ];
+  const tryTimeSqli = async (t: InjectableTarget, param: string, endpointPath: string): Promise<void> => {
+    const key = `timesqli:${endpointPath}:${param}`;
+    // Skip if this param already has an (error-based) SQLi finding, or no budget.
+    if (reported.has(key) || reported.has(`sqli:${endpointPath}:${param}`) || !canSpend()) return;
+
+    // Baseline. Bail on an already-slow endpoint, where jitter would swamp the
+    // timing signal and risk a false positive.
+    budget--;
+    const base = await sendTimed(t, param, "1", TIME_TIMEOUT);
+    if (!base.ok || base.elapsed > 2500) return;
+    const baseline = base.elapsed;
+
+    for (const { probe: probePayload, confirm: confirmPayload } of TIME_DIALECTS) {
+      if (!canSpend()) return;
+      budget--;
+      const hit = await sendTimed(t, param, probePayload, TIME_TIMEOUT);
+      // A clear ~TIME_DELAY-second delay beyond baseline (0.6 factor absorbs the
+      // sleep being inexact plus normal response time).
+      if (!hit.ok || hit.elapsed - baseline < TIME_DELAY * 1000 * 0.6) continue;
+
+      // Scaling confirmation: the short sleep must land clearly between baseline
+      // and the long sleep. Fixed latency delays both equally and fails here.
+      if (!canSpend()) return;
+      budget--;
+      const confirm = await sendTimed(t, param, confirmPayload, TIME_TIMEOUT);
+      if (!confirm.ok) continue;
+      const scaled =
+        hit.elapsed - confirm.elapsed >= (TIME_DELAY - TIME_CONFIRM) * 1000 * 0.5 &&
+        confirm.elapsed - baseline >= TIME_CONFIRM * 1000 * 0.4;
+      if (!scaled) continue;
+
+      reported.add(key);
+      findings.push({
+        testName: `SQL Injection — time-based blind (discovered parameter "${param}" on ${endpointPath})`,
+        payload: `${param}=${probePayload}`,
+        severity: "critical",
+        description: `A time-based blind SQL injection was confirmed on the ${t.method} parameter "${param}" at ${endpointPath}. A benign value returned in ~${baseline}ms, an injected ${TIME_DELAY}s database sleep delayed the response to ~${hit.elapsed}ms, and a ${TIME_CONFIRM}s sleep to ~${confirm.elapsed}ms — the response time tracks the injected delay, proving "${param}" is concatenated into a SQL query executed on the database even though nothing is reflected in the response.`,
+        fix: "Use parameterized queries / prepared statements for this endpoint; never concatenate request input into SQL. A time-based blind injection is fully exploitable to extract data one query at a time.",
+      });
+      return;
     }
   };
 
@@ -395,6 +507,9 @@ export async function fuzzDiscoveredTargets(
     if (!canSpend()) break;
     let endpointPath = t.url;
     try { endpointPath = new URL(t.url).pathname; } catch {}
+    // The slow time-based SQLi pass runs at most once per target (on its most
+    // SQLi-leaning parameter), so it can't dominate the wall-clock budget.
+    let timeTried = false;
 
     // Prioritize params by injectability, dedupe, cap per target.
     const ranked = [...new Set(t.params)]
@@ -420,6 +535,13 @@ export async function fuzzDiscoveredTargets(
         await tryLfi(t, param, endpointPath);
         await tryOpenRedirect(t, param, endpointPath);
         await tryCrlf(t, param, endpointPath);
+        // Time-based blind SQLi: only when error-based SQLi didn't already fire
+        // for this param, once per target, on a SQLi-leaning parameter — catches
+        // injection on apps that suppress errors and reflect nothing.
+        if (!timeTried && s.sqli >= s.xss) {
+          timeTried = true;
+          await tryTimeSqli(t, param, endpointPath);
+        }
       }
       // Report any injections confirmed on this parameter to the live ticker.
       for (let i = before; i < findings.length; i++) {
