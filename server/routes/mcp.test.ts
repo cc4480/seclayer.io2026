@@ -159,9 +159,10 @@ test('GET /api/mcp/scans/:id returns a completed report, 404s across users, and 
   const other = db.getOrCreateUser(`mcp-report-other-${Date.now()}@test.io`);
 
   const done = db.createScan(owner.id, 'https://93.184.216.34');
-  // One high-severity finding: the read-model recomputes the display score from
-  // findings (100 − 25 = 75), so the report's postureScore is deterministic and
-  // reflects the shared scoring, not whatever raw value was stored.
+  // One confirmed high-severity finding: the read-model recomputes the display
+  // score from findings via the shared scoring. A confirmed high ceilings the
+  // grade at F (45), so postureScore is deterministic and reflects the shared
+  // scoring, not whatever raw value was stored.
   db.updateScan(done.id, {
     status: 'complete', score: 61, severity: 'high', aiSummary: 'sum',
     findings: [{ id: 'f1', title: 'Test High Finding', description: 'd', severity: 'high', confidence: 'high', fix: 'f', category: 'DAST' }],
@@ -178,7 +179,7 @@ test('GET /api/mcp/scans/:id returns a completed report, 404s across users, and 
     const report = await ok.json();
     assert.equal(report.success, true);
     assert.equal(report.targetUrl, 'https://93.184.216.34');
-    assert.equal(report.postureScore, 75, 'score is recomputed from findings via the shared read-model (100 − 25)');
+    assert.equal(report.postureScore, 45, 'a confirmed high ceilings the recomputed score at F (45)');
     assert.equal(report.vulnerabilityLevel, 'high');
     assert.equal(report.securityFindings.length, 1);
 

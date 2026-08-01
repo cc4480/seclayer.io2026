@@ -23,11 +23,12 @@ test("summarizes score and change counts per target", () => {
   assert.equal(row.hasData, true);
   assert.equal(row.newCount, 1, "SQLi is new");
   assert.equal(row.fixedCount, 1, "Old is resolved");
-  // score = 100 - 35 (critical) - 15 (medium) = 50
-  assert.equal(row.score, 50);
+  // A confirmed critical (the SQLi) ceilings the grade at F — severity dominates
+  // count, so the score is 20, not the old linear 100 - 35 - 15 = 50.
+  assert.equal(row.score, 20);
   assert.match(d.subject, /1 new finding/);
   assert.match(d.text, /https:\/\/a\.test/);
-  assert.match(d.html, /50\/100/);
+  assert.match(d.html, /20\/100/);
 });
 
 test("handles a target with no completed scan yet", () => {

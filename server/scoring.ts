@@ -48,6 +48,18 @@ export const HEURISTIC_CONFIDENCE_FACTOR: Record<"medium" | "low", number> = {
 // "we found hardening gaps but proved no exploit" must never read as an F.
 export const HEURISTIC_DEDUCTION_CAP = 40;
 
+// Severity must dominate finding count: a single CONFIRMED severe issue caps the
+// grade regardless of how few other findings there are, so a proven SQL injection
+// or a leaked live key can never grade as a mediocre "D" just because it's the
+// only finding. Only CONFIRMED findings (proven receipt or high-confidence
+// observation) set a ceiling — an UNCONFIRMED high (e.g. a library version match,
+// or an AWS key id we couldn't verify) must NOT auto-fail a site, or we reopen the
+// false-positive problem. Medium/low have no ceiling; they grade via deduction.
+export const CONFIRMED_SEVERITY_CEILING: Partial<Record<Severity, number>> = {
+  critical: 20, // deep F — a proven critical is the worst possible posture
+  high: 45,     // F — a confirmed high-severity exposure fails the grade
+};
+
 const SEVERITY_ORDER: Severity[] = ["info", "low", "medium", "high", "critical"];
 
 export function normalizeSeverity(sev: string | undefined): Severity {
@@ -149,6 +161,7 @@ export function deriveSecurityPosture(findings: Finding[]): SecurityPosture {
   let confidentDeduction = 0;
   let heuristicDeduction = 0;
   let confirmedCount = 0;
+  let confirmedCeiling = 100; // lowered by the worst CONFIRMED severe finding
   for (const f of active) {
     const sev = normalizeSeverity(f.severity);
     findingsBySeverity[sev] += 1;
@@ -156,12 +169,16 @@ export function deriveSecurityPosture(findings: Finding[]): SecurityPosture {
     if (isConfirmed(f)) {
       confidentDeduction += weight;
       confirmedCount += 1;
+      const ceiling = CONFIRMED_SEVERITY_CEILING[sev];
+      if (ceiling !== undefined) confirmedCeiling = Math.min(confirmedCeiling, ceiling);
     } else {
       heuristicDeduction += weight * HEURISTIC_CONFIDENCE_FACTOR[f.confidence === "low" ? "low" : "medium"];
     }
   }
   const totalDeduction = confidentDeduction + Math.min(HEURISTIC_DEDUCTION_CAP, heuristicDeduction);
-  const score = Math.round(Math.max(SCORE_FLOOR, Math.min(100, 100 - totalDeduction)));
+  // Take the lower of the deduction-based score and the confirmed-severity
+  // ceiling: a proven critical fails the grade even as the only finding.
+  const score = Math.round(Math.max(SCORE_FLOOR, Math.min(100, 100 - totalDeduction, confirmedCeiling)));
 
   const top = highestSeverity(active);
 

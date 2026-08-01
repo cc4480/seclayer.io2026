@@ -4,6 +4,7 @@ import {
   scoreFindings, SEVERITY_WEIGHTS, SCORE_FLOOR,
   deriveSecurityPosture, riskLabelForSeverity, bannerForPosture,
   isProven, isConfirmed, HEURISTIC_CONFIDENCE_FACTOR, HEURISTIC_DEDUCTION_CAP,
+  CONFIRMED_SEVERITY_CEILING, gradeForScore,
 } from './scoring.js';
 
 function evidence(response: string, quote: string): any {
@@ -41,9 +42,12 @@ test('no findings yields a perfect, info-level score', () => {
   assert.equal(r.severity, 'info');
 });
 
-test('a single critical deducts its weight and sets severity', () => {
+test('a single CONFIRMED critical fails the grade — severity dominates count', () => {
+  // A proven/high-confidence critical (e.g. exposed .env, leaked live key) must
+  // be an F even as the only finding, not a middling "D" from one -35 deduction.
   const r = scoreFindings([{ severity: 'critical' } as any]);
-  assert.equal(r.score, 100 - SEVERITY_WEIGHTS.critical);
+  assert.equal(r.score, CONFIRMED_SEVERITY_CEILING.critical);
+  assert.equal(gradeForScore(r.score), 'F');
   assert.equal(r.severity, 'critical');
 });
 
@@ -93,10 +97,22 @@ test('posture: score, grade, posture rating and counts agree for the same findin
 });
 
 test('a confirmed finding deducts its FULL weight — a real vulnerability always moves the grade', () => {
-  // High-confidence and PROVEN both count fully, regardless of confidence label.
-  assert.equal(deriveSecurityPosture([{ severity: 'critical', confidence: 'high' } as any]).score, 100 - SEVERITY_WEIGHTS.critical);
+  // A confirmed critical is ceilinged to an F (severity dominates); a confirmed
+  // medium has no ceiling and deducts its full weight (never damped like a heuristic).
+  assert.equal(deriveSecurityPosture([{ severity: 'critical', confidence: 'high' } as any]).score, CONFIRMED_SEVERITY_CEILING.critical);
   const proven = deriveSecurityPosture([{ severity: 'medium', confidence: 'low', evidence: evidence('a<b>c', '<b>') } as any]);
   assert.equal(proven.score, 100 - SEVERITY_WEIGHTS.medium, 'a PROVEN finding is never damped by its confidence label');
+});
+
+test('an UNCONFIRMED high does NOT trigger the severity ceiling (no false-positive auto-fail)', () => {
+  // A library-version match or an unverified key id is high-severity but medium
+  // confidence — it must NOT auto-fail the site the way a confirmed high does.
+  const p = deriveSecurityPosture([{ severity: 'high', confidence: 'medium' } as any]);
+  assert.ok(p.score > CONFIRMED_SEVERITY_CEILING.high!, `unconfirmed high must not hit the ceiling, got ${p.score}`);
+  // A CONFIRMED high, by contrast, fails.
+  const confirmed = deriveSecurityPosture([{ severity: 'high', confidence: 'high' } as any]);
+  assert.equal(confirmed.score, CONFIRMED_SEVERITY_CEILING.high);
+  assert.equal(gradeForScore(confirmed.score), 'F');
 });
 
 test('an unconfirmed finding is damped by its confidence, not counted at full weight', () => {
