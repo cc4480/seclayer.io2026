@@ -1,5 +1,12 @@
-import { Key, Plus, Trash2, Terminal, ShieldCheck } from 'lucide-react';
+import { Key, Plus, Trash2, Terminal, ShieldCheck, Zap, Copy } from 'lucide-react';
 import { ApiKey } from '../../types.js';
+import {
+  cursorInstallUrl,
+  vscodeInstallUrl,
+  claudeCodeCommand,
+  mcpServersJson,
+  vscodeMcpJson,
+} from '../../lib/mcpInstall.js';
 
 // Developer API keys panel (right column): generate/copy/revoke MCP keys, plus a
 // short MCP integration help card.
@@ -17,6 +24,17 @@ interface Props {
 export default function ApiKeysPanel({
   apiKeys, justGeneratedKey, onDismissGeneratedKey, onGenerateKey, onRevokeKey, copiedKeyId, handleCopyKey, freeMode,
 }: Props) {
+  // Deeplinks and configs embed the raw key, which is only in hand right after
+  // generation (keys are shown once). With a fresh key the one-click editor
+  // buttons are live; without one they fall back to copy-paste templates and a
+  // nudge to generate a key. baseUrl = this dashboard's origin, so a local or
+  // self-hosted instance points the server back at itself (production == the
+  // package default and is omitted).
+  const rawKey = justGeneratedKey?.rawKey;
+  const installOpts = {
+    apiKey: rawKey,
+    baseUrl: typeof window !== 'undefined' ? window.location.origin : undefined,
+  };
   return (
     <>
       <div className="bg-[#0c0c0e] border border-[#27272a] rounded p-6">
@@ -84,15 +102,56 @@ export default function ApiKeysPanel({
         )}
       </div>
 
-      {/* Documentation Help card */}
+      {/* MCP integration: one-click editor install + copy-paste fallbacks */}
       <div className="bg-[#0c0c0e]/65 border border-[#27272a] rounded p-6 relative overflow-hidden">
         <div className="absolute right-0 bottom-0 pointer-events-none opacity-5 translate-x-1/10 translate-y-1/10">
           <Terminal className="w-48 h-48 text-white" />
         </div>
-        <h3 className="font-mono text-xs text-[#22c55e] font-bold uppercase tracking-wider mb-2">MCP Integration Help</h3>
-        <p className="text-[#a1a1aa] text-xs mb-4 font-mono">Add Seclayer to any MCP-compatible client as a stdio command server:</p>
+        <h3 className="font-mono text-xs text-[#22c55e] font-bold uppercase tracking-wider mb-2">MCP Integration</h3>
+        <p className="text-[#a1a1aa] text-xs mb-4 font-mono">Add Seclayer to your AI coding agent — one click, no config file to edit.</p>
+
+        {/* One-click editor deeplinks — live only with a freshly generated key */}
+        <div className="flex flex-wrap gap-2 mb-2">
+          {rawKey ? (
+            <>
+              <a href={cursorInstallUrl(installOpts)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-[#22c55e]/10 border border-[#22c55e]/30 hover:bg-[#22c55e]/20 hover:border-[#22c55e]/50 text-[#22c55e] rounded text-[10px] font-bold font-mono uppercase tracking-wider transition-all cursor-pointer no-underline" id="install-cursor-btn">
+                <Zap className="w-3 h-3" /><span>Add to Cursor</span>
+              </a>
+              <a href={vscodeInstallUrl(installOpts)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-[#22c55e]/10 border border-[#22c55e]/30 hover:bg-[#22c55e]/20 hover:border-[#22c55e]/50 text-[#22c55e] rounded text-[10px] font-bold font-mono uppercase tracking-wider transition-all cursor-pointer no-underline" id="install-vscode-btn">
+                <Zap className="w-3 h-3" /><span>Add to VS Code</span>
+              </a>
+            </>
+          ) : (
+            <>
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-black border border-[#27272a] text-[#3f3f46] rounded text-[10px] font-bold font-mono uppercase tracking-wider cursor-not-allowed opacity-60" title="Generate a key to enable one-click install">
+                <Zap className="w-3 h-3" /><span>Add to Cursor</span>
+              </span>
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-black border border-[#27272a] text-[#3f3f46] rounded text-[10px] font-bold font-mono uppercase tracking-wider cursor-not-allowed opacity-60" title="Generate a key to enable one-click install">
+                <Zap className="w-3 h-3" /><span>Add to VS Code</span>
+              </span>
+            </>
+          )}
+        </div>
+        {!rawKey && (
+          <p className="text-[9px] text-[#52525b] font-mono mb-3">Generate a key above to enable one-click install — the raw key is only shown once, at creation.</p>
+        )}
+
+        {/* Copy-paste fallbacks for every other client */}
+        <div className="flex flex-wrap gap-2 mb-4 mt-3">
+          <button onClick={() => handleCopyKey(claudeCodeCommand(installOpts), 'mcp-claude-cmd')} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-black border border-[#27272a] hover:border-[#22c55e]/30 hover:text-[#22c55e] text-[#a1a1aa] rounded text-[10px] font-bold font-mono uppercase tracking-wider transition-all cursor-pointer">
+            <Copy className="w-3 h-3" /><span>{copiedKeyId === 'mcp-claude-cmd' ? 'Copied!' : 'Claude Code cmd'}</span>
+          </button>
+          <button onClick={() => handleCopyKey(mcpServersJson(installOpts), 'mcp-json')} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-black border border-[#27272a] hover:border-[#22c55e]/30 hover:text-[#22c55e] text-[#a1a1aa] rounded text-[10px] font-bold font-mono uppercase tracking-wider transition-all cursor-pointer">
+            <Copy className="w-3 h-3" /><span>{copiedKeyId === 'mcp-json' ? 'Copied!' : 'Copy JSON'}</span>
+          </button>
+          <button onClick={() => handleCopyKey(vscodeMcpJson(installOpts), 'mcp-vscode-json')} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-black border border-[#27272a] hover:border-[#22c55e]/30 hover:text-[#22c55e] text-[#a1a1aa] rounded text-[10px] font-bold font-mono uppercase tracking-wider transition-all cursor-pointer">
+            <Copy className="w-3 h-3" /><span>{copiedKeyId === 'mcp-vscode-json' ? 'Copied!' : 'VS Code JSON'}</span>
+          </button>
+        </div>
+
+        {/* Manual one-liner fallback for any other stdio client */}
         <div className="bg-black p-3 rounded font-mono text-[10px] text-zinc-300 select-all leading-relaxed border border-[#27272a] break-all mb-4">
-          npx -y @seclayer/mcp --key <span className="text-[#22c55e]">{justGeneratedKey?.rawKey || "YOUR_API_KEY"}</span>
+          npx -y @seclayer/mcp --key <span className="text-[#22c55e]">{rawKey || "YOUR_API_KEY"}</span>
         </div>
         <span className="text-[10px] text-[#52525b] flex items-center space-x-1 font-mono">
           <ShieldCheck className="w-3.5 h-3.5 text-[#22c55e] shrink-0" />
