@@ -18,6 +18,7 @@ import { registerDomainRoutes } from './server/routes/domains.js';
 import { registerMcpRoutes } from './server/routes/mcp.js';
 import { registerWellKnownRoutes } from './server/routes/wellKnown.js';
 import { accessLog } from './server/accessLog.js';
+import { securityHeaders } from './server/securityHeaders.js';
 import type { RouteContext } from './server/routes/context.js';
 
 async function startServer() {
@@ -52,16 +53,10 @@ async function startServer() {
   // doesn't flood the log). One structured line per finished response.
   app.use(accessLog());
 
-  // Baseline security headers on every response (including API + errors).
-  app.use((req, res, next) => {
-    res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-    if (config.isProd) {
-      res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
-    }
-    next();
-  });
+  // Baseline security headers on every response (including API + errors). HSTS
+  // and the strict Content-Security-Policy are production-only — see
+  // server/securityHeaders.ts for the per-directive rationale.
+  app.use(securityHeaders({ isProd: config.isProd }));
 
   // Stripe webhook MUST receive the raw body for signature verification, so it
   // is registered before the JSON body parser. Credits are granted only here,
