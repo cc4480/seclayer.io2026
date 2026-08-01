@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   scoreFindings, SEVERITY_WEIGHTS, SCORE_FLOOR,
   deriveSecurityPosture, riskLabelForSeverity, bannerForPosture,
-  isProven, isConfirmed,
+  isProven, isConfirmed, HEURISTIC_CONFIDENCE_FACTOR, HEURISTIC_DEDUCTION_CAP,
 } from './scoring.js';
 
 function evidence(response: string, quote: string): any {
@@ -79,16 +79,59 @@ test('info findings alongside a real finding contribute nothing extra to the ded
 
 test('posture: score, grade, posture rating and counts agree for the same findings', () => {
   const p = deriveSecurityPosture([
-    { severity: 'medium', confidence: 'medium' } as any,
-    { severity: 'low', confidence: 'high' } as any,
+    { severity: 'medium', confidence: 'medium' } as any, // unconfirmed → damped to half
+    { severity: 'low', confidence: 'high' } as any,      // confirmed → full weight
   ]);
-  assert.equal(p.score, 100 - SEVERITY_WEIGHTS.medium - SEVERITY_WEIGHTS.low); // 80
+  // Evidence-weighted: 100 − low(5) − medium(15)*0.5 = 87.5 → 88.
+  assert.equal(p.score, 88);
   assert.equal(p.severity, 'medium');
   assert.equal(p.postureRating, 'MODERATE');
   assert.equal(p.grade, 'B');
   assert.equal(p.activeCount, 2);
   assert.equal(p.findingsBySeverity.medium, 1);
   assert.equal(p.findingsBySeverity.low, 1);
+});
+
+test('a confirmed finding deducts its FULL weight — a real vulnerability always moves the grade', () => {
+  // High-confidence and PROVEN both count fully, regardless of confidence label.
+  assert.equal(deriveSecurityPosture([{ severity: 'critical', confidence: 'high' } as any]).score, 100 - SEVERITY_WEIGHTS.critical);
+  const proven = deriveSecurityPosture([{ severity: 'medium', confidence: 'low', evidence: evidence('a<b>c', '<b>') } as any]);
+  assert.equal(proven.score, 100 - SEVERITY_WEIGHTS.medium, 'a PROVEN finding is never damped by its confidence label');
+});
+
+test('an unconfirmed finding is damped by its confidence, not counted at full weight', () => {
+  const med = deriveSecurityPosture([{ severity: 'medium', confidence: 'medium' } as any]).score;
+  assert.equal(med, Math.round(100 - SEVERITY_WEIGHTS.medium * HEURISTIC_CONFIDENCE_FACTOR.medium)); // 93
+  const low = deriveSecurityPosture([{ severity: 'low', confidence: 'low' } as any]).score;
+  assert.equal(low, Math.round(100 - SEVERITY_WEIGHTS.low * HEURISTIC_CONFIDENCE_FACTOR.low)); // 99
+});
+
+test('a pile of UNCONFIRMED findings is capped and can never manufacture an F', () => {
+  // Ten medium-confidence mediums would linearly subtract 150; damped they are
+  // 75, but the heuristic cap holds the deduction at 40 → 60 (grade D), never F.
+  const many = Array.from({ length: 10 }, () => ({ severity: 'medium', confidence: 'medium' } as any));
+  const p = deriveSecurityPosture(many);
+  assert.equal(p.score, 100 - HEURISTIC_DEDUCTION_CAP); // 60
+  assert.equal(p.grade, 'D');
+  assert.notEqual(p.grade, 'F');
+});
+
+test('the heuristic cap NEVER shields confirmed vulnerabilities — real findings still reach F', () => {
+  const many = Array.from({ length: 3 }, () => ({ severity: 'critical', confidence: 'high' } as any));
+  const p = deriveSecurityPosture(many);
+  assert.equal(p.score, SCORE_FLOOR); // 3 confirmed criticals crater past the floor
+  assert.equal(p.grade, 'F');
+});
+
+test('the lovable.dev shape: one heuristic medium + one confirmed low is a B, not an F', () => {
+  // The exact class of report that used to score 10/100: hygiene findings, none
+  // proven. With evidence weighting it lands where a well-built site belongs.
+  const p = deriveSecurityPosture([
+    { severity: 'medium', confidence: 'medium' } as any, // e.g. missing X-Frame-Options (black-box)
+    { severity: 'low', confidence: 'high' } as any,      // e.g. a preference cookie missing Secure
+  ]);
+  assert.ok(p.score >= 85, `expected a healthy score, got ${p.score}`);
+  assert.equal(p.grade, 'B');
 });
 
 test('posture: confirmed vs needs-verification split follows confidence', () => {

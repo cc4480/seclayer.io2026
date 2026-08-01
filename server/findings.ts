@@ -99,11 +99,15 @@ function buildEasmFindings(diag: DiagnosticResult): Finding[] {
   if (diag.techLeaked.length > 0) {
     findings.push({
       id: fid(),
+      // A Server / X-Powered-By banner is fingerprinting, not a weakness: nearly
+      // every site discloses one, so scoring it as a LOW weakness fired on almost
+      // every scan for no real risk. Reported as informational context (zero
+      // score impact) — surfaced for hardening, never treated as a vulnerability.
       title: "Verbose Server Framework Signature Leaked",
-      description: `The attack surface assessment detected visible framework signatures leaked in response headers: ${diag.techLeaked.join(", ")}. Automated bots use these patterns to locate vulnerable systems.`,
-      severity: "low",
+      description: `The attack surface assessment detected visible framework signatures leaked in response headers: ${diag.techLeaked.join(", ")}. This is a fingerprinting/hardening note, not an exploitable weakness — automated bots use these patterns to locate systems, but the banner itself grants no access.`,
+      severity: "info",
       confidence: "high",
-      fix: "Disable verbose Server headers in nginx.conf or web.config and strip x-powered-by settings globally.",
+      fix: "Optional hardening: suppress the Server / X-Powered-By response headers at the web server or reverse proxy so the stack isn't advertised.",
       category: "EASM",
     });
   }
@@ -207,6 +211,13 @@ function buildCookieFindings(diag: DiagnosticResult): Finding[] {
     }
     // session / unknown: keep medium (don't under-report a possible session cookie).
 
+    // Confidence reflects how sure we are the finding is a real RISK, not just
+    // that the flag is absent. For a session-named cookie we're confident it
+    // matters; for an unclassifiable cookie we can't confirm it carries session
+    // state, so it's medium — which damps its score impact (see scoring.ts)
+    // instead of letting an unknown cookie crater the grade at full weight.
+    const confidence: Finding["confidence"] = cls === "unknown" ? "medium" : "high";
+
     const finding: Finding = {
       id: fid(),
       title: issue,
@@ -214,7 +225,7 @@ function buildCookieFindings(diag: DiagnosticResult): Finding[] {
         ? `${issue}. A cookie without the Secure attribute can be transmitted over an unencrypted connection, where a network attacker could intercept it. If this cookie carries session or authentication state, that exposes the session to hijacking.`
         : `${issue}. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft.`,
       severity,
-      confidence: "high",
+      confidence,
       fix: isSecureIssue
         ? "Add the Secure attribute to this cookie so it is only ever sent over HTTPS."
         : "Add the HttpOnly attribute to this cookie unless it must be read by client-side JavaScript; if it must, keep the sensitive session token in a separate HttpOnly cookie.",

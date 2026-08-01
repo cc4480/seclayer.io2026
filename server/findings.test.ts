@@ -51,11 +51,30 @@ test('analytics/preference cookie HttpOnly gaps are auto-suppressed, not scored 
   assert.ok(r.score >= 90, `expected a sane score, got ${r.score}`);
 });
 
-test('a genuine session cookie missing HttpOnly is still scored medium', () => {
+test('a genuine session cookie missing HttpOnly is still scored medium at high confidence', () => {
   const diag = baseDiag({ cookieIssues: ['Cookie "sl_session" is set without the HttpOnly attribute'] });
   const r = compileStaticFindings(diag);
   const f = r.findings.find((x) => /sl_session/.test(x.title));
   assert.ok(f && !f.isFalsePositive && f.severity === 'medium', 'session cookie HttpOnly gap must remain a medium finding');
+  assert.equal(f!.confidence, 'high', 'a session-named cookie is a confident finding');
+});
+
+test('an unclassifiable cookie is reported but at medium confidence so it can be damped, not crater the grade', () => {
+  const diag = baseDiag({ cookieIssues: ['Cookie "foo_bar" is set without the HttpOnly attribute'] });
+  const r = compileStaticFindings(diag);
+  const f = r.findings.find((x) => /foo_bar/.test(x.title));
+  assert.ok(f && !f.isFalsePositive, 'still reported — never silently dropped');
+  assert.equal(f!.severity, 'medium');
+  assert.equal(f!.confidence, 'medium', "we can't confirm it carries session state");
+});
+
+test('a leaked Server/framework banner is informational context, not a scored weakness', () => {
+  const diag = baseDiag({ techLeaked: ['Server: nginx/1.18.0'] });
+  const r = compileStaticFindings(diag);
+  const f = r.findings.find((x) => /Signature Leaked/i.test(x.title));
+  assert.ok(f, 'still surfaced for hardening');
+  assert.equal(f!.severity, 'info');
+  assert.equal(r.score, 100, 'fingerprinting must not deduct from the score');
 });
 
 test('clickjacking finding fires when neither X-Frame-Options nor CSP frame-ancestors is present', () => {

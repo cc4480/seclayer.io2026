@@ -29,6 +29,25 @@ export const SEVERITY_WEIGHTS: Record<Severity, number> = {
 // renders sensibly; mirrors the previous floor used across the codebase.
 export const SCORE_FLOOR = 10;
 
+// Evidence weighting. The grade must track how confidently each finding is REAL,
+// not the raw count of findings — otherwise a stack of low-confidence heuristics
+// (missing headers a black-box GET can't see conditionally, a library version
+// string, a cookie we can't confirm is session-bearing) craters an otherwise
+// clean site. So an UNCONFIRMED finding deducts only a fraction of its severity
+// weight, scaled by its confidence. CONFIRMED findings (a replayable exploit
+// receipt, or a high-confidence direct observation) are never damped — a real
+// vulnerability always deducts its full weight.
+export const HEURISTIC_CONFIDENCE_FACTOR: Record<"medium" | "low", number> = {
+  medium: 0.5,
+  low: 0.25,
+};
+
+// The most that unconfirmed findings can subtract in aggregate. Confirmed
+// findings are uncapped (a real vuln can still drive the grade to an F), but a
+// pile of purely-heuristic signals is floored here at 100 − 40 = 60 (grade D):
+// "we found hardening gaps but proved no exploit" must never read as an F.
+export const HEURISTIC_DEDUCTION_CAP = 40;
+
 const SEVERITY_ORDER: Severity[] = ["info", "low", "medium", "high", "critical"];
 
 export function normalizeSeverity(sev: string | undefined): Severity {
@@ -117,18 +136,32 @@ export interface SecurityPosture {
 export function deriveSecurityPosture(findings: Finding[]): SecurityPosture {
   const active = (findings || []).filter((f) => !f.isFalsePositive);
 
-  let score = 100;
   const findingsBySeverity: Record<Severity, number> = {
     critical: 0, high: 0, medium: 0, low: 0, info: 0,
   };
+  // Two-bucket, evidence-weighted deduction (see HEURISTIC_* above):
+  //  - CONFIRMED findings (proven receipt or high-confidence direct observation)
+  //    deduct their FULL severity weight, uncapped — a real vulnerability must
+  //    always move the grade, and can still drive it to an F.
+  //  - UNCONFIRMED findings (medium/low confidence heuristics) are damped by
+  //    their confidence and, together, capped — so no pile of unproven signals
+  //    can manufacture an F on a site where nothing was actually proven.
+  let confidentDeduction = 0;
+  let heuristicDeduction = 0;
   let confirmedCount = 0;
   for (const f of active) {
     const sev = normalizeSeverity(f.severity);
-    score -= SEVERITY_WEIGHTS[sev];
     findingsBySeverity[sev] += 1;
-    if (isConfirmed(f)) confirmedCount += 1;
+    const weight = SEVERITY_WEIGHTS[sev];
+    if (isConfirmed(f)) {
+      confidentDeduction += weight;
+      confirmedCount += 1;
+    } else {
+      heuristicDeduction += weight * HEURISTIC_CONFIDENCE_FACTOR[f.confidence === "low" ? "low" : "medium"];
+    }
   }
-  score = Math.round(Math.max(SCORE_FLOOR, Math.min(100, score)));
+  const totalDeduction = confidentDeduction + Math.min(HEURISTIC_DEDUCTION_CAP, heuristicDeduction);
+  const score = Math.round(Math.max(SCORE_FLOOR, Math.min(100, 100 - totalDeduction)));
 
   const top = highestSeverity(active);
 
