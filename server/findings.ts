@@ -10,6 +10,7 @@
 import type { DiagnosticResult } from "./scanner.js";
 import { Finding, Severity, ScanEvidence } from "../src/types.js";
 import { scoreFindings } from "./scoring.js";
+import { classifyCookie } from "./cookieClassify.js";
 import { mapOwasp } from "./owasp.js";
 import { buildAgentPrompt, buildImpactFallback } from "./agentPrompt.js";
 import crypto from "crypto";
@@ -167,23 +168,64 @@ function buildHeaderFindings(diag: DiagnosticResult): Finding[] {
   return findings;
 }
 
-// 2b. Cookie hardening (IAST). Secure/HttpOnly attribute gaps.
+// 2b. Cookie hardening (IAST). Secure/HttpOnly attribute gaps, scored by what the
+// cookie actually is (see cookieClassify.ts). A missing flag only carries real
+// session-hijack risk on a session/auth cookie. On third-party analytics cookies
+// and non-secret UX preference cookies the same "gap" is a false positive: they
+// MUST be JS-readable, hold no secret, and (for analytics) are set by an embedded
+// SDK, not this app. Flagging all of them at "medium" was inflating the score and
+// firing FP noise — e.g. six locale/analytics cookies dragging an otherwise-clean
+// site to the score floor. Genuine session cookies (and anything we can't
+// confidently classify as non-session) still report at medium so nothing real is
+// under-reported.
 function buildCookieFindings(diag: DiagnosticResult): Finding[] {
   return diag.cookieIssues.map((issue) => {
     const isSecureIssue = /secure attribute/i.test(issue);
-    return {
+    const name = issue.match(/"([^"]+)"/)?.[1] || "cookie";
+    const cls = classifyCookie(name);
+
+    let severity: Severity = "medium";
+    let isFalsePositive = false;
+    let suppressionReason: string | undefined;
+
+    if (cls === "analytics") {
+      // Third-party, JS-required, non-secret — neither flag is the app's to set
+      // nor a real gap. Auto-suppress (visible, but excluded from the score).
+      severity = "low";
+      isFalsePositive = true;
+      suppressionReason = `"${name}" is a third-party analytics/telemetry cookie set by an embedded SDK, not this app; it must be readable by client-side JavaScript and carries no session or authentication state, so ${isSecureIssue ? "its Secure flag is the provider's to set" : "HttpOnly does not apply"}.`;
+    } else if (cls === "preference" && !isSecureIssue) {
+      // HttpOnly on a cookie whose whole purpose is to be read by client JS is
+      // inappropriate by design (this scanner's own passiveScan note says so).
+      severity = "low";
+      isFalsePositive = true;
+      suppressionReason = `"${name}" is a non-secret UX preference cookie meant to be read by client-side JavaScript; HttpOnly would break that read and the cookie holds no session or authentication state.`;
+    } else if (cls === "preference") {
+      // A preference cookie SHOULD still be Secure over HTTPS — cheap and
+      // correct — but it's a minor hardening nit, not a medium session risk.
+      severity = "low";
+    }
+    // session / unknown: keep medium (don't under-report a possible session cookie).
+
+    const finding: Finding = {
       id: fid(),
       title: issue,
       description: isSecureIssue
         ? `${issue}. A cookie without the Secure attribute can be transmitted over an unencrypted connection, where a network attacker could intercept it. If this cookie carries session or authentication state, that exposes the session to hijacking.`
         : `${issue}. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft.`,
-      severity: "medium",
+      severity,
       confidence: "high",
       fix: isSecureIssue
         ? "Add the Secure attribute to this cookie so it is only ever sent over HTTPS."
         : "Add the HttpOnly attribute to this cookie unless it must be read by client-side JavaScript; if it must, keep the sensitive session token in a separate HttpOnly cookie.",
       category: "IAST",
     };
+    if (isFalsePositive) {
+      finding.isFalsePositive = true;
+      finding.suppressionReason = suppressionReason;
+      finding.suppressedAt = diag.scannedAt || undefined;
+    }
+    return finding;
   });
 }
 
