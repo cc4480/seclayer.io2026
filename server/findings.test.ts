@@ -14,10 +14,11 @@ function baseDiag(overrides: any = {}): any {
 
 const isClickjacking = (f: { title: string }) => /x-frame-options|clickjack/i.test(f.title);
 
-// Regression for the lovable.dev report: six cookie-flag findings (all analytics/
-// preference cookies) hard-scored to "medium" cratered a clean site to 10/100.
-// After classification, the HttpOnly gaps on those cookies are auto-suppressed
-// (false positives) and the score is sane again.
+// Regression for the lovable.dev report: cookie-flag findings — all on analytics
+// (rs_*) or preference (locale/currency/country) cookies — cratered a clean site.
+// Those flags are irrelevant/by-design on such cookies (they must be JS-readable
+// and carry no secret), so under a ZERO-FALSE-POSITIVE policy they are dropped
+// entirely rather than shown as low/suppressed noise the user still has to triage.
 const LOVABLE_COOKIE_ISSUES = [
   'Cookie "USER_COUNTRY" is set without the HttpOnly attribute',
   'Cookie "USER_CURRENCY" is set without the HttpOnly attribute',
@@ -26,29 +27,15 @@ const LOVABLE_COOKIE_ISSUES = [
   'Cookie "rs_visitor_id" is set without the HttpOnly attribute',
 ];
 
-test('analytics/preference cookie HttpOnly gaps are auto-suppressed, not scored medium', () => {
+test('analytics/preference cookie flag gaps are not reported at all (zero false positives)', () => {
   const diag = baseDiag({ cookieIssues: LOVABLE_COOKIE_ISSUES });
   const r = compileStaticFindings(diag);
   const cookieFindings = r.findings.filter((f) => /Cookie "/.test(f.title));
 
-  // The four HttpOnly gaps on analytics/preference cookies are marked false positive.
-  const suppressed = cookieFindings.filter((f) => f.isFalsePositive);
-  assert.equal(suppressed.length, 4, 'the four JS-readable-by-design HttpOnly gaps are suppressed');
-  for (const f of suppressed) {
-    assert.ok(f.suppressionReason && f.suppressionReason.length > 0, 'each auto-suppression carries a reason');
-    assert.notEqual(f.severity, 'medium');
-  }
-
-  // None of these cookies is session/auth, so nothing survives at medium.
-  const activeMedium = cookieFindings.filter((f) => !f.isFalsePositive && f.severity === 'medium');
-  assert.equal(activeMedium.length, 0, 'no locale/analytics cookie is scored medium');
-
-  // The one legitimate-but-minor gap (LOCALE missing Secure) stays as a low, active finding.
-  const localeSecure = cookieFindings.find((f) => /LOCALE.*Secure/.test(f.title));
-  assert.ok(localeSecure && !localeSecure.isFalsePositive && localeSecure.severity === 'low');
-
-  // Score is no longer at the floor: only the low Secure gap counts (100 - 5 = 95).
-  assert.ok(r.score >= 90, `expected a sane score, got ${r.score}`);
+  // Every one is an analytics or preference cookie — none should surface at all.
+  assert.equal(cookieFindings.length, 0, 'no analytics/preference cookie flag finding should be produced');
+  // Nothing real to score → the site reads clean.
+  assert.equal(r.score, 100, `expected a clean score, got ${r.score}`);
 });
 
 test('a genuine session cookie missing HttpOnly is still scored medium at high confidence', () => {

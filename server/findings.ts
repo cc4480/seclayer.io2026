@@ -183,61 +183,44 @@ function buildHeaderFindings(diag: DiagnosticResult): Finding[] {
 // confidently classify as non-session) still report at medium so nothing real is
 // under-reported.
 function buildCookieFindings(diag: DiagnosticResult): Finding[] {
-  return diag.cookieIssues.map((issue) => {
+  const findings: Finding[] = [];
+  for (const issue of diag.cookieIssues) {
     const isSecureIssue = /secure attribute/i.test(issue);
     const name = issue.match(/"([^"]+)"/)?.[1] || "cookie";
     const cls = classifyCookie(name);
 
-    let severity: Severity = "medium";
-    let isFalsePositive = false;
-    let suppressionReason: string | undefined;
+    // ZERO-FALSE-POSITIVE policy. A missing HttpOnly/Secure flag is only a real
+    // risk on a cookie that could carry session/auth state. Third-party analytics
+    // cookies and non-secret UX preference cookies (locale/currency/country/theme)
+    // MUST be readable by client-side JavaScript, hold no secret, and are often
+    // set by an embedded SDK rather than this app — the "gap" is a false positive.
+    // We therefore DON'T EMIT a finding for them at all (previously they were shown
+    // as low/suppressed, which still surfaced noise the user had to triage). Every
+    // cookie we can't confidently classify as non-session ("session" or "unknown")
+    // is still reported, so a genuine session-cookie gap is never missed.
+    if (cls === "analytics" || cls === "preference") continue;
 
-    if (cls === "analytics") {
-      // Third-party, JS-required, non-secret — neither flag is the app's to set
-      // nor a real gap. Auto-suppress (visible, but excluded from the score).
-      severity = "low";
-      isFalsePositive = true;
-      suppressionReason = `"${name}" is a third-party analytics/telemetry cookie set by an embedded SDK, not this app; it must be readable by client-side JavaScript and carries no session or authentication state, so ${isSecureIssue ? "its Secure flag is the provider's to set" : "HttpOnly does not apply"}.`;
-    } else if (cls === "preference" && !isSecureIssue) {
-      // HttpOnly on a cookie whose whole purpose is to be read by client JS is
-      // inappropriate by design (this scanner's own passiveScan note says so).
-      severity = "low";
-      isFalsePositive = true;
-      suppressionReason = `"${name}" is a non-secret UX preference cookie meant to be read by client-side JavaScript; HttpOnly would break that read and the cookie holds no session or authentication state.`;
-    } else if (cls === "preference") {
-      // A preference cookie SHOULD still be Secure over HTTPS — cheap and
-      // correct — but it's a minor hardening nit, not a medium session risk.
-      severity = "low";
-    }
-    // session / unknown: keep medium (don't under-report a possible session cookie).
-
-    // Confidence reflects how sure we are the finding is a real RISK, not just
-    // that the flag is absent. For a session-named cookie we're confident it
-    // matters; for an unclassifiable cookie we can't confirm it carries session
-    // state, so it's medium — which damps its score impact (see scoring.ts)
-    // instead of letting an unknown cookie crater the grade at full weight.
+    // Confidence reflects how sure we are it's a real RISK, not just that the flag
+    // is absent: a session-named cookie is high; an unclassifiable one is medium
+    // (which damps its score impact) since we can't confirm it carries session
+    // state — but we still report it rather than risk under-reporting a real one.
     const confidence: Finding["confidence"] = cls === "unknown" ? "medium" : "high";
 
-    const finding: Finding = {
+    findings.push({
       id: fid(),
       title: issue,
       description: isSecureIssue
         ? `${issue}. A cookie without the Secure attribute can be transmitted over an unencrypted connection, where a network attacker could intercept it. If this cookie carries session or authentication state, that exposes the session to hijacking.`
         : `${issue}. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft.`,
-      severity,
+      severity: "medium",
       confidence,
       fix: isSecureIssue
         ? "Add the Secure attribute to this cookie so it is only ever sent over HTTPS."
         : "Add the HttpOnly attribute to this cookie unless it must be read by client-side JavaScript; if it must, keep the sensitive session token in a separate HttpOnly cookie.",
       category: "IAST",
-    };
-    if (isFalsePositive) {
-      finding.isFalsePositive = true;
-      finding.suppressionReason = suppressionReason;
-      finding.suppressedAt = diag.scannedAt || undefined;
-    }
-    return finding;
-  });
+    });
+  }
+  return findings;
 }
 
 // 3. SAST (static code security analysis) findings.
