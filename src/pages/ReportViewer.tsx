@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { ArrowLeft, Download, Share2, Clock, Check, AlertTriangle, Sparkles, Eye, EyeOff, Clipboard } from 'lucide-react';
 import { Scan } from '../types.js';
 import { buildScanFixPrompt, actionableFindings } from '../lib/scanFixPrompt.js';
+import { copyToClipboard } from '../lib/clipboard.js';
 // Single source of truth for every risk figure/label shown here — the same
 // module the server scanner and read-model score from. No risk value or label
 // in this component is computed locally.
@@ -60,15 +61,21 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
     try {
       const res = await fetch(`/api/scans/${scan.id}/share`, { method: 'POST' });
       const data = await res.json().catch(() => ({}));
-      if (res.ok && data.shareUrl) {
-        setShareToken(data.shareToken);
-        await navigator.clipboard.writeText(data.shareUrl);
-        setCopiedLink(true);
-        setTimeout(() => setCopiedLink(false), 2500);
-      } else {
+      if (!res.ok || !data.shareUrl) {
         setShareError(true);
         setTimeout(() => setShareError(false), 3000);
+        return;
       }
+      // The link is minted server-side at this point regardless of what
+      // happens next — a clipboard failure below (blocked permission,
+      // insecure context, unfocused tab) must not be reported as a share
+      // failure, since the token already exists and Revoke now applies.
+      setShareToken(data.shareToken);
+      if (await copyToClipboard(data.shareUrl)) {
+        setCopiedLink(true);
+        setTimeout(() => setCopiedLink(false), 2500);
+      }
+      // Else: link exists; user can copy it via the now-shown "Copy public link" state.
     } catch {
       setShareError(true);
       setTimeout(() => setShareError(false), 3000);
@@ -83,8 +90,8 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
     } catch { /* leave the link as-is on error */ }
   };
 
-  const handleCopyCode = (findingId: string, fixText: string) => {
-    navigator.clipboard.writeText(fixText);
+  const handleCopyCode = async (findingId: string, fixText: string) => {
+    if (!(await copyToClipboard(fixText))) return;
     setCopiedCodeId(findingId);
     setTimeout(() => setCopiedCodeId(null), 2000);
   };
@@ -111,8 +118,8 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
   // what a user reads is exactly what gets copied.
   const fixableCount = actionableFindings(findings).length;
   const fixPromptText = useMemo(() => buildScanFixPrompt(scan), [scan]);
-  const handleCopyFixPrompt = () => {
-    navigator.clipboard.writeText(fixPromptText);
+  const handleCopyFixPrompt = async () => {
+    if (!(await copyToClipboard(fixPromptText))) return;
     setCopiedFixPrompt(true);
     setTimeout(() => setCopiedFixPrompt(false), 2000);
   };

@@ -1,11 +1,11 @@
 import { Code, Copy, FileText } from 'lucide-react';
+import { copyToClipboard } from '../../lib/clipboard.js';
 
 // API & MCP integration documentation tab: request schema, cURL + TypeScript
 // snippets, and the response envelope, each with a copy-to-clipboard button.
 export default function ApiDocsTab({ notify }: { notify: (msg: string) => void }) {
-  const copy = (text: string, msg: string) => {
-    navigator.clipboard.writeText(text);
-    notify(msg);
+  const copy = async (text: string, msg: string) => {
+    if (await copyToClipboard(text)) notify(msg);
   };
   const origin = window.location.origin;
 

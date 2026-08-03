@@ -13,6 +13,7 @@ import MonitoringTab from '../components/dashboard/MonitoringTab.js';
 import ExclusionsTab from '../components/dashboard/ExclusionsTab.js';
 import BillingTab from '../components/dashboard/BillingTab.js';
 import ApiDocsTab from '../components/dashboard/ApiDocsTab.js';
+import { copyToClipboard } from '../lib/clipboard.js';
 
 // Persisted scan-launcher config so the advanced fields (auth header + the two
 // BOLA identities) come pre-filled and never need re-entering — set them once and
@@ -217,8 +218,8 @@ export default function Dashboard({
     }, 1200);
   };
 
-  const handleCopyKey = (keyText: string, keyId: string) => {
-    navigator.clipboard.writeText(keyText);
+  const handleCopyKey = async (keyText: string, keyId: string) => {
+    if (!(await copyToClipboard(keyText))) return;
     setCopiedKeyId(keyId);
     setTimeout(() => setCopiedKeyId(null), 2000);
   };
