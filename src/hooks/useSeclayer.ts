@@ -127,6 +127,13 @@ export function useSeclayer() {
   });
 
   const handleNavigate = (view: string, arg?: string) => {
+    // The dashboard is session-gated (App.tsx only renders it when a user is
+    // present) — without this check, navigating there while logged out just
+    // blanks the page instead of prompting sign-in.
+    if (view === 'dashboard' && !user) {
+      setShowLogin(true);
+      return;
+    }
     if (view === 'report' && arg) {
       setSelectedScanId(arg);
       setCurrentView('report');
