@@ -32,7 +32,23 @@ RUN apt-get update && \
     setcap cap_net_raw,cap_net_admin+eip "$(command -v nmap)" && \
     rm -rf /var/lib/apt/lists/*
 
+# The base image ships a global `npm` CLI (with its own vendored
+# node_modules — tar, brace-expansion, sigstore, etc.) that this image never
+# invokes: the runtime CMD is a plain `node`, never `npm`/`npx`. Removing it
+# isn't just cleanup — a vulnerability scan (docker scout / trivy) otherwise
+# flags CVEs in npm's bundled deps (e.g. a CRITICAL in its vendored `tar`)
+# that have zero real exposure here, but show up indistinguishable from ones
+# that do. Trim it so the report only reflects code actually in the request path.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
+
 # Carry over pruned node_modules (incl. the prebuilt better-sqlite3 binary).
+# vite (and its transitive esbuild/plugin deps) is intentionally NOT here:
+# server.ts only reaches it via a dynamic import() inside the dev-only branch,
+# so `npm prune --omit=dev` drops it — it's devDependencies-only in
+# package.json for exactly this reason. Same motivation as removing npm
+# above: vite/esbuild carry their own CVEs (esbuild embeds a Go binary with
+# unrelated Go-stdlib CVEs) that a vulnerability scan can't tell apart from
+# something actually reachable in production.
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./

@@ -2,7 +2,6 @@ import './server/env.js'; // must run first: loads .env before any module reads 
 import express from 'express';
 import path from 'path';
 import cookieParser from 'cookie-parser';
-import { createServer as createViteServer } from 'vite';
 import { db } from './server/db.js';
 import { config, validateConfigOnBoot } from './server/config.js';
 import { parseWebhookEvent } from './server/stripe.js';
@@ -169,6 +168,12 @@ async function startServer() {
 
   // --- Express serving of static client files ---
   if (!config.isProd) {
+    // Dynamic, not a top-level import: vite is a devDependency only (see
+    // package.json) so it — and its own esbuild/transitive deps — can be
+    // pruned out of the production image entirely (npm prune --omit=dev). A
+    // static top-level import would force node to resolve 'vite' on every
+    // boot, dev or prod, defeating that.
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
