@@ -58,7 +58,11 @@ export async function processNmapScanJob(scanId: string): Promise<void> {
       completedAt: new Date().toISOString(),
     });
     const openPorts = result.ports.filter((p) => p.state === "open").length;
-    emit("result", `Found ${openPorts} open port(s), ${result.vulnFindings.length} DETECTED vuln-script hit(s).`);
+    const detected = result.vulnFindings.filter((f) => f.outcome === "finding").length;
+    emit(
+      "result",
+      `Found ${openPorts} open port(s), ${detected} DETECTED vuln-script hit(s) (${result.vulnFindings.length} scripts ran).`,
+    );
   } catch (err: any) {
     if (isCanceled(scanId)) return; // already canceled — don't overwrite with a failure
     const message = err?.message || "The network reconnaissance scan could not be completed.";

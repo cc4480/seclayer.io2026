@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Radar, Globe, RefreshCw, ChevronDown, AlertTriangle, Info } from 'lucide-react';
 import { useNmap } from '../../hooks/useNmap.js';
-import { NmapScan } from '../../types.js';
+import { NmapScan, NmapVulnFinding, NmapScriptOutcome } from '../../types.js';
 
 const STATUS_STYLE: Record<string, string> = {
   complete: 'bg-[#22c55e]/10 text-[#22c55e] border-[#22c55e]/30',
@@ -11,10 +11,46 @@ const STATUS_STYLE: Record<string, string> = {
   canceled: 'bg-[#52525b]/15 text-[#a1a1aa] border-[#52525b]/40',
 };
 
+// A script ran for every entry here — only 'finding' means it actually hit
+// something (see server/nmap/classify.ts). Missing outcome (older, pre-fix
+// persisted scans) falls back to 'finding' rather than silently hiding it —
+// never under-report, worst case a stale row still shows the old label.
+const OUTCOME_BADGE: Record<NmapScriptOutcome, { label: string; className: string }> = {
+  finding: { label: 'Detected', className: 'bg-amber-500/10 text-amber-400 border-amber-500/35' },
+  negative: { label: 'Clean', className: 'bg-[#22c55e]/10 text-[#22c55e] border-[#22c55e]/30' },
+  error: { label: 'Script Error', className: 'bg-[#52525b]/15 text-[#a1a1aa] border-[#52525b]/40' },
+  inconclusive: { label: 'Inconclusive', className: 'bg-[#52525b]/15 text-[#a1a1aa] border-[#52525b]/40' },
+};
+
+function outcomeOf(f: NmapVulnFinding): NmapScriptOutcome {
+  return f.outcome ?? 'finding';
+}
+
+// `key` is declared (but unused in the body) only because this repo has no
+// @types/react installed, so TS doesn't auto-strip JSX's special `key` prop
+// the way it would with real React types — see the two call sites below.
+function ScriptResultRow({ f }: { f: NmapVulnFinding; key?: string }) {
+  const badge = OUTCOME_BADGE[outcomeOf(f)];
+  return (
+    <div className="p-3 bg-black border border-[#27272a] rounded">
+      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+        <span className={`${badge.className} border text-[9px] font-mono uppercase rounded px-1.5 py-0.5 font-bold`}>{badge.label}</span>
+        <span className="text-white text-[11px] font-mono font-bold">{f.scriptId}</span>
+        {f.port != null && <span className="text-[#52525b] text-[10px] font-mono">port {f.port}</span>}
+      </div>
+      <pre className="text-[10px] font-mono text-[#a1a1aa] whitespace-pre-wrap break-words">{f.output}</pre>
+    </div>
+  );
+}
+
 function ResultsView({ scan }: { scan: NmapScan }) {
+  const [showAllScripts, setShowAllScripts] = useState(false);
   const result = scan.result;
   if (!result) return null;
   const openPorts = result.ports.filter((p) => p.state === 'open');
+  const findings = result.vulnFindings.filter((f) => outcomeOf(f) === 'finding');
+  const otherScripts = result.vulnFindings.filter((f) => outcomeOf(f) !== 'finding');
+  const errored = otherScripts.filter((f) => outcomeOf(f) === 'error').length;
 
   return (
     <div className="mt-4 pt-4 border-t border-[#27272a] space-y-5">
@@ -65,27 +101,40 @@ function ResultsView({ scan }: { scan: NmapScan }) {
 
       <div>
         <h4 className="text-[10px] font-mono uppercase tracking-wider text-[#52525b] mb-2">
-          Vulnerability Script Findings ({result.vulnFindings.length})
+          NSE Vulnerability Scripts ({result.vulnFindings.length} run{errored > 0 ? `, ${errored} errored` : ''})
         </h4>
         {result.vulnFindings.length === 0 ? (
-          <p className="text-[11px] font-mono text-[#a1a1aa]">No NSE vulnerability-script hits.</p>
+          <p className="text-[11px] font-mono text-[#a1a1aa]">No NSE vulnerability scripts ran (no open ports matched).</p>
+        ) : findings.length === 0 ? (
+          <p className="text-[11px] font-mono text-[#22c55e] flex items-start gap-1.5">
+            <Info className="w-3 h-3 shrink-0 mt-0.5" />
+            {result.vulnFindings.length} script(s) ran against open ports/host — none flagged a signal.
+          </p>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-2 mb-3">
             <p className="text-[10px] font-mono text-[#a1a1aa] flex items-start gap-1.5">
               <Info className="w-3 h-3 text-amber-400 shrink-0 mt-0.5" />
               Nmap NSE vulnerability scripts match on service banners and version strings — they indicate a
               likely issue, not a confirmed, exploited proof. Every hit below is marked <span className="text-amber-400 font-bold">DETECTED</span>, never PROVEN. Verify manually, or run a targeted AppSec active probe for PROVEN evidence.
             </p>
-            {result.vulnFindings.map((f, i) => (
-              <div key={`${f.scriptId}-${i}`} className="p-3 bg-black border border-[#27272a] rounded">
-                <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                  <span className="bg-amber-500/10 text-amber-400 border border-amber-500/35 text-[9px] font-mono uppercase rounded px-1.5 py-0.5 font-bold">Detected</span>
-                  <span className="text-white text-[11px] font-mono font-bold">{f.scriptId}</span>
-                  {f.port != null && <span className="text-[#52525b] text-[10px] font-mono">port {f.port}</span>}
-                </div>
-                <pre className="text-[10px] font-mono text-[#a1a1aa] whitespace-pre-wrap break-words">{f.output}</pre>
+            {findings.map((f, i) => <ScriptResultRow key={`${f.scriptId}-${i}`} f={f} />)}
+          </div>
+        )}
+        {otherScripts.length > 0 && (
+          <div>
+            <button
+              type="button"
+              onClick={() => setShowAllScripts((v) => !v)}
+              className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-[#52525b] hover:text-white transition-all cursor-pointer"
+            >
+              <ChevronDown className={`w-3 h-3 transition-transform ${showAllScripts ? 'rotate-180' : ''}`} />
+              {showAllScripts ? 'Hide' : 'Show'} {otherScripts.length} clean / inconclusive / errored script result(s)
+            </button>
+            {showAllScripts && (
+              <div className="space-y-2 mt-2">
+                {otherScripts.map((f, i) => <ScriptResultRow key={`${f.scriptId}-${i}`} f={f} />)}
               </div>
-            ))}
+            )}
           </div>
         )}
       </div>
@@ -147,7 +196,7 @@ export default function NetworkReconTab({ nm }: { nm: ReturnType<typeof useNmap>
                   {scan.result && (
                     <>
                       <span>&bull;</span>
-                      <span>{scan.result.ports.filter((p) => p.state === 'open').length} open port(s), {scan.result.vulnFindings.length} DETECTED</span>
+                      <span>{scan.result.ports.filter((p) => p.state === 'open').length} open port(s), {scan.result.vulnFindings.filter((f) => outcomeOf(f) === 'finding').length} DETECTED</span>
                     </>
                   )}
                 </div>

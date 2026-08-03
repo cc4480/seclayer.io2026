@@ -75,10 +75,11 @@ test('compileNmapResult flattens per-port and host-level scripts into vulnFindin
   assert.equal(result.nmapVersion, '7.94');
   assert.equal(result.durationMs, 120000);
 
-  // Two per-port vuln scripts + one host-level script = 3 total findings.
+  // Two per-port vuln scripts + one host-level script = 3 total results.
   assert.equal(result.vulnFindings.length, 3);
   const httpFinding = result.vulnFindings.find((f) => f.scriptId === 'http-vuln-cve2021-41773')!;
   assert.equal(httpFinding.port, 80);
+  assert.equal(httpFinding.outcome, 'finding', 'a real VULNERABLE hit is classified as a finding');
   const hostFinding = result.vulnFindings.find((f) => f.scriptId === 'clock-skew')!;
   assert.equal(hostFinding.port, undefined, 'host-level scripts carry no port number');
 
@@ -89,6 +90,44 @@ test('compileNmapResult flattens per-port and host-level scripts into vulnFindin
     assert.equal((f as any).severity, undefined);
     assert.equal((f as any).evidence, undefined);
   }
+});
+
+test('compileNmapResult classifies negative, errored, and inconclusive script results — never all DETECTED', () => {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+    <nmaprun>
+      <host>
+        <status state="up"/>
+        <address addr="203.0.113.20" addrtype="ipv4"/>
+        <ports>
+          <port protocol="tcp" portid="80">
+            <state state="open"/>
+            <script id="http-csrf" output="Couldn't find any CSRF vulnerabilities."/>
+            <script id="http-vuln-cve2013-7091" output="ERROR: Script execution failed (use -d to debug)"/>
+          </port>
+          <port protocol="tcp" portid="443">
+            <state state="open"/>
+            <script id="ssl-ccs-injection" output="No reply from server (TIMEOUT)"/>
+            <script id="some-vuln-check" output="State: UNKNOWN (going to safe state)"/>
+            <script id="http-vuln-real" output="VULNERABLE:&#10;  State: VULNERABLE&#10;  A real hit."/>
+          </port>
+        </ports>
+      </host>
+    </nmaprun>`;
+  const parsed = parseNmapXml(xml);
+  const result = compileNmapResult(parsed, {
+    targetHost: 'scan-me.test', resolvedIp: '203.0.113.20', nmapVersion: '7.94', durationMs: 1000, scanArgs: [],
+  });
+
+  assert.equal(result.vulnFindings.length, 5, 'every script that ran is still surfaced — nothing is silently dropped');
+  const byId = Object.fromEntries(result.vulnFindings.map((f) => [f.scriptId, f.outcome]));
+  assert.equal(byId['http-csrf'], 'negative');
+  assert.equal(byId['http-vuln-cve2013-7091'], 'error');
+  assert.equal(byId['ssl-ccs-injection'], 'error');
+  assert.equal(byId['some-vuln-check'], 'inconclusive');
+  assert.equal(byId['http-vuln-real'], 'finding');
+
+  // Exactly one real finding — the previous behavior would have reported 5.
+  assert.equal(result.vulnFindings.filter((f) => f.outcome === 'finding').length, 1);
 });
 
 test('compileNmapResult produces an empty port/finding list for a down host', () => {

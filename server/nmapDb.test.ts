@@ -37,7 +37,7 @@ test('updateNmapScan merges onto the existing row and round-trips the result JSO
     state: 'up' as const,
     ports: [{ port: 22, protocol: 'tcp' as const, state: 'open', service: 'ssh', scripts: [] }],
     osMatches: [{ name: 'Linux 5.x', accuracy: 92 }],
-    vulnFindings: [{ port: 22, scriptId: 'sshv1', output: 'Server supports deprecated SSHv1' }],
+    vulnFindings: [{ port: 22, scriptId: 'sshv1', output: 'Server supports deprecated SSHv1', outcome: 'finding' as const }],
     nmapVersion: '7.94',
     scanArgs: ['-p-', '-sV', '-O', '--script', 'vuln'],
     durationMs: 12345,

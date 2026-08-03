@@ -4,7 +4,9 @@ import { useNmap } from '../../hooks/useNmap.js';
 import { useDomainVerification } from '../../hooks/useDomainVerification.js';
 import { useNmapEvents } from '../../hooks/useNmapEvents.js';
 import ScanConsole from '../scanProgress/ScanConsole.js';
+import NmapProgressBar from '../scanProgress/NmapProgressBar.js';
 import { liveEventsToLogs } from '../scanProgress/scanLogs.js';
+import { parseNmapProgress } from '../../lib/nmapProgress.js';
 
 interface Props {
   nm: ReturnType<typeof useNmap>;
@@ -24,6 +26,7 @@ export default function NetworkReconCard({ nm, userId, freeMode, devSkipDomainVe
   const inFlight = nm.nmapScans.find((s) => s.status === 'queued' || s.status === 'scanning');
   const events = useNmapEvents(inFlight?.id || '');
   const logs = liveEventsToLogs(events);
+  const progress = parseNmapProgress(events);
 
   const canLaunch = !inFlight && (dv.currentDomainVerified || !!devSkipDomainVerification);
 
@@ -125,6 +128,7 @@ export default function NetworkReconCard({ nm, userId, freeMode, devSkipDomainVe
               <span className="text-purple-400 uppercase tracking-wider">● Scanning {inFlight.url}…</span>
               <span>Started {new Date(inFlight.startedAt || inFlight.createdAt).toLocaleTimeString()}</span>
             </div>
+            <NmapProgressBar progress={progress} />
             <ScanConsole logs={logs.length ? logs : ['[SYSTEM] Launching…']} />
           </div>
         ) : (

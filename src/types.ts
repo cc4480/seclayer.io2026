@@ -303,15 +303,26 @@ export interface NmapOsMatch {
   accuracy: number;
 }
 
-// A single NSE `vuln`-category script hit. Deliberately its own shape — never
-// a Finding, never an ExploitEvidence, never touches scoring — so nmap output
-// is structurally incapable of affecting the 0-100 AppSec posture score.
-// Always rendered as DETECTED, never PROVEN: these are banner/version
-// signature matches, not a replayable exploit receipt.
+// nmap emits a <script> result for EVERY `--script vuln` script that ran
+// against a port/host, regardless of outcome — a script that explicitly found
+// nothing, or that errored/timed out, produces a result element exactly like
+// one that found something real. `outcome` (server/nmap/classify.ts) reads
+// the script's own output text to tell these apart, so only a genuine signal
+// is ever labeled 'finding' — the others are surfaced too (full transparency
+// on what nmap actually ran), just never mislabeled as a hit.
+export type NmapScriptOutcome = 'finding' | 'negative' | 'error' | 'inconclusive';
+
+// A single NSE `vuln`-category script result. Deliberately its own shape —
+// never a Finding, never an ExploitEvidence, never touches scoring — so nmap
+// output is structurally incapable of affecting the 0-100 AppSec posture
+// score. A 'finding' outcome is always rendered as DETECTED, never PROVEN:
+// these are banner/version signature matches, not a replayable exploit
+// receipt.
 export interface NmapVulnFinding {
   port?: number; // undefined = host-level script
   scriptId: string;
   output: string;
+  outcome: NmapScriptOutcome;
 }
 
 export interface NmapResult {
