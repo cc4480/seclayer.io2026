@@ -80,6 +80,30 @@ export default function Navbar({
             Home
           </button>
           <button
+            onClick={() => {
+              // The FAQ lives as a section on the landing page, not its own
+              // route — navigate home first (no-op if already there), then wait
+              // a paint for it to mount before scrolling to the anchor.
+              onNavigate('landing');
+              requestAnimationFrame(() => requestAnimationFrame(() => {
+                document.getElementById('faq')?.scrollIntoView({ behavior: 'smooth' });
+              }));
+            }}
+            className="font-mono text-xs uppercase tracking-widest transition-all text-[#a1a1aa] hover:text-white"
+            id="nav-link-faq"
+          >
+            FAQ
+          </button>
+          <button
+            onClick={() => onNavigate('docs')}
+            className={`font-mono text-xs uppercase tracking-widest transition-all ${
+              currentView === 'docs' ? 'text-[#22c55e]' : 'text-[#a1a1aa] hover:text-white'
+            }`}
+            id="nav-link-docs"
+          >
+            Docs
+          </button>
+          <button
             onClick={() => onNavigate('dashboard')}
             className={`font-mono text-xs uppercase tracking-widest transition-all ${
               currentView === 'dashboard' ? 'text-[#22c55e]' : 'text-[#a1a1aa] hover:text-white'

@@ -27,8 +27,13 @@ export function useSeclayer() {
   // never persisted, never re-fetchable, cleared on dismiss or reload.
   const [justGeneratedKey, setJustGeneratedKey] = useState<{ id: string; rawKey: string } | null>(null);
 
-  // Navigation states
-  const [currentView, setCurrentView] = useState<'landing' | 'dashboard' | 'progress' | 'report'>('landing');
+  // Navigation states. 'docs' is the one other view with a real, stable URL
+  // (/docs) — indexable and directly linkable, unlike dashboard/progress/report
+  // which are session-gated or lack a stable id in the path. Initialized from
+  // the URL so a direct visit or hard refresh on /docs lands there, not on landing.
+  const [currentView, setCurrentView] = useState<'landing' | 'dashboard' | 'progress' | 'report' | 'docs'>(
+    () => (window.location.pathname.replace(/\/+$/, '') === '/docs' ? 'docs' : 'landing')
+  );
   const [selectedScanId, setSelectedScanId] = useState<string | null>(null);
   const [showLogin, setShowLogin] = useState(false);
   const [isPerformingAction, setIsPerformingAction] = useState(false);
@@ -125,9 +130,26 @@ export function useSeclayer() {
       setSelectedScanId(null);
       setCurrentView(view as any);
     }
+    // Keep the URL in sync for the two views with a real, stable path; every
+    // other view (dashboard/progress/report) is session-gated with no shareable
+    // URL of its own, so it collapses back to '/'.
+    const path = view === 'docs' ? '/docs' : '/';
+    if (window.location.pathname !== path) window.history.pushState({}, '', path);
     // Scroll smoothly back to top on transitions
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+
+  // Back/forward between '/' and '/docs' should update the view, not just the
+  // address bar — otherwise the browser history entry lies about what's on screen.
+  useEffect(() => {
+    const onPopState = () => {
+      const path = window.location.pathname.replace(/\/+$/, '') || '/';
+      if (path === '/docs') setCurrentView('docs');
+      else if (path === '/') setCurrentView('landing');
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
 
   const handleStartTrial = (initialUrl: string) => {
     // If guest clicks landing page audit input, we route them into console

@@ -2,6 +2,7 @@ import HeroSection from '../components/landing/HeroSection.js';
 import PricingSection from '../components/landing/PricingSection.js';
 import McpSection from '../components/landing/McpSection.js';
 import SampleReportSection from '../components/landing/SampleReportSection.js';
+import FaqSection from '../components/landing/FaqSection.js';
 
 interface LandingProps {
   onStartTrial: (initialUrl: string) => void;
@@ -16,6 +17,7 @@ export default function Landing({ onStartTrial, onNavigate, onSelectPack }: Land
       <PricingSection onSelectPack={onSelectPack} />
       <McpSection onNavigate={onNavigate} />
       <SampleReportSection />
+      <FaqSection />
 
       {/* Footer */}
       <footer className="border-t border-[#27272a] bg-[#0c0c0e] py-12 text-[#a1a1aa] text-xs font-mono text-center">

@@ -2,6 +2,7 @@
 // source (never from user input):
 //   - /robots.txt                    crawler policy — keep the API surface out
 //                                     of search indexes.
+//   - /sitemap.xml                   the indexable marketing/docs pages.
 //   - /.well-known/security.txt      RFC 9116 vulnerability-disclosure contact,
 //                                     which a security product in particular is
 //                                     expected to publish.
@@ -10,6 +11,14 @@
 // the file is still valid rather than empty.
 import type express from 'express';
 import { config } from '../config.js';
+
+// Public site origin used to build absolute URLs in the sitemap and OG/canonical
+// tags server-side. Falls back to the real production domain (matching the
+// static canonical/OG tags already hardcoded in index.html) so these stay valid
+// even when APP_URL isn't set, e.g. in local dev.
+function siteOrigin(): string {
+  return config.appUrl || 'https://seclayer.io';
+}
 
 function securityContact(): string {
   const explicit = (process.env.SECURITY_CONTACT || '').trim();
@@ -27,8 +36,20 @@ export function buildRobotsTxt(): string {
     'Disallow: /api/',
     'Disallow: /dashboard',
     'Allow: /',
+    `Sitemap: ${siteOrigin()}/sitemap.xml`,
     '',
   ].join('\n');
+}
+
+// Every publicly indexable, unauthenticated page. Keep in sync with the SPA's
+// path-based routes in useSeclayer.ts (currently just '/' and '/docs' — every
+// other view is session-gated or has no stable URL of its own).
+const PUBLIC_PAGES = ['/', '/docs'];
+
+export function buildSitemapXml(): string {
+  const origin = siteOrigin();
+  const urls = PUBLIC_PAGES.map((path) => `  <url><loc>${origin}${path}</loc></url>`).join('\n');
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`;
 }
 
 export function buildSecurityTxt(): string {
@@ -47,6 +68,10 @@ export function buildSecurityTxt(): string {
 export function registerWellKnownRoutes(app: express.Express) {
   app.get('/robots.txt', (_req, res) => {
     res.type('text/plain').send(buildRobotsTxt());
+  });
+
+  app.get('/sitemap.xml', (_req, res) => {
+    res.type('application/xml').send(buildSitemapXml());
   });
 
   const securityTxtHandler = (_req: express.Request, res: express.Response) => {

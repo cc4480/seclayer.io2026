@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import type { AddressInfo } from 'node:net';
-import { registerWellKnownRoutes, buildRobotsTxt, buildSecurityTxt } from './wellKnown.js';
+import { registerWellKnownRoutes, buildRobotsTxt, buildSecurityTxt, buildSitemapXml } from './wellKnown.js';
 
 async function withApp(app: express.Express, fn: (base: string) => Promise<void>) {
   const server = app.listen(0);
@@ -19,6 +19,21 @@ test('robots.txt keeps the API surface out of indexes', () => {
   const body = buildRobotsTxt();
   assert.match(body, /User-agent: \*/);
   assert.match(body, /Disallow: \/api\//);
+});
+
+test('robots.txt points crawlers at the sitemap', () => {
+  assert.match(buildRobotsTxt(), /^Sitemap: https?:\/\/.+\/sitemap\.xml$/m);
+});
+
+test('sitemap.xml is valid XML listing only public pages', () => {
+  const body = buildSitemapXml();
+  assert.match(body, /^<\?xml version="1\.0" encoding="UTF-8"\?>/);
+  assert.match(body, /<urlset xmlns="http:\/\/www\.sitemaps\.org\/schemas\/sitemap\/0\.9">/);
+  assert.match(body, /<loc>https?:\/\/[^<]+\/<\/loc>/);
+  assert.match(body, /<loc>https?:\/\/[^<]+\/docs<\/loc>/);
+  // Never leak session-gated or API routes into the public sitemap.
+  assert.doesNotMatch(body, /\/api\//);
+  assert.doesNotMatch(body, /\/dashboard/);
 });
 
 test('security.txt is RFC 9116-valid: has Contact and a future Expires', () => {
@@ -55,5 +70,9 @@ test('serves the files over HTTP as text/plain', async () => {
 
     const secLegacy = await fetch(`${base}/security.txt`);
     assert.equal(secLegacy.status, 200);
+
+    const sitemap = await fetch(`${base}/sitemap.xml`);
+    assert.equal(sitemap.status, 200);
+    assert.match(sitemap.headers.get('content-type') || '', /application\/xml/);
   });
 });

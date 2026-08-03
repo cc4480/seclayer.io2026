@@ -4,6 +4,7 @@ import Dashboard from './pages/Dashboard.js';
 import ReportViewer from './pages/ReportViewer.js';
 import ScanProgress from './pages/ScanProgress.js';
 import PublicReport from './pages/PublicReport.js';
+import DocsPage from './pages/DocsPage.js';
 import LoginModal from './components/LoginModal.js';
 import { useSeclayer } from './hooks/useSeclayer.js';
 import { sameTarget } from './lib/targetUrl.js';
@@ -63,6 +64,8 @@ function AuthedApp() {
             }}
           />
         )}
+
+        {currentView === 'docs' && <DocsPage onNavigate={handleNavigate} />}
 
         {currentView === 'dashboard' && user && (
           <Dashboard
