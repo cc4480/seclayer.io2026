@@ -20,7 +20,7 @@ export default function BillingTab({ transactions }: { transactions: any[] }) {
               <th className="py-3 px-4">Transaction ID</th>
               <th className="py-3 px-4">Action Type</th>
               <th className="py-3 px-4">Amount</th>
-              <th className="py-3 px-4">Reference Reference ID</th>
+              <th className="py-3 px-4">Reference ID</th>
               <th className="py-3 px-4 text-right font-mono">Timestamp</th>
             </tr>
           </thead>
