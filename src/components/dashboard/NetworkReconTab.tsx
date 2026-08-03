@@ -1,7 +1,24 @@
 import { useState } from 'react';
-import { Radar, Globe, RefreshCw, ChevronDown, AlertTriangle, Info } from 'lucide-react';
+import { Radar, Globe, RefreshCw, ChevronDown, AlertTriangle, Info, Download } from 'lucide-react';
 import { useNmap } from '../../hooks/useNmap.js';
 import { NmapScan, NmapVulnFinding, NmapScriptOutcome } from '../../types.js';
+
+// Client-side only — scan.rawXml is nmap's own unmodified -oX output, already
+// sent to the client on every scan fetch (see src/types.ts's NmapScan). This
+// just gives it somewhere to go: independently verifiable proof the scan
+// actually ran, not just Seclayer's own rendering of it.
+function downloadRawXml(scan: NmapScan) {
+  if (!scan.rawXml) return;
+  const blob = new Blob([scan.rawXml], { type: 'application/xml' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `nmap-${scan.id}.xml`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 
 const STATUS_STYLE: Record<string, string> = {
   complete: 'bg-[#22c55e]/10 text-[#22c55e] border-[#22c55e]/30',
@@ -130,6 +147,17 @@ function ResultsView({ scan }: { scan: NmapScan }) {
               <ChevronDown className={`w-3 h-3 transition-transform ${showAllScripts ? 'rotate-180' : ''}`} />
               {showAllScripts ? 'Hide' : 'Show'} {otherScripts.length} clean / inconclusive / errored script result(s)
             </button>
+            {errored > 0 && (
+              <p className="text-[10px] font-mono text-[#a1a1aa] flex items-start gap-1.5 mt-2">
+                <Info className="w-3 h-3 text-[#52525b] shrink-0 mt-0.5" />
+                {errored} script{errored === 1 ? '' : 's'} failed to get a clean read rather than reporting a real
+                signal — this scan still completed successfully. It's common against a target sitting behind a
+                reverse proxy / PaaS edge (Replit, Vercel, Heroku, Cloudflare, etc.): the script expects to talk
+                directly to the origin server and gets an unexpected response shape from the edge layer instead, so
+                it errors or times out rather than producing a false result. A bare, unproxied host typically shows
+                zero script errors.
+              </p>
+            )}
             {showAllScripts && (
               <div className="space-y-2 mt-2">
                 {otherScripts.map((f, i) => <ScriptResultRow key={`${f.scriptId}-${i}`} f={f} />)}
@@ -139,10 +167,23 @@ function ResultsView({ scan }: { scan: NmapScan }) {
         )}
       </div>
 
-      <p className="text-[9px] font-mono text-[#52525b]">
-        Scanned {result.resolvedIp} with nmap {result.nmapVersion} in {Math.round(result.durationMs / 1000)}s
-        · {result.scanArgs.join(' ')}
-      </p>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <p className="text-[9px] font-mono text-[#52525b]">
+          Scanned {result.resolvedIp} with nmap {result.nmapVersion} in {Math.round(result.durationMs / 1000)}s
+          · {result.scanArgs.join(' ')}
+        </p>
+        {scan.rawXml && (
+          <button
+            type="button"
+            onClick={() => downloadRawXml(scan)}
+            className="flex items-center gap-1.5 px-2 py-1 rounded bg-black border border-[#27272a] hover:border-[#22c55e]/40 hover:text-[#22c55e] text-[#a1a1aa] text-[9px] font-mono uppercase tracking-wide transition-all cursor-pointer shrink-0"
+            title="Download nmap's unmodified -oX output — independent proof of exactly what ran and what it returned"
+          >
+            <Download className="w-3 h-3" />
+            <span>Download raw nmap XML</span>
+          </button>
+        )}
+      </div>
     </div>
   );
 }
