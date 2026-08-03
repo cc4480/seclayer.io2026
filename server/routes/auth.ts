@@ -75,9 +75,13 @@ export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
       return res.status(502).json({ status: "error", message: "Could not send the sign-in email. Please try again shortly." });
     }
     // The login link contains a live session-granting token, so it is ONLY ever
-    // returned in the response for local development (no email provider). In
-    // production it is never exposed — it is delivered by email exclusively.
-    const devLink = (!config.isProd && !isEmailConfigured()) ? link : undefined;
+    // returned in the response when there's no real email provider configured
+    // AND either we're not in production, or the operator has explicitly opted
+    // into running without one (ALLOW_MISSING_EMAIL_PROVIDER — private,
+    // single-operator instances only, e.g. local Docker testing; see
+    // config.ts). Any real deployment with an email provider configured never
+    // exposes it — it is delivered by email exclusively.
+    const devLink = !isEmailConfigured() && (!config.isProd || config.allowMissingEmailProvider) ? link : undefined;
     res.json({ status: "ok", message: "If that email is valid, a sign-in link is on its way.", devLink });
   });
 
