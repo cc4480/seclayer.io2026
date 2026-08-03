@@ -34,6 +34,8 @@ async function withScanApp(fn: (base: string, userId: string) => Promise<void>) 
     // No-op: these tests check the HTTP-layer credit/creation contract, not
     // the background scan pipeline.
     processScanJob: () => {},
+    processNmapScanJob: () => {},
+    nmapAvailable: false,
     cookieOptions: { httpOnly: true },
     sessionCookie: 'sl_session',
   });

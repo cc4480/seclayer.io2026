@@ -1,11 +1,11 @@
 import path from 'path';
 import crypto from 'crypto';
 import Database from 'better-sqlite3';
-import { User, Scan, CreditTransaction, ApiKey, Finding, SuppressionRule, MonitoredTarget, DomainVerification, OobEvent } from '../src/types.js';
+import { User, Scan, CreditTransaction, ApiKey, Finding, SuppressionRule, MonitoredTarget, DomainVerification, OobEvent, NmapScan } from '../src/types.js';
 import { scoreFindings } from './scoring.js';
 import { MonitorSchedule, computeNextRun, describeSchedule } from './schedule.js';
 import { runMigrations } from './dbSchema.js';
-import { rowToUser, rowToScan, rowToApiKey, rowToDomainVerification, rowToMonitoredTarget } from './dbMappers.js';
+import { rowToUser, rowToScan, rowToApiKey, rowToDomainVerification, rowToMonitoredTarget, rowToNmapScan } from './dbMappers.js';
 import { hashToken, maskKey } from './dbCrypto.js';
 
 const DB_FILE = process.env.DB_PATH || path.join(process.cwd(), 'data.sqlite');
@@ -373,6 +373,98 @@ class SqliteDb {
       id
     );
     return this.getScan(id)!;
+  }
+
+  // --- Network Reconnaissance (nmap) ---
+  // A fully independent scan type: its own table, its own lifecycle, never
+  // wired into scans/findings/scoring. Mirrors the Scans methods above almost
+  // verbatim, minus the 'analyzing' phase (there is no separate AI-analysis
+  // step — the whole run is one 'scanning' phase driven by a single process).
+  createNmapScan(userId: string, url: string): NmapScan {
+    const id = 'nmap_' + crypto.randomBytes(8).toString('hex');
+    const now = new Date().toISOString();
+    this.db.prepare('INSERT INTO nmap_scans (id, userId, url, status, createdAt) VALUES (?, ?, ?, ?, ?)')
+      .run(id, userId, url, 'queued', now);
+    return this.getNmapScan(id)!;
+  }
+
+  getNmapScan(id: string): NmapScan | undefined {
+    return rowToNmapScan(this.db.prepare('SELECT * FROM nmap_scans WHERE id = ?').get(id));
+  }
+
+  listNmapScans(userId: string): NmapScan[] {
+    const rows = this.db.prepare('SELECT * FROM nmap_scans WHERE userId = ? ORDER BY createdAt DESC').all(userId);
+    return rows.map(r => rowToNmapScan(r)!).filter(Boolean);
+  }
+
+  updateNmapScan(id: string, updates: Partial<NmapScan>): NmapScan {
+    const existing = this.getNmapScan(id);
+    if (!existing) throw new Error('Nmap scan not found');
+    const merged = { ...existing, ...updates };
+    this.db.prepare(`
+      UPDATE nmap_scans SET status = ?, resolvedIp = ?, nmapVersion = ?, result = ?, rawXml = ?, error = ?, startedAt = ?, completedAt = ?
+      WHERE id = ?
+    `).run(
+      merged.status,
+      merged.resolvedIp ?? null,
+      merged.nmapVersion ?? null,
+      merged.result ? JSON.stringify(merged.result) : null,
+      merged.rawXml ?? null,
+      merged.error ?? null,
+      merged.startedAt ?? null,
+      merged.completedAt ?? null,
+      id
+    );
+    return this.getNmapScan(id)!;
+  }
+
+  // User-initiated cancellation. Unlike cancelScan, this stops a genuinely
+  // killable process (see server/nmap/run.ts's killNmapProcess, invoked by the
+  // route right after this returns) rather than only guarding against a stale
+  // late write — nmap is exactly one OS process, so cancellation here is real.
+  cancelNmapScan(userId: string, scanId: string): NmapScan | null {
+    const scan = this.getNmapScan(scanId);
+    if (!scan || scan.userId !== userId) return null;
+    if (!['queued', 'scanning'].includes(scan.status)) return null;
+    const now = new Date().toISOString();
+    const tx = this.db.transaction(() => {
+      this.db.prepare("UPDATE nmap_scans SET status = 'canceled', error = ?, completedAt = ? WHERE id = ?")
+        .run('Canceled by user.', now, scanId);
+      this.addCredits(userId, 1, 'purchase');
+    });
+    tx();
+    return this.getNmapScan(scanId)!;
+  }
+
+  // Mirrors recoverStuckScans — called once at boot to fail any nmap scan
+  // orphaned by a crash/redeploy and refund the credit it spent.
+  recoverStuckNmapScans(): number {
+    const stuck = this.db.prepare(
+      "SELECT id, userId FROM nmap_scans WHERE status IN ('queued', 'scanning')"
+    ).all() as Array<{ id: string; userId: string }>;
+    if (stuck.length === 0) return 0;
+    const now = new Date().toISOString();
+    const tx = this.db.transaction(() => {
+      for (const s of stuck) {
+        this.db.prepare("UPDATE nmap_scans SET status = 'failed', error = ?, completedAt = ? WHERE id = ?").run(
+          'This scan was interrupted by a server restart and could not be resumed. Your credit has been refunded — please launch a new scan.',
+          now,
+          s.id
+        );
+        this.addCredits(s.userId, 1, 'purchase');
+      }
+    });
+    tx();
+    return stuck.length;
+  }
+
+  // Resource-ceiling guard, not an authorization restriction: at most one
+  // in-flight nmap scan per user at a time, since a full 65535-port +
+  // vuln-script sweep is heavy. The launch route 409s a second attempt.
+  hasInFlightNmapScan(userId: string): boolean {
+    return !!this.db.prepare(
+      "SELECT 1 FROM nmap_scans WHERE userId = ? AND status IN ('queued', 'scanning') LIMIT 1"
+    ).get(userId);
   }
 
   // --- API Keys ---

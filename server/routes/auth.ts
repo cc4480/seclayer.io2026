@@ -9,7 +9,7 @@ import { sendEmail, buildMagicLinkEmail, isEmailConfigured } from "../email.js";
 import type { RouteContext } from "./context.js";
 
 export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
-  const { requireAuth, getUserId, cookieOptions, sessionCookie } = ctx;
+  const { requireAuth, getUserId, cookieOptions, sessionCookie, nmapAvailable } = ctx;
 
   // Liveness + readiness probe. Actually pings the datastore rather than
   // reporting a hardcoded "Online", so an orchestrator (or the Docker
@@ -115,6 +115,15 @@ export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
     // to enable the active-scan UI; kept under the existing field name so nothing
     // downstream has to change.
     const activeProbesUnlocked = config.devSkipDomainVerification || config.allowUnverifiedActiveProbes;
-    res.json({ user, freeMode: config.freeMode, devSkipDomainVerification: activeProbesUnlocked, ...deepseekKeyStatus(db.getUserDeepseekKey(user.id)) });
+    res.json({
+      user,
+      freeMode: config.freeMode,
+      devSkipDomainVerification: activeProbesUnlocked,
+      // Network Reconnaissance (nmap) is only ever present in the self-hosted
+      // Docker image — this tells the client whether to render the feature at
+      // all, so it stays cleanly absent (not erroring) everywhere else.
+      nmapAvailable,
+      ...deepseekKeyStatus(db.getUserDeepseekKey(user.id)),
+    });
   });
 }

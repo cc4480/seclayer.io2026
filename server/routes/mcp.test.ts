@@ -17,6 +17,8 @@ async function withMcpApp(fn: (base: string) => Promise<void>) {
     requireAuth: (_req, _res, next) => next(),
     getUserId: () => '',
     processScanJob: () => {},
+    processNmapScanJob: () => {},
+    nmapAvailable: false,
     cookieOptions: { httpOnly: true },
     sessionCookie: 'sl_session',
   });

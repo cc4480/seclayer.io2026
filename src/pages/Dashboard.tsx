@@ -4,15 +4,18 @@ import { Scan, ApiKey, User } from '../types.js';
 import DashboardHeader from '../components/dashboard/DashboardHeader.js';
 import { useDomainVerification } from '../hooks/useDomainVerification.js';
 import { useMonitoring } from '../hooks/useMonitoring.js';
+import { useNmap } from '../hooks/useNmap.js';
 import ScanLauncher from '../components/dashboard/ScanLauncher.js';
 import CreditPacks from '../components/dashboard/CreditPacks.js';
 import DeepSeekKeyCard from '../components/dashboard/DeepSeekKeyCard.js';
 import ApiKeysPanel from '../components/dashboard/ApiKeysPanel.js';
+import NetworkReconCard from '../components/dashboard/NetworkReconCard.js';
 import ScansTab from '../components/dashboard/ScansTab.js';
 import MonitoringTab from '../components/dashboard/MonitoringTab.js';
 import ExclusionsTab from '../components/dashboard/ExclusionsTab.js';
 import BillingTab from '../components/dashboard/BillingTab.js';
 import ApiDocsTab from '../components/dashboard/ApiDocsTab.js';
+import NetworkReconTab from '../components/dashboard/NetworkReconTab.js';
 import { copyToClipboard } from '../lib/clipboard.js';
 
 // Persisted scan-launcher config so the advanced fields (auth header + the two
@@ -61,6 +64,7 @@ interface DashboardProps {
   refreshData: () => void;
   freeMode: boolean;
   devSkipDomainVerification: boolean;
+  nmapAvailable: boolean;
   deepseekKeySet: boolean;
   deepseekKeyPreview: string | null;
   saveDeepseekKey: (key: string) => Promise<{ ok: boolean; message?: string }>;
@@ -76,7 +80,7 @@ interface DashboardProps {
 
 export default function Dashboard({
   user, scans, apiKeys, credits, transactions, justGeneratedKey, onDismissGeneratedKey, refreshData, freeMode,
-  devSkipDomainVerification, deepseekKeySet, deepseekKeyPreview, saveDeepseekKey,
+  devSkipDomainVerification, nmapAvailable, deepseekKeySet, deepseekKeyPreview, saveDeepseekKey,
   onInitiateScan, onGenerateKey, onRevokeKey, onPurchaseCredits, onViewReport, isPerformingAction,
   checkoutNotice, onDismissCheckoutNotice,
 }: DashboardProps) {
@@ -106,7 +110,7 @@ export default function Dashboard({
   const [errorText, setErrorText] = useState('');
 
   const [copiedKeyId, setCopiedKeyId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'scans' | 'billing' | 'exclusions' | 'monitoring' | 'api-docs'>('scans');
+  const [activeTab, setActiveTab] = useState<'scans' | 'billing' | 'exclusions' | 'monitoring' | 'api-docs' | 'network-scans'>('scans');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterSeverity, setFilterSeverity] = useState('all');
@@ -116,6 +120,7 @@ export default function Dashboard({
 
   const dv = useDomainVerification(scanUrl, user.id);
   const m = useMonitoring(user, scans, refreshData);
+  const nm = useNmap(user);
 
   // --- Per-target memory ---
   // The current target's hostname (''/none until a URL is entered). Each host
@@ -256,6 +261,9 @@ export default function Dashboard({
               launchScan={launchScan} handleScanSubmit={handleScanSubmit} dv={dv} freeMode={freeMode}
               devSkipDomainVerification={devSkipDomainVerification}
             />
+            {nmapAvailable && (
+              <NetworkReconCard nm={nm} userId={user.id} freeMode={freeMode} devSkipDomainVerification={devSkipDomainVerification} />
+            )}
             {freeMode ? (
               <DeepSeekKeyCard deepseekKeySet={deepseekKeySet} deepseekKeyPreview={deepseekKeyPreview} saveDeepseekKey={saveDeepseekKey} />
             ) : (
@@ -277,6 +285,7 @@ export default function Dashboard({
           <div className="flex flex-wrap gap-1.5 border-b border-[#27272a]/80 mb-6">
             {tabButton('scans', `[+] Vulnerability Scans History (${scans.length})`)}
             {tabButton('monitoring', '[+] Continuous Monitoring')}
+            {nmapAvailable && tabButton('network-scans', `[+] Network Scans (${nm.nmapScans.length})`)}
             {tabButton('exclusions', `[+] Risk Exclusions & FP Rules (${m.suppressRules.length})`)}
             {tabButton('billing', `[+] Billing & Receipts Log (${transactions.length})`)}
             {tabButton('api-docs', '[+] API Documentation')}
@@ -292,6 +301,7 @@ export default function Dashboard({
             />
           )}
           {activeTab === 'monitoring' && <MonitoringTab m={m} onViewReport={onViewReport} />}
+          {activeTab === 'network-scans' && nmapAvailable && <NetworkReconTab nm={nm} />}
           {activeTab === 'exclusions' && <ExclusionsTab suppressRules={m.suppressRules} fetchSuppressRules={m.fetchSuppressRules} />}
           {activeTab === 'billing' && <BillingTab transactions={transactions} />}
           {activeTab === 'api-docs' && <ApiDocsTab notify={notify} />}

@@ -13,10 +13,18 @@ export type ProcessScanJob = (
   allowAggressiveProbes?: boolean,
 ) => void;
 
+export type ProcessNmapScanJob = (scanId: string) => void;
+
 export interface RouteContext {
   requireAuth: express.RequestHandler;
   getUserId: (req: express.Request) => string;
   processScanJob: ProcessScanJob;
+  processNmapScanJob: ProcessNmapScanJob;
+  // Whether the nmap binary was detected at boot — probed once (see
+  // server/nmap/detect.ts) and threaded through here rather than read from
+  // the singleton directly in each route module, matching how
+  // processScanJob/oobCollaborator are already injected.
+  nmapAvailable: boolean;
   oobCollaborator?: OobCollaborator;
   cookieOptions: express.CookieOptions;
   sessionCookie: string;

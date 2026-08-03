@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet href="file:///usr/share/nmap/nmap.xsl" type="text/xsl"?>
+<nmaprun scanner="nmap" args="nmap -p- -sV -O --script vuln -T4 --host-timeout 25m --stats-every 10s -oX - 203.0.113.10" start="1735689600" startstr="Wed Jan  1 00:00:00 2025" version="7.94" xmloutputversion="1.05">
+  <host starttime="1735689600" endtime="1735689720">
+    <status state="up" reason="syn-ack" reason_ttl="64"/>
+    <address addr="203.0.113.10" addrtype="ipv4"/>
+    <hostnames>
+      <hostname name="scan-me.test" type="user"/>
+    </hostnames>
+    <ports>
+      <extraports state="closed" count="65533">
+        <extrareasons reason="resets" count="65533"/>
+      </extraports>
+      <port protocol="tcp" portid="22">
+        <state state="open" reason="syn-ack" reason_ttl="64"/>
+        <service name="ssh" product="OpenSSH" version="7.6p1 Ubuntu 4ubuntu0.7" extrainfo="Ubuntu Linux; protocol 2.0" method="probed" conf="10"/>
+      </port>
+      <port protocol="tcp" portid="80">
+        <state state="open" reason="syn-ack" reason_ttl="64"/>
+        <service name="http" product="Apache httpd" version="2.4.29" extrainfo="(Ubuntu)" method="probed" conf="10"/>
+        <script id="http-vuln-cve2021-41773" output="VULNERABLE:&#10;Apache path traversal and remote code execution&#10;  State: VULNERABLE (Exploitable)&#10;  IDs:  CVE:CVE-2021-41773&#10;  Apache 2.4.49 and 2.4.50 mod_cgi path traversal."/>
+      </port>
+      <port protocol="tcp" portid="3306">
+        <state state="open" reason="syn-ack" reason_ttl="64"/>
+        <service name="mysql" product="MySQL" version="5.7.30" method="probed" conf="10"/>
+        <script id="mysql-vuln-cve2012-2122" output="VULNERABLE:&#10;MySQL and MariaDB weak password authentication scramble&#10;  State: VULNERABLE&#10;  IDs:  CVE:CVE-2012-2122"/>
+      </port>
+    </ports>
+    <os>
+      <osmatch name="Linux 5.0 - 5.14" accuracy="95" line="12345">
+        <osclass type="general purpose" vendor="Linux" osfamily="Linux" osgen="5.X" accuracy="95"/>
+      </osmatch>
+      <osmatch name="Linux 4.15 - 5.6" accuracy="90" line="23456">
+        <osclass type="general purpose" vendor="Linux" osfamily="Linux" osgen="4.X" accuracy="90"/>
+      </osmatch>
+    </os>
+    <hostscript>
+      <script id="clock-skew" output="mean: 1s, deviation: 0s, median: 1s"/>
+    </hostscript>
+    <times srtt="1234" rttvar="567" to="100000"/>
+  </host>
+  <runstats>
+    <finished time="1735689720" timestr="Wed Jan  1 00:02:00 2025" summary="Nmap done at Wed Jan  1 00:02:00 2025; 1 IP address (1 host up) scanned in 120.00 seconds" elapsed="120.00" exit="success"/>
+    <hosts up="1" down="0" total="1"/>
+  </runstats>
+</nmaprun>

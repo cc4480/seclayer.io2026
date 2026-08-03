@@ -272,3 +272,72 @@ export interface DomainVerification {
   // How ownership was established: 'dns' or 'file' (cryptographic proof).
   method?: 'dns' | 'file';
 }
+
+// --- Network Reconnaissance (nmap) ---
+// A fully independent scan type: its own table, own lifecycle, own history —
+// never wired into Scan/Finding, and never scored. There is no 'analyzing'
+// phase (unlike ScanStatus) because there's no separate AI-analysis step; the
+// whole run is one 'scanning' phase driven by a single nmap process.
+export type NmapScanStatus = 'queued' | 'scanning' | 'complete' | 'failed' | 'canceled';
+
+export interface NmapPortScript {
+  id: string;     // NSE script id, e.g. "vulners", "http-vuln-cve2021-41773"
+  output: string; // raw script output text
+}
+
+export interface NmapPort {
+  port: number;
+  protocol: 'tcp' | 'udp';
+  state: string; // "open" | "closed" | "filtered" | "open|filtered"
+  service?: string;
+  product?: string;
+  version?: string;
+  extraInfo?: string;
+  scripts: NmapPortScript[];
+}
+
+// nmap's own 0-100 confidence — NOT a PROVEN/DETECTED security evidence tier
+// (see NmapVulnFinding below for that distinction).
+export interface NmapOsMatch {
+  name: string;
+  accuracy: number;
+}
+
+// A single NSE `vuln`-category script hit. Deliberately its own shape — never
+// a Finding, never an ExploitEvidence, never touches scoring — so nmap output
+// is structurally incapable of affecting the 0-100 AppSec posture score.
+// Always rendered as DETECTED, never PROVEN: these are banner/version
+// signature matches, not a replayable exploit receipt.
+export interface NmapVulnFinding {
+  port?: number; // undefined = host-level script
+  scriptId: string;
+  output: string;
+}
+
+export interface NmapResult {
+  scannedAt: string;
+  targetHost: string;
+  resolvedIp: string;
+  state: 'up' | 'down';
+  ports: NmapPort[];
+  osMatches: NmapOsMatch[];
+  vulnFindings: NmapVulnFinding[];
+  nmapVersion: string;
+  scanArgs: string[]; // transparency: exactly what ran
+  durationMs: number;
+}
+
+export interface NmapScan {
+  id: string;
+  userId: string;
+  url: string;
+  resolvedIp?: string;
+  status: NmapScanStatus;
+  nmapVersion?: string;
+  result?: NmapResult;
+  rawXml?: string; // full transparency, mirrors the rest of the product's raw-evidence ethos
+  error?: string;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+}

@@ -25,6 +25,8 @@ async function withAccountApp(
     requireAuth: (req, _res, next) => { (req as any).userId = user.id; next(); },
     getUserId: (req) => (req as any).userId,
     processScanJob: opts.processScanJob || (() => {}),
+    processNmapScanJob: () => {},
+    nmapAvailable: false,
     cookieOptions: { httpOnly: true },
     sessionCookie: 'sl_session',
   });

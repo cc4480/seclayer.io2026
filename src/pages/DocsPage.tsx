@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Code, Globe, Zap, Package, Grid, Server, Terminal, ArrowLeft } from 'lucide-react';
+import { Code, Globe, Zap, Package, Grid, Server, Terminal, ArrowLeft, Radar } from 'lucide-react';
 
 interface DocsPageProps {
   onNavigate: (view: string, arg?: string) => void;
@@ -49,6 +49,7 @@ const TOC = [
   { id: 'evidence', label: 'PROVEN vs DETECTED' },
   { id: 'ownership', label: 'Domain ownership' },
   { id: 'scoring', label: 'Scoring & grading' },
+  { id: 'network-recon', label: 'Network Reconnaissance (nmap)' },
   { id: 'ai-reports', label: 'AI-generated reports' },
   { id: 'mcp-api', label: 'MCP & API access' },
   { id: 'data', label: 'Data handling & privacy' },
@@ -209,6 +210,31 @@ export default function DocsPage({ onNavigate }: DocsPageProps) {
                 One more rule sits on top: the grade is anchored to the worst CONFIRMED severity on the report. A
                 single proven critical always fails the grade, no matter how clean everything else scores — a real
                 vulnerability can never be diluted away by a good average.
+              </p>
+            </Section>
+
+            <Section id="network-recon" title="Network Reconnaissance (nmap)">
+              <p className="flex items-center gap-2 text-white">
+                <Radar className="w-4 h-4 text-[#22c55e]" aria-hidden="true" />
+                <span>A fully independent scan, separate from the seven pillars above.</span>
+              </p>
+              <p>
+                Network Reconnaissance runs a real, full-depth nmap sweep of a verified target — every port,
+                service and version fingerprint, an OS guess, and NSE vulnerability-script results — as its own
+                scan type, with its own history. It never touches the seven AppSec pillars, and it never affects
+                your 0–100 posture score: the two are structurally kept apart end to end.
+              </p>
+              <p>
+                It shares the same domain-ownership verification gate as the RED_TEAM and API_SEC pillars — no
+                separate authorization step to learn. Vulnerability-script hits are always shown as{' '}
+                <strong className="text-white">DETECTED</strong>, the same evidence tier used everywhere else on
+                the report for a real signal that wasn't demonstrated end-to-end: nmap's NSE scripts match on
+                service banners and version strings, which is a strong signal, not a replayable exploit receipt.
+              </p>
+              <p>
+                Self-hosted only. Nmap is a real system binary, not something a serverless platform can run, so
+                this capability is only present when Seclayer is deployed via the included Docker image — it's
+                cleanly absent everywhere else, including the hosted seclayer.io, with no error and no broken UI.
               </p>
             </Section>
 

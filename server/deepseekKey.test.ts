@@ -44,6 +44,8 @@ async function withAccountApp(userId: string, fn: (base: string) => Promise<void
     requireAuth: (req, _res, next) => { (req as any).userId = userId; next(); },
     getUserId: (req) => (req as any).userId,
     processScanJob: () => {},
+    processNmapScanJob: () => {},
+    nmapAvailable: false,
     cookieOptions: { httpOnly: true },
     sessionCookie: 'sl_session',
   });

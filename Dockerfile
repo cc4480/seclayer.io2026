@@ -13,6 +13,21 @@ ENV NODE_ENV=production \
     PORT=3000 \
     DB_PATH=/data/seclayer.sqlite
 
+# Network Reconnaissance: install nmap and grant its binary the raw-socket
+# capability SYN scan (-sS) and OS detection (-O) need, via a file capability
+# on the binary itself rather than running the whole container as root or
+# requiring --cap-add at `docker run` time — least privilege, works out of
+# the box. (Some hardened `docker run --cap-drop=ALL` setups still need
+# --cap-add=NET_RAW --cap-add=NET_ADMIN added back — see DEPLOY.md.) If the
+# binary is ever missing/unrunnable, the app feature-detects that at boot
+# (server/nmap/detect.ts) and cleanly hides the whole feature instead of
+# erroring — this is what makes it PRESENT on this self-hosted image while
+# staying absent on the Vercel-hosted deployment.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends nmap libcap2-bin && \
+    setcap cap_net_raw,cap_net_admin+eip "$(command -v nmap)" && \
+    rm -rf /var/lib/apt/lists/*
+
 # Carry over pruned node_modules (incl. the prebuilt better-sqlite3 binary).
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist

@@ -26,7 +26,7 @@ export default function App() {
 
 function AuthedApp() {
   const {
-    user, scans, apiKeys, credits, transactions, freeMode, devSkipDomainVerification, justGeneratedKey, setJustGeneratedKey,
+    user, scans, apiKeys, credits, transactions, freeMode, devSkipDomainVerification, nmapAvailable, justGeneratedKey, setJustGeneratedKey,
     deepseekKeySet, deepseekKeyPreview, saveDeepseekKey,
     currentView, setCurrentView, selectedScanId, setSelectedScanId, showLogin, setShowLogin,
     isPerformingAction, activeScan, checkoutNotice, setCheckoutNotice,
@@ -79,6 +79,7 @@ function AuthedApp() {
             refreshData={loadUserContext}
             freeMode={freeMode}
             devSkipDomainVerification={devSkipDomainVerification}
+            nmapAvailable={nmapAvailable}
             deepseekKeySet={deepseekKeySet}
             deepseekKeyPreview={deepseekKeyPreview}
             saveDeepseekKey={saveDeepseekKey}

@@ -127,6 +127,21 @@ export function runMigrations(db: Database.Database): void {
       receivedAt TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_oob_events_token ON oob_events(token);
+    CREATE TABLE IF NOT EXISTS nmap_scans (
+      id TEXT PRIMARY KEY,
+      userId TEXT NOT NULL,
+      url TEXT NOT NULL,
+      resolvedIp TEXT,
+      status TEXT NOT NULL,
+      nmapVersion TEXT,
+      result TEXT,
+      rawXml TEXT,
+      error TEXT,
+      createdAt TEXT NOT NULL,
+      startedAt TEXT,
+      completedAt TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_nmap_scans_user ON nmap_scans(userId);
   `);
 
   // Additive column migrations (safe across existing databases).

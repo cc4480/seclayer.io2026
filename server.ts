@@ -8,11 +8,14 @@ import { config, validateConfigOnBoot } from './server/config.js';
 import { parseWebhookEvent } from './server/stripe.js';
 import { createOobCollaborator } from './server/oob.js';
 import { makeProcessScanJob } from './server/scanWorker.js';
+import { processNmapScanJob } from './server/nmapWorker.js';
+import { detectNmap } from './server/nmap/detect.js';
 import { startMonitorWorker } from './server/monitorWorker.js';
 import { startDigestWorker } from './server/digestWorker.js';
 import { startBackupWorker } from './server/backupWorker.js';
 import { registerAuthRoutes } from './server/routes/auth.js';
 import { registerScanRoutes } from './server/routes/scans.js';
+import { registerNmapRoutes } from './server/routes/nmap.js';
 import { registerAccountRoutes } from './server/routes/account.js';
 import { registerDomainRoutes } from './server/routes/domains.js';
 import { registerMcpRoutes } from './server/routes/mcp.js';
@@ -37,6 +40,22 @@ async function startServer() {
   if (recovered > 0) {
     console.log(`[server] Recovered ${recovered} scan(s) left mid-flight by a prior process — marked failed and refunded.`);
   }
+  const recoveredNmap = db.recoverStuckNmapScans();
+  if (recoveredNmap > 0) {
+    console.log(`[server] Recovered ${recoveredNmap} network reconnaissance scan(s) left mid-flight by a prior process — marked failed and refunded.`);
+  }
+
+  // Network Reconnaissance (nmap) feature detection — probed once at boot and
+  // memoized; the feature stays cleanly absent (not erroring) whenever the
+  // binary isn't present, e.g. the Vercel-hosted deployment or a bare local
+  // checkout without nmap installed. Only ever present in the self-hosted
+  // Docker image (see Dockerfile).
+  const nmapDetection = await detectNmap();
+  console.log(
+    nmapDetection.available
+      ? `[config] nmap ${nmapDetection.version} detected — Network Reconnaissance is available.`
+      : `[config] nmap not available (${nmapDetection.error}) — Network Reconnaissance is disabled on this deployment.`
+  );
 
   // Out-of-band collaborator for blind-vuln proofs. Needs a base URL the SCANNED
   // TARGET can reach back on — APP_URL in production (OOB_BASE_URL overrides it,
@@ -124,10 +143,13 @@ async function startServer() {
 
   // --- API ROUTES ---
   const ctx: RouteContext = {
-    requireAuth, getUserId, processScanJob, oobCollaborator, cookieOptions, sessionCookie: SESSION_COOKIE,
+    requireAuth, getUserId, processScanJob, processNmapScanJob,
+    nmapAvailable: nmapDetection.available,
+    oobCollaborator, cookieOptions, sessionCookie: SESSION_COOKIE,
   };
   registerAuthRoutes(app, ctx);
   registerScanRoutes(app, ctx);
+  registerNmapRoutes(app, ctx);
   registerAccountRoutes(app, ctx);
   registerDomainRoutes(app, ctx);
   registerMcpRoutes(app, ctx);

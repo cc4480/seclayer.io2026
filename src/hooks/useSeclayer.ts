@@ -18,6 +18,9 @@ export function useSeclayer() {
   // DNS/file domain-ownership step. Lets the launcher skip the verify gate while
   // testing locally. Always false in production. Sourced from /api/auth/me.
   const [devSkipDomainVerification, setDevSkipDomainVerification] = useState(false);
+  // Network Reconnaissance (nmap) — only present in the self-hosted Docker
+  // image; absent (not erroring) everywhere else. Sourced from /api/auth/me.
+  const [nmapAvailable, setNmapAvailable] = useState(false);
   // Personal DeepSeek key (bring-your-own-key) status. The raw key is never sent
   // to the client — only whether one is set and a masked preview.
   const [deepseekKeySet, setDeepseekKeySet] = useState(false);
@@ -76,6 +79,7 @@ export function useSeclayer() {
       setCredits(userData.user.credits);
       setFreeMode(!!userData.freeMode);
       setDevSkipDomainVerification(!!userData.devSkipDomainVerification);
+      setNmapAvailable(!!userData.nmapAvailable);
       setDeepseekKeySet(!!userData.deepseekKeySet);
       setDeepseekKeyPreview(userData.deepseekKeyPreview ?? null);
 
@@ -309,7 +313,7 @@ export function useSeclayer() {
   const activeScan = scans.find(s => s.id === selectedScanId);
 
   return {
-    user, scans, apiKeys, credits, transactions, freeMode, devSkipDomainVerification, justGeneratedKey, setJustGeneratedKey,
+    user, scans, apiKeys, credits, transactions, freeMode, devSkipDomainVerification, nmapAvailable, justGeneratedKey, setJustGeneratedKey,
     deepseekKeySet, deepseekKeyPreview, saveDeepseekKey,
     currentView, setCurrentView, selectedScanId, setSelectedScanId, showLogin, setShowLogin,
     isPerformingAction, activeScan, checkoutNotice, setCheckoutNotice,

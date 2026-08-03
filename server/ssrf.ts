@@ -54,8 +54,9 @@ function isDevAllowedHost(parsedUrl: URL): boolean {
 // Hostname-level view of the dev allowlist. The connect-time DNS lookup only
 // sees a hostname (never a port), so this matches on the host part alone; a
 // listed loopback test target still connects in dev. Hard-off in production,
-// exactly like isDevAllowedHost.
-function isDevAllowedHostname(hostname: string): boolean {
+// exactly like isDevAllowedHost. Exported for non-HTTP consumers (e.g.
+// server/nmap/resolve.ts) that need the same bypass outside guardedFetch.
+export function isDevAllowedHostname(hostname: string): boolean {
   if (process.env.NODE_ENV === "production") return false;
   const allow = (process.env.SCAN_DEV_ALLOW_HOSTS || "")
     .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);

@@ -35,6 +35,7 @@ if a production-critical value is missing (see `server/config.ts`).
 | `FREE_MODE` | on when Stripe unset | Free public testing: scans require no credits and the paywall is hidden. Defaults ON whenever Stripe isn't configured, OFF once it is. Set `FREE_MODE=false` to force paid mode, or `FREE_MODE=true` to keep it free even with Stripe configured. |
 | `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` | purchases disabled | Enable real credit purchases via Stripe Checkout. Both must be set. Setting them also flips the `FREE_MODE` default to off. |
 | `OOB_BASE_URL` | falls back to `APP_URL` | Base URL the *scanned target* can call back on for blind-SSRF proofs. Set only if it differs from `APP_URL`. |
+| `NMAP_SCAN_TIMEOUT_MS` | `1800000` (30 min) | Hard timeout for a single Network Reconnaissance scan (see §7). Resource ceiling, not a scope limit. |
 
 ### Do NOT set in production
 
@@ -107,7 +108,34 @@ claude mcp add seclayer -- npx -y @seclayer/mcp --key YOUR_API_KEY
 
 Override the backend with `--url` / `SECLAYER_API_URL` for self-hosted installs.
 
-## 7. Pre-production checklist
+## 7. Network Reconnaissance (nmap) — optional, self-hosted only
+
+Nmap ships baked into the Docker image (installed + `setcap` in the
+Dockerfile — see its comments) with no extra `docker run` flags needed. The
+app probes for the binary once at boot and cleanly hides the whole feature
+(no error, no partial UI) whenever it isn't present or runnable — which is
+always the case on the Vercel-hosted deployment and any local `npm run dev`
+checkout without nmap installed manually.
+
+- **Works out of the box** on `docker run` with no extra flags — the image
+  grants the nmap binary `CAP_NET_RAW`/`CAP_NET_ADMIN` directly via `setcap`,
+  not the container process.
+- **Hardened setups**: if you run with `--cap-drop=ALL` (or an equivalent
+  Kubernetes `securityContext`), `setcap` alone can't grant a capability
+  outside the container's bounding set — add `--cap-add=NET_RAW
+  --cap-add=NET_ADMIN` back explicitly.
+- **Without those capabilities at all**, nmap degrades gracefully rather than
+  failing: it falls back to a TCP connect scan instead of a SYN scan, and OS
+  detection (`-O`) simply reports no match instead of erroring.
+- Same domain-ownership verification gate as every other active probe (DNS
+  TXT record or well-known file) — no separate authorization step to
+  configure.
+- Verify it's live: the console UI's "Network Reconnaissance" card only
+  renders when the backend reports the feature available (`nmapAvailable` on
+  `GET /api/auth/me`); if it's silently absent, check the boot log for
+  `[config] nmap ... — Network Reconnaissance is disabled on this deployment.`
+
+## 8. Pre-production checklist
 
 - [ ] Required env vars set (`NODE_ENV`, `APP_URL`, `RESEND_API_KEY`); optional
       keys set for any feature you want live (AI reports, payments).
@@ -121,6 +149,9 @@ Override the backend with `--url` / `SECLAYER_API_URL` for self-hosted installs.
       derives Secure cookies / client IP from `X-Forwarded-*` in production).
 - [ ] Stripe webhook configured (if payments are enabled).
 - [ ] `@seclayer/mcp` published (if you advertise the MCP integration).
+- [ ] If advertising Network Reconnaissance, confirm the boot log shows nmap
+      detected, and that a real scan against a target you own completes
+      (see §7 — capability caveats for hardened `docker run` configs).
 - [ ] `npm audit` reviewed — clean at time of writing (0 advisories).
 - [ ] One real Docker image build + smoke test in the target environment
       (CI builds the app and both test suites, but does not build the image).
