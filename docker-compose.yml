@@ -1,0 +1,28 @@
+# Convenience wrapper around `docker build` + `docker run` (see DEPLOY.md §3).
+# Builds the same self-hosted image — nmap included, with its binary scoped
+# via setcap in the Dockerfile. That setcap alone is NOT enough: Docker's
+# default capability set does not include NET_ADMIN (only NET_RAW), so nmap
+# fails to even exec ("spawn EPERM") without cap_add below — confirmed by
+# booting the built image with and without these flags. This is required on
+# every `docker run`/compose invocation, not just hardened cap-drop setups
+# (see DEPLOY.md §7). Copy .env.example to .env and fill in at least
+# APP_URL + RESEND_API_KEY before `docker compose up` (the app refuses to
+# boot in production without them — see server/config.ts).
+services:
+  seclayer:
+    build: .
+    container_name: seclayer
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    ports:
+      - "3000:3000"
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - seclayer-data:/data
+
+volumes:
+  seclayer-data:

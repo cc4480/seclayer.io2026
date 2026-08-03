@@ -46,6 +46,17 @@ if a production-critical value is missing (see `server/config.ts`).
 
 ### Docker (recommended)
 
+**Via docker compose** (simplest — reads secrets from a `.env` file you
+control, persists the DB on a named volume, and already passes the
+`--cap-add` flags Network Reconnaissance needs — see §7):
+
+```bash
+cp .env.example .env   # fill in at least APP_URL + RESEND_API_KEY
+docker compose up -d --build
+```
+
+**Via plain `docker run`:**
+
 ```bash
 docker build -t seclayer .
 docker run -d --name seclayer \
@@ -54,7 +65,9 @@ docker run -d --name seclayer \
   -e NODE_ENV=production \
   -e APP_URL=https://your-host \
   -e RESEND_API_KEY=re_... \
+  --cap-add=NET_ADMIN --cap-add=NET_RAW \
   # optional: DEEPSEEK_API_KEY, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET
+  # omit the two --cap-add flags if you don't need Network Reconnaissance
   seclayer
 ```
 
@@ -111,22 +124,26 @@ Override the backend with `--url` / `SECLAYER_API_URL` for self-hosted installs.
 ## 7. Network Reconnaissance (nmap) — optional, self-hosted only
 
 Nmap ships baked into the Docker image (installed + `setcap` in the
-Dockerfile — see its comments) with no extra `docker run` flags needed. The
-app probes for the binary once at boot and cleanly hides the whole feature
-(no error, no partial UI) whenever it isn't present or runnable — which is
-always the case on the Vercel-hosted deployment and any local `npm run dev`
-checkout without nmap installed manually.
+Dockerfile — see its comments). The app probes for the binary once at boot
+and cleanly hides the whole feature (no error, no partial UI) whenever it
+isn't present or runnable — which is always the case on the Vercel-hosted
+deployment and any local `npm run dev` checkout without nmap installed
+manually.
 
-- **Works out of the box** on `docker run` with no extra flags — the image
-  grants the nmap binary `CAP_NET_RAW`/`CAP_NET_ADMIN` directly via `setcap`,
-  not the container process.
-- **Hardened setups**: if you run with `--cap-drop=ALL` (or an equivalent
-  Kubernetes `securityContext`), `setcap` alone can't grant a capability
-  outside the container's bounding set — add `--cap-add=NET_RAW
-  --cap-add=NET_ADMIN` back explicitly.
-- **Without those capabilities at all**, nmap degrades gracefully rather than
-  failing: it falls back to a TCP connect scan instead of a SYN scan, and OS
-  detection (`-O`) simply reports no match instead of erroring.
+- **Requires `--cap-add=NET_ADMIN --cap-add=NET_RAW` on every `docker run`
+  (or the equivalent in compose/Kubernetes)** — confirmed by booting the
+  built image with and without these flags. `setcap` in the Dockerfile
+  scopes the capability to the nmap binary itself (least privilege — the
+  Node process doesn't get it), but a binary's file capabilities can never
+  exceed the container's own capability bounding set, and Docker's default
+  set includes `NET_RAW` but **not** `NET_ADMIN`. Without both flags, nmap
+  fails to even exec (`spawn EPERM`) and the feature silently stays
+  detected-absent — this is not limited to hardened `--cap-drop=ALL` setups,
+  it's the default-Docker behavior. `docker-compose.yml` already sets both;
+  the plain `docker run` example in §3 does too.
+- **Without those capabilities at all**, the whole binary fails to exec
+  rather than degrading — the two flags above are required, not optional,
+  whenever this feature should be live.
 - Same domain-ownership verification gate as every other active probe (DNS
   TXT record or well-known file) — no separate authorization step to
   configure.
@@ -149,9 +166,9 @@ checkout without nmap installed manually.
       derives Secure cookies / client IP from `X-Forwarded-*` in production).
 - [ ] Stripe webhook configured (if payments are enabled).
 - [ ] `@seclayer/mcp` published (if you advertise the MCP integration).
-- [ ] If advertising Network Reconnaissance, confirm the boot log shows nmap
-      detected, and that a real scan against a target you own completes
-      (see §7 — capability caveats for hardened `docker run` configs).
+- [ ] If advertising Network Reconnaissance, confirm `--cap-add=NET_ADMIN
+      --cap-add=NET_RAW` is set (see §7), the boot log shows nmap detected,
+      and that a real scan against a target you own completes.
 - [ ] `npm audit` reviewed — clean at time of writing (0 advisories).
 - [ ] One real Docker image build + smoke test in the target environment
       (CI builds the app and both test suites, but does not build the image).

@@ -15,14 +15,18 @@ ENV NODE_ENV=production \
 
 # Network Reconnaissance: install nmap and grant its binary the raw-socket
 # capability SYN scan (-sS) and OS detection (-O) need, via a file capability
-# on the binary itself rather than running the whole container as root or
-# requiring --cap-add at `docker run` time — least privilege, works out of
-# the box. (Some hardened `docker run --cap-drop=ALL` setups still need
-# --cap-add=NET_RAW --cap-add=NET_ADMIN added back — see DEPLOY.md.) If the
-# binary is ever missing/unrunnable, the app feature-detects that at boot
-# (server/nmap/detect.ts) and cleanly hides the whole feature instead of
-# erroring — this is what makes it PRESENT on this self-hosted image while
-# staying absent on the Vercel-hosted deployment.
+# on the binary itself rather than running the whole container as root —
+# least privilege at the process level. This alone is NOT sufficient at
+# `docker run` time, though: Docker's default capability set includes
+# NET_RAW but not NET_ADMIN, and a binary's file capabilities can never
+# exceed the container's own bounding set — without --cap-add=NET_ADMIN
+# (NET_RAW is already default, but pass both for clarity) nmap fails to even
+# exec ("spawn EPERM"), on every docker run, not just hardened
+# --cap-drop=ALL setups. See docker-compose.yml / DEPLOY.md §7 for the
+# required flags. If the binary is ever missing/unrunnable, the app
+# feature-detects that at boot (server/nmap/detect.ts) and cleanly hides the
+# whole feature instead of erroring — this is what makes it PRESENT on this
+# self-hosted image while staying absent on the Vercel-hosted deployment.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends nmap libcap2-bin && \
     setcap cap_net_raw,cap_net_admin+eip "$(command -v nmap)" && \
