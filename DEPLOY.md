@@ -36,6 +36,7 @@ if a production-critical value is missing (see `server/config.ts`).
 | `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` | purchases disabled | Enable real credit purchases via Stripe Checkout. Both must be set. Setting them also flips the `FREE_MODE` default to off. |
 | `OOB_BASE_URL` | falls back to `APP_URL` | Base URL the *scanned target* can call back on for blind-SSRF proofs. Set only if it differs from `APP_URL`. |
 | `NMAP_SCAN_TIMEOUT_MS` | `1800000` (30 min) | Hard timeout for a single Network Reconnaissance scan (see §7). Resource ceiling, not a scope limit. |
+| `ALLOW_MISSING_EMAIL_PROVIDER` | off | Lets production boot without `RESEND_API_KEY`; sign-in links are logged to the console instead of emailed. Auth itself is unchanged (still a real one-time token) — only safe on a private, single-operator instance (e.g. local Docker) where you can read your own logs. |
 
 ### Do NOT set in production
 
@@ -54,6 +55,10 @@ control, persists the DB on a named volume, and already passes the
 cp .env.example .env   # fill in at least APP_URL + RESEND_API_KEY
 docker compose up -d --build
 ```
+
+No `RESEND_API_KEY` yet? For local-only use you can set
+`ALLOW_MISSING_EMAIL_PROVIDER=true` in `.env` instead — sign-in links get
+logged to `docker compose logs` rather than emailed (see the table above).
 
 **Via plain `docker run`:**
 

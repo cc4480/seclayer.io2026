@@ -53,6 +53,17 @@ export const config = {
   // an instance other people can reach or sign into: it re-opens the "aim active
   // exploits at any domain" surface the ownership gate exists to close.
   allowUnverifiedActiveProbes: process.env.ALLOW_UNVERIFIED_ACTIVE_PROBES === 'true',
+  // OPERATOR opt-in (works in production too): permit boot without a real email
+  // provider. This does NOT weaken auth - the magic-link token, its single-use
+  // redemption and 15-minute expiry are unchanged (see routes/auth.ts); it only
+  // changes delivery: server/email.ts already logs the link to the console
+  // whenever RESEND_API_KEY is unset, this just lets that fallback run on a
+  // production boot instead of being treated as fatal misconfiguration. Intended
+  // for a private, single-operator instance (e.g. local Docker) where you read
+  // your own sign-in link from `docker logs`/console instead of an inbox. Do NOT
+  // enable it on an instance other people might try to sign into - they would
+  // have no way to receive their link.
+  allowMissingEmailProvider: process.env.ALLOW_MISSING_EMAIL_PROVIDER === 'true',
 };
 
 // Logs configuration warnings; returns false if a production-critical setting is
@@ -86,8 +97,12 @@ export function validateConfigOnBoot(): boolean {
       prodCriticalMissing = true;
     }
     if (!config.emailConfigured) {
-      warnings.push('Running in production without an email provider: users will NOT receive sign-in links.');
-      prodCriticalMissing = true;
+      if (config.allowMissingEmailProvider) {
+        warnings.push('ALLOW_MISSING_EMAIL_PROVIDER is on — running in production without an email provider; sign-in links are written to the console instead of emailed. Only safe on a private, single-operator instance.');
+      } else {
+        warnings.push('Running in production without an email provider: users will NOT receive sign-in links.');
+        prodCriticalMissing = true;
+      }
     }
   }
 
