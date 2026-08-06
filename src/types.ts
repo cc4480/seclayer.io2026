@@ -352,3 +352,22 @@ export interface NmapScan {
   startedAt?: string;
   completedAt?: string;
 }
+
+export type AutofixSessionStatus = 'active' | 'done' | 'expired';
+
+// One "fix this one finding" attempt run by a CI job via the @seclayer/mcp
+// autofix CLI. The session itself never holds source code or file contents —
+// those live only in the caller's own CI runner, exchanged turn-by-turn as
+// tool calls/results. This row exists purely for auth/credit accounting,
+// turn-cap enforcement, and audit history.
+export interface AutofixSession {
+  id: string;
+  userId: string;
+  targetUrl: string;
+  findingTitle: string;
+  findingCategory: string;
+  status: AutofixSessionStatus;
+  turns: number;
+  createdAt: string;
+  updatedAt: string;
+}

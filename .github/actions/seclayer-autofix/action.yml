@@ -1,0 +1,56 @@
+name: 'Seclayer Auto-fix'
+description: 'Scan a target and open a pull request per proven, high-confidence finding, fixed by an AI agent running inside this job.'
+branding:
+  icon: 'shield'
+  color: 'green'
+inputs:
+  url:
+    description: 'Target URL to scan, including scheme (e.g. https://staging.example.com).'
+    required: true
+  api-key:
+    description: 'Seclayer API key. Store it as a repository secret and pass it here. No other secret is required — the fix agent is billed through this key''s credits.'
+    required: true
+  fail-on:
+    description: 'Minimum finding severity eligible for auto-fix: info | low | medium | high | critical.'
+    required: false
+    default: 'high'
+  max-fixes:
+    description: 'Maximum number of findings to attempt (and PRs to open) in one run.'
+    required: false
+    default: '3'
+  test-command:
+    description: 'Optional command the fix agent may run to check its own work (e.g. "npm test"). If unset, the agent has no way to run tests.'
+    required: false
+    default: ''
+  base-branch:
+    description: 'Branch name PRs are opened against. Defaults to the workflow''s own ref (GITHUB_HEAD_REF/GITHUB_REF_NAME), falling back to "main".'
+    required: false
+    default: ''
+  api-url:
+    description: 'Seclayer backend base URL.'
+    required: false
+    default: 'https://seclayer.io'
+  auth-header:
+    description: 'Optional Authorization header value for scanning authenticated endpoints (e.g. "Bearer …").'
+    required: false
+    default: ''
+  github-token:
+    description: 'Token used to push branches and open pull requests. Defaults to the job''s own GITHUB_TOKEN — the workflow must grant it `contents: write` and `pull-requests: write`.'
+    required: false
+    default: ${{ github.token }}
+runs:
+  using: 'composite'
+  steps:
+    - shell: bash
+      env:
+        SECLAYER_API_KEY: ${{ inputs.api-key }}
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: >-
+        npx -y @seclayer/mcp autofix
+        --url "${{ inputs.url }}"
+        --fail-on "${{ inputs.fail-on }}"
+        --max-fixes "${{ inputs.max-fixes }}"
+        --api-url "${{ inputs.api-url }}"
+        ${{ inputs.test-command && format('--test-cmd "{0}"', inputs.test-command) || '' }}
+        ${{ inputs.base-branch && format('--base-branch "{0}"', inputs.base-branch) || '' }}
+        ${{ inputs.auth-header && format('--auth-header "{0}"', inputs.auth-header) || '' }}

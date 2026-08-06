@@ -160,6 +160,75 @@ jobs:
           fail-on: high
 ```
 
+## Auto-fix PRs (`seclayer-mcp autofix`)
+
+Closes the loop past just gating a build: scans a target, then for each
+finding that's **proven or high-confidence** (never a medium/low-confidence
+guess — see below), runs a DeepSeek-backed fix agent and opens a pull request
+with the change.
+
+```bash
+SECLAYER_API_KEY=... npx -y @seclayer/mcp autofix \
+  --url https://staging.example.com \
+  --fail-on high \
+  --max-fixes 3 \
+  --test-cmd "npm test"
+```
+
+Options: everything `scan` (the CI gate) takes, plus `--max-fixes` (default
+3), `--test-cmd` (optional — lets the agent run your test suite to check its
+own work), and `--base-branch` (defaults to the workflow's own ref). Add
+`--dry-run` to print which findings are eligible and preview the plan without
+spending a credit or touching git. Requires `git` and the GitHub CLI (`gh`,
+authenticated via `GH_TOKEN`/`GITHUB_TOKEN`) on `PATH`.
+
+**What it does and doesn't do:**
+- **No new secret required.** The fix agent is DeepSeek, proxied through the
+  same Seclayer backend and billed through the same `SECLAYER_API_KEY` credits
+  as every other MCP call — there's no separate AI key to provision.
+- **Seclayer's servers never receive your source.** The backend only ever
+  exchanges a message transcript and tool-call results; every file read, file
+  edit, and test run happens locally, inside your own CI job.
+- **Only proven/high-confidence findings qualify.** A finding is eligible only
+  when it's not suppressed, is at or above `--fail-on`, and either carries a
+  replayable exploit receipt or a `high` confidence rating — this ties
+  directly into the product's low-false-positive design, so a run never burns
+  a credit and a PR review cycle chasing a guess.
+- **Always a PR, never a merge.** One branch and one pull request per finding
+  (capped by `--max-fixes`), independently reviewable and revertable. Nothing
+  is ever auto-merged.
+- **A minimal, non-shell tool surface.** The agent can read files, edit files,
+  and (only if you configure `--test-cmd`) run exactly that one fixed command
+  — never an arbitrary shell. This matters because some finding data
+  originates from the scanned target's own HTTP responses, so the tool
+  surface is deliberately narrow enough that even a hostile target can't turn
+  a scan into code execution beyond an in-repo file edit.
+
+### GitHub Action
+
+A composite action ships at `.github/actions/seclayer-autofix`. It needs
+`contents: write` and `pull-requests: write`, so it's a separate opt-in action
+from the read-only scan gate above:
+
+```yaml
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  autofix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cc4480/seclayer.io2026/.github/actions/seclayer-autofix@main
+        with:
+          url: https://staging.example.com
+          api-key: ${{ secrets.SECLAYER_API_KEY }}
+          fail-on: high
+          max-fixes: 3
+          test-command: npm test
+```
+
 ## Development
 
 ```bash

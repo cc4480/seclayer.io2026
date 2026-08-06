@@ -1,11 +1,11 @@
 import path from 'path';
 import crypto from 'crypto';
 import Database from 'better-sqlite3';
-import { User, Scan, CreditTransaction, ApiKey, Finding, SuppressionRule, MonitoredTarget, DomainVerification, OobEvent, NmapScan } from '../src/types.js';
+import { User, Scan, CreditTransaction, ApiKey, Finding, SuppressionRule, MonitoredTarget, DomainVerification, OobEvent, NmapScan, AutofixSession } from '../src/types.js';
 import { scoreFindings } from './scoring.js';
 import { MonitorSchedule, computeNextRun, describeSchedule } from './schedule.js';
 import { runMigrations } from './dbSchema.js';
-import { rowToUser, rowToScan, rowToApiKey, rowToDomainVerification, rowToMonitoredTarget, rowToNmapScan } from './dbMappers.js';
+import { rowToUser, rowToScan, rowToApiKey, rowToDomainVerification, rowToMonitoredTarget, rowToNmapScan, rowToAutofixSession } from './dbMappers.js';
 import { hashToken, maskKey } from './dbCrypto.js';
 
 const DB_FILE = process.env.DB_PATH || path.join(process.cwd(), 'data.sqlite');
@@ -456,6 +456,42 @@ class SqliteDb {
     });
     tx();
     return stuck.length;
+  }
+
+  // --- Autofix sessions ---
+  // One row per "fix this one finding" CI attempt (see server/routes/autofix.ts).
+  // Holds no source code or file contents — those never leave the caller's own
+  // CI runner — this is purely auth/credit/turn-cap accounting and audit history.
+  createAutofixSession(userId: string, targetUrl: string, findingTitle: string, findingCategory: string): AutofixSession {
+    const id = 'afx_' + crypto.randomBytes(8).toString('hex');
+    const now = new Date().toISOString();
+    this.db.prepare(
+      'INSERT INTO autofix_sessions (id, userId, targetUrl, findingTitle, findingCategory, status, turns, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)'
+    ).run(id, userId, targetUrl, findingTitle, findingCategory, 'active', now, now);
+    return this.getAutofixSession(id)!;
+  }
+
+  getAutofixSession(id: string): AutofixSession | undefined {
+    return rowToAutofixSession(this.db.prepare('SELECT * FROM autofix_sessions WHERE id = ?').get(id));
+  }
+
+  // Records one more model turn was spent on this session. Callers enforce the
+  // turn cap themselves (comparing the returned `turns` against their limit)
+  // before calling this, so the counter always reflects turns actually taken.
+  incrementAutofixTurn(id: string): AutofixSession {
+    const existing = this.getAutofixSession(id);
+    if (!existing) throw new Error('Autofix session not found');
+    this.db.prepare('UPDATE autofix_sessions SET turns = turns + 1, updatedAt = ? WHERE id = ?')
+      .run(new Date().toISOString(), id);
+    return this.getAutofixSession(id)!;
+  }
+
+  completeAutofixSession(id: string, status: 'done' | 'expired' = 'done'): AutofixSession {
+    const existing = this.getAutofixSession(id);
+    if (!existing) throw new Error('Autofix session not found');
+    this.db.prepare('UPDATE autofix_sessions SET status = ?, updatedAt = ? WHERE id = ?')
+      .run(status, new Date().toISOString(), id);
+    return this.getAutofixSession(id)!;
   }
 
   // Resource-ceiling guard, not an authorization restriction: at most one

@@ -1,7 +1,7 @@
 // Row → domain-object mappers for the database layer. These are pure functions
 // of a raw SQLite row (they never touch the connection), extracted from db.ts so
 // the persistence class holds queries + business logic, not field plumbing.
-import type { User, Scan, ApiKey, DomainVerification, MonitoredTarget, NmapScan } from "../src/types.js";
+import type { User, Scan, ApiKey, DomainVerification, MonitoredTarget, NmapScan, AutofixSession } from "../src/types.js";
 
 export function rowToUser(row: any): User | undefined {
   if (!row) return undefined;
@@ -67,6 +67,21 @@ export function rowToNmapScan(row: any): NmapScan | undefined {
     createdAt: row.createdAt,
     startedAt: row.startedAt ?? undefined,
     completedAt: row.completedAt ?? undefined,
+  };
+}
+
+export function rowToAutofixSession(row: any): AutofixSession | undefined {
+  if (!row) return undefined;
+  return {
+    id: row.id,
+    userId: row.userId,
+    targetUrl: row.targetUrl,
+    findingTitle: row.findingTitle,
+    findingCategory: row.findingCategory,
+    status: row.status,
+    turns: row.turns,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
   };
 }
 

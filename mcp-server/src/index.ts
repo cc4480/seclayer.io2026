@@ -3,6 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { parseArgs, resolveConfig } from "./cli.js";
 import { buildServer } from "./server.js";
 import { runCiScan } from "./ciScan.js";
+import { runAutofix } from "./autofix.js";
 import { VERSION } from "./version.js";
 
 const HELP_TEXT = `seclayer-mcp — Model Context Protocol server for Seclayer security scans.
@@ -23,9 +24,14 @@ server to your MCP client (Claude Code, Cursor, Windsurf) as a stdio "command" s
 
 async function main() {
   // `seclayer-mcp scan ...` is the CI/CD gate: run one scan and exit non-zero on
-  // findings at/above a threshold. With no subcommand, run the MCP stdio server.
+  // findings at/above a threshold. `seclayer-mcp autofix ...` runs a scan and
+  // opens a PR per eligible finding. With no subcommand, run the MCP stdio server.
   if (process.argv[2] === "scan") {
     const code = await runCiScan(process.argv.slice(3), process.env);
+    process.exit(code);
+  }
+  if (process.argv[2] === "autofix") {
+    const code = await runAutofix(process.argv.slice(3), process.env);
     process.exit(code);
   }
 

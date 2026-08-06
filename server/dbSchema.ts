@@ -142,6 +142,18 @@ export function runMigrations(db: Database.Database): void {
       completedAt TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_nmap_scans_user ON nmap_scans(userId);
+    CREATE TABLE IF NOT EXISTS autofix_sessions (
+      id TEXT PRIMARY KEY,
+      userId TEXT NOT NULL,
+      targetUrl TEXT NOT NULL,
+      findingTitle TEXT NOT NULL,
+      findingCategory TEXT NOT NULL,
+      status TEXT NOT NULL,
+      turns INTEGER NOT NULL DEFAULT 0,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_autofix_sessions_user ON autofix_sessions(userId);
   `);
 
   // Additive column migrations (safe across existing databases).

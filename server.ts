@@ -18,6 +18,7 @@ import { registerNmapRoutes } from './server/routes/nmap.js';
 import { registerAccountRoutes } from './server/routes/account.js';
 import { registerDomainRoutes } from './server/routes/domains.js';
 import { registerMcpRoutes } from './server/routes/mcp.js';
+import { registerAutofixRoutes } from './server/routes/autofix.js';
 import { registerWellKnownRoutes } from './server/routes/wellKnown.js';
 import { accessLog } from './server/accessLog.js';
 import { securityHeaders } from './server/securityHeaders.js';
@@ -152,6 +153,7 @@ async function startServer() {
   registerAccountRoutes(app, ctx);
   registerDomainRoutes(app, ctx);
   registerMcpRoutes(app, ctx);
+  registerAutofixRoutes(app);
 
   // Public site-policy files: robots.txt + RFC 9116 security.txt.
   registerWellKnownRoutes(app);

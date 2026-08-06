@@ -99,3 +99,94 @@ export async function callDeepSeek(model: string, prompt: string, opts: DeepSeek
   const reasoningContent = typeof message?.reasoning_content === 'string' ? message.reasoning_content : undefined;
   return { content, reasoningContent };
 }
+
+// --- Multi-turn tool-calling (autofix agent loop) ---
+//
+// Separate from callDeepSeek above on purpose: that function's contract (one
+// user-role prompt in, JSON-mode content out) is depended on verbatim by
+// server/deepseek.ts and server/narrate.ts. The autofix agent loop instead
+// needs a growing multi-role transcript (system/user/assistant/tool) and
+// OpenAI-style function calling, so it gets its own request/response shape
+// rather than overloading the existing one.
+export interface DeepSeekToolDef {
+  type: 'function';
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+}
+
+export interface DeepSeekMessage {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string;
+  tool_call_id?: string;   // required on role:'tool' messages
+  tool_calls?: DeepSeekToolCall[]; // present on an assistant message that called tools
+}
+
+export interface DeepSeekToolCall {
+  id: string;
+  type: 'function';
+  function: { name: string; arguments: string };
+}
+
+export interface DeepSeekAgentTurnResult {
+  content: string | null;
+  toolCalls: DeepSeekToolCall[];
+}
+
+// One turn of an agentic tool-calling conversation: sends the full transcript
+// so far plus the fixed tool schema, and returns the model's next move (either
+// a final text answer or one/more tool calls for the caller to execute).
+// Never falls back to local generation on a missing key — the autofix route
+// that calls this always runs server-side where DEEPSEEK_API_KEY is required,
+// unlike the optional-everywhere report generators.
+export async function callDeepSeekAgentTurn(
+  model: string,
+  messages: DeepSeekMessage[],
+  tools: DeepSeekToolDef[],
+  opts: { maxTokens: number; timeoutMs: number },
+): Promise<DeepSeekAgentTurnResult> {
+  const apiKey = getApiKey();
+  if (!apiKey) throw new Error('DEEPSEEK_API_KEY is not configured; the autofix agent loop requires it.');
+
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), opts.timeoutMs);
+  let response: Response;
+  try {
+    response = await fetch(`${DEEPSEEK_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        tools,
+        tool_choice: 'auto',
+        max_tokens: opts.maxTokens,
+        stream: false,
+      }),
+      signal: ctl.signal,
+    });
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      throw new Error(`DeepSeek agent-turn call timed out after ${opts.timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (!response.ok) {
+    const errBody = await response.text().catch(() => '');
+    throw new Error(`DeepSeek API error ${response.status}: ${errBody}`);
+  }
+
+  const data = await response.json();
+  const message = data?.choices?.[0]?.message;
+  const content = typeof message?.content === 'string' ? message.content : null;
+  const toolCalls: DeepSeekToolCall[] = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
+  return { content, toolCalls };
+}

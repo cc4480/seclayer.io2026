@@ -23,6 +23,10 @@ signature-confirmed for high precision (low false positives).
   across the whole request surface
 - **Optional headless rendering** (Playwright) for SPA/JS-heavy targets
 - **Continuous monitoring** with scheduled re-scans and Slack-compatible alerts
+- **Auto-fix PRs** — `@seclayer/mcp autofix` runs an AI agent inside your own
+  CI job to fix each proven, high-confidence finding and opens a pull request;
+  no separate AI key, and your source never leaves the CI runner (see
+  [mcp-server/README.md](mcp-server/README.md#auto-fix-prs-seclayer-mcp-autofix))
 
 ## Stack
 

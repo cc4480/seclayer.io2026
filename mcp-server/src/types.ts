@@ -109,3 +109,22 @@ export interface ScanErrorBody {
   details?: string;
   creditsRemaining?: number;
 }
+
+// --- Autofix (agentic tool-calling transcript) ---
+// Mirrors the shapes server/deepseekClient.ts's DeepSeekMessage/DeepSeekToolCall
+// and server/routes/autofix.ts's AUTOFIX_TOOLS produce/consume — kept as a
+// separate, loose local copy rather than a shared import for the same reason
+// the rest of this file is: an independently published CLI package shouldn't
+// pull in the whole app's type tree.
+export interface AgentToolCall {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+}
+
+export interface AgentMessage {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string;
+  tool_call_id?: string;
+  tool_calls?: AgentToolCall[];
+}

@@ -1,4 +1,4 @@
-import type { ScanErrorBody, ScanListSuccess, ScanReport, ScanSuccess } from "./types.js";
+import type { AgentMessage, AgentToolCall, ScanErrorBody, ScanListSuccess, ScanReport, ScanSuccess } from "./types.js";
 
 export interface ScanRequest {
   url: string;
@@ -236,4 +236,165 @@ export async function getReport(
     return { ok: false, kind: "malformed", message: "Received an unexpected report response shape from the Seclayer backend." };
   }
   return { ok: true, data };
+}
+
+// --- Autofix: agentic tool-calling loop backing `seclayer-mcp autofix` ---
+// The backend proxies each turn to DeepSeek and returns the model's next
+// move; this client never sees or needs the model's raw API key — only the
+// caller's own Seclayer API key, exactly like every other MCP call.
+
+export type AutofixStartOutcome =
+  | { ok: true; sessionId: string; creditsRemaining: number }
+  | {
+      ok: false;
+      kind: "bad_request" | "unauthorized" | "rate_limited" | "server_error" | "network" | "timeout" | "malformed";
+      message: string;
+      retryAfterSeconds?: number;
+    };
+
+// POST /api/mcp/autofix/start — spends 1 credit and opens one fix attempt for
+// one finding. Never throws; every failure mode is a typed outcome.
+export async function startAutofixSession(
+  baseUrl: string,
+  apiKey: string,
+  input: { url: string; findingTitle: string; findingCategory: string },
+  timeoutMs: number = READ_TIMEOUT_MS,
+): Promise<AutofixStartOutcome> {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), timeoutMs);
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}/api/mcp/autofix/start`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey, url: input.url, findingTitle: input.findingTitle, findingCategory: input.findingCategory }),
+      signal: ctl.signal,
+    });
+  } catch (err: any) {
+    if (err?.name === "AbortError") {
+      return { ok: false, kind: "timeout", message: `Timed out after ${timeoutMs}ms starting an autofix session at ${baseUrl}.` };
+    }
+    return { ok: false, kind: "network", message: `Could not reach the Seclayer backend at ${baseUrl}: ${err?.message || err}.` };
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (response.ok) {
+    const data = await response.json().catch(() => null) as { success?: boolean; sessionId?: string; creditsRemaining?: number } | null;
+    if (!data || data.success !== true || !data.sessionId) {
+      return { ok: false, kind: "malformed", message: "Received an unexpected response starting the autofix session (expected {success:true, sessionId})." };
+    }
+    return { ok: true, sessionId: data.sessionId, creditsRemaining: data.creditsRemaining ?? 0 };
+  }
+
+  const body = (await response.json().catch(() => ({}))) as ScanErrorBody;
+  const detail = body.error || body.message || body.details || `HTTP ${response.status}`;
+  if (response.status === 400) {
+    return { ok: false, kind: "bad_request", message: `Autofix session rejected: ${detail}.` };
+  }
+  if (response.status === 401) {
+    return { ok: false, kind: "unauthorized", message: `Authentication or credit failure starting autofix: ${detail}. Verify the key and check your credit balance at https://seclayer.io.` };
+  }
+  if (response.status === 429) {
+    const retryAfterHeader = response.headers.get("retry-after");
+    const retryAfterSeconds = retryAfterHeader ? Number(retryAfterHeader) : undefined;
+    return {
+      ok: false,
+      kind: "rate_limited",
+      message: `Rate limited starting an autofix session. ${retryAfterSeconds ? `Wait ${retryAfterSeconds}s and retry.` : "Wait a moment and retry."}`,
+      retryAfterSeconds,
+    };
+  }
+  if (response.status >= 500) {
+    return { ok: false, kind: "server_error", message: `Autofix session failed server-side: ${detail}. Usually transient — retry shortly.` };
+  }
+  return { ok: false, kind: "malformed", message: `Received an unexpected ${response.status} response starting autofix: ${detail}.` };
+}
+
+export type AutofixTurnOutcome =
+  | { ok: true; content: string | null; toolCalls: AgentToolCall[]; turnsUsed: number; turnsRemaining: number; sessionDone: boolean }
+  | {
+      ok: false;
+      kind: "bad_request" | "unauthorized" | "not_found" | "conflict" | "rate_limited" | "server_error" | "network" | "timeout" | "malformed";
+      message: string;
+      retryAfterSeconds?: number;
+    };
+
+// Agent-turn calls run a real DeepSeek completion server-side, so this gets a
+// generous bound — longer than a plain read, shorter than a full scan.
+export const AUTOFIX_TURN_TIMEOUT_MS = 130_000;
+
+// POST /api/mcp/autofix/turn — sends the transcript so far, gets back the
+// model's next move. Never throws.
+export async function autofixTurn(
+  baseUrl: string,
+  apiKey: string,
+  sessionId: string,
+  messages: AgentMessage[],
+  timeoutMs: number = AUTOFIX_TURN_TIMEOUT_MS,
+): Promise<AutofixTurnOutcome> {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), timeoutMs);
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}/api/mcp/autofix/turn`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey, sessionId, messages }),
+      signal: ctl.signal,
+    });
+  } catch (err: any) {
+    if (err?.name === "AbortError") {
+      return { ok: false, kind: "timeout", message: `Timed out after ${timeoutMs}ms waiting for an autofix turn at ${baseUrl}.` };
+    }
+    return { ok: false, kind: "network", message: `Could not reach the Seclayer backend at ${baseUrl}: ${err?.message || err}.` };
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (response.ok) {
+    const data = (await response.json().catch(() => null)) as
+      | { success?: boolean; content?: string | null; toolCalls?: AgentToolCall[]; turnsUsed?: number; turnsRemaining?: number; sessionDone?: boolean }
+      | null;
+    if (!data || data.success !== true) {
+      return { ok: false, kind: "malformed", message: "Received an unexpected response for an autofix turn (expected {success:true, ...})." };
+    }
+    return {
+      ok: true,
+      content: data.content ?? null,
+      toolCalls: data.toolCalls ?? [],
+      turnsUsed: data.turnsUsed ?? 0,
+      turnsRemaining: data.turnsRemaining ?? 0,
+      sessionDone: data.sessionDone ?? false,
+    };
+  }
+
+  const body = (await response.json().catch(() => ({}))) as ScanErrorBody;
+  const detail = body.error || body.message || body.details || `HTTP ${response.status}`;
+  if (response.status === 400) {
+    return { ok: false, kind: "bad_request", message: `Autofix turn rejected: ${detail}.` };
+  }
+  if (response.status === 401) {
+    return { ok: false, kind: "unauthorized", message: `Authentication failed for an autofix turn: ${detail}.` };
+  }
+  if (response.status === 404) {
+    return { ok: false, kind: "not_found", message: `Autofix session not found: ${detail}.` };
+  }
+  if (response.status === 409) {
+    return { ok: false, kind: "conflict", message: `Autofix session can't continue: ${detail}.` };
+  }
+  if (response.status === 429) {
+    const retryAfterHeader = response.headers.get("retry-after");
+    const retryAfterSeconds = retryAfterHeader ? Number(retryAfterHeader) : undefined;
+    return {
+      ok: false,
+      kind: "rate_limited",
+      message: `Rate limited on an autofix turn. ${retryAfterSeconds ? `Wait ${retryAfterSeconds}s and retry.` : "Wait a moment and retry."}`,
+      retryAfterSeconds,
+    };
+  }
+  if (response.status >= 500) {
+    return { ok: false, kind: "server_error", message: `Autofix turn failed server-side: ${detail}. Usually transient — retry shortly.` };
+  }
+  return { ok: false, kind: "malformed", message: `Received an unexpected ${response.status} response on an autofix turn: ${detail}.` };
 }
