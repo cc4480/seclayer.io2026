@@ -81,6 +81,37 @@ The image is multi-stage (build → pruned runtime), runs `node dist/server.cjs`
 persists the DB on the `/data` volume, and has a `HEALTHCHECK` wired to the
 endpoint below.
 
+### Railway
+
+`railway.json` pins the Dockerfile builder and wires `/api/system/health` as
+Railway's own healthcheck. Railway's builder does not support a Dockerfile
+`VOLUME` instruction (rejects the build outright) — this repo's Dockerfile
+intentionally omits it and relies on an attached Railway Volume instead, same
+as the Docker/compose flows above already do with an explicit `-v`.
+
+```bash
+npx @railway/cli login          # opens a browser
+npx @railway/cli init --name seclayer
+npx @railway/cli up --ci --service seclayer      # first build (will crash-loop until env vars below are set — expected)
+npx @railway/cli volume add -m /data             # persistent SQLite volume
+npx @railway/cli domain                          # generates a *.up.railway.app URL
+npx @railway/cli variable set "APP_URL=https://<the-generated-domain>" --skip-deploys
+npx @railway/cli variable set "FREE_MODE=true" --skip-deploys   # or leave unset; defaults on without Stripe
+echo -n "re_..." | npx @railway/cli variable set RESEND_API_KEY --stdin --skip-deploys
+echo -n "sk-..." | npx @railway/cli variable set DEEPSEEK_API_KEY --stdin --skip-deploys
+npx @railway/cli redeploy --yes
+npx @railway/cli service source connect --repo <owner>/<repo> --branch main   # auto-deploy on future pushes
+```
+
+Note: on Git Bash (Windows), a leading `/` in `--mount-path`/`-m` gets
+silently mangled into a Windows path by MSYS's path conversion, which then
+fails with "Mount path must start with a `/`" — prefix the `volume add`
+command with `MSYS_NO_PATHCONV=1` if you hit that.
+
+Network Reconnaissance (nmap) needs `--cap-add=NET_ADMIN`/`NET_RAW`, which
+Railway's runtime doesn't expose — the feature auto-disables cleanly there
+(§7), same as on any host without those capabilities.
+
 ### Without Docker
 
 ```bash
@@ -132,9 +163,11 @@ Override the backend with `--url` / `SECLAYER_API_URL` for self-hosted installs.
 Nmap ships baked into the Docker image (installed + `setcap` in the
 Dockerfile — see its comments). The app probes for the binary once at boot
 and cleanly hides the whole feature (no error, no partial UI) whenever it
-isn't present or runnable — which is always the case on the Vercel-hosted
-deployment and any local `npm run dev` checkout without nmap installed
-manually.
+isn't present or runnable — which is always the case on Railway, a
+Vercel-hosted deployment, or any local `npm run dev` checkout without nmap
+installed manually. Needs the `--cap-add` flags in §3 to actually work, which
+means a VPS running the Docker/compose flow directly, or another platform that
+exposes custom container capabilities.
 
 - **Requires `--cap-add=NET_ADMIN --cap-add=NET_RAW` on every `docker run`
   (or the equivalent in compose/Kubernetes)** — confirmed by booting the
