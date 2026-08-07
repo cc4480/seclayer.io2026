@@ -53,9 +53,13 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./
 
-# SQLite database lives on a persistent volume.
+# SQLite database lives on a persistent volume, attached at deploy time (e.g.
+# docker-compose.yml's `seclayer-data:/data`, or a Railway Volume mounted at
+# /data). No `VOLUME` instruction here on purpose — Railway's builder rejects
+# it outright ("dockerfile invalid: docker VOLUME ... is not supported, use
+# Railway Volumes"), and it was never load-bearing for the documented
+# docker/compose flows above, which already bind an explicit named volume.
 RUN mkdir -p /data
-VOLUME ["/data"]
 
 EXPOSE 3000
 
