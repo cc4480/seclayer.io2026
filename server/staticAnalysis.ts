@@ -54,7 +54,15 @@ const SECRET_SIGNATURES = [
   ];
 export const SECRET_SIGNATURE_COUNT = SECRET_SIGNATURES.length;
 
-export function analyzeSecrets(htmlText: string): DiagnosticResult["sastFindings"] {
+// `source` labels WHERE the text came from — defaults to the historical
+// root-document label so every existing caller is unaffected. Callers scanning
+// a specific crawled page/endpoint pass its URL, which flows through to the
+// finding's `file` (and from there to the report's endpoint) so a reader can
+// tell which page leaked it, not just that something did.
+export function analyzeSecrets(
+  htmlText: string,
+  source = "Client-served HTML/JavaScript",
+): DiagnosticResult["sastFindings"] {
   const findings: DiagnosticResult["sastFindings"] = [];
   if (!htmlText) return findings;
 
@@ -65,7 +73,7 @@ export function analyzeSecrets(htmlText: string): DiagnosticResult["sastFindings
     // sk_live_0000…, YOUR_API_KEY) so they never surface as false positives.
     if (m && !isLikelyPlaceholderSecret(m[0])) {
       findings.push({
-        file: "Client-served HTML/JavaScript",
+        file: source,
         issue: `Exposed Credential Signature (${p.name})`,
         severity: p.severity,
         confidence: p.confidence,

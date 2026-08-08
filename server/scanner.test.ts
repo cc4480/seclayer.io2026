@@ -561,6 +561,34 @@ test('exposed user-object endpoint gets a PROVEN receipt and never collides with
   });
 });
 
+test('exposed user-object probe also catches a "list every user" ARRAY response at a non-first candidate path', async () => {
+  // /api/v1/users/admin (the first, historical candidate) 404s; the real leak
+  // is at /admin/users, an authenticated-but-not-authorized user-LIST endpoint
+  // (an array, not a single object) — the shape this session's benchmark
+  // (test-targets/tier1-owasp-foundation) actually surfaced as a real gap.
+  await withServer((req, res) => {
+    const u = new URL(req.url || '/', 'http://127.0.0.1');
+    if (u.pathname === '/admin/users') {
+      const authed = !!(req.headers['authorization'] || '');
+      if (!authed) { res.writeHead(401); res.end('unauthorized'); return; }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify([
+        { id: 1, username: 'admin', password: 'hunter2', email: 'admin@corp.test', role: 'admin' },
+        { id: 2, username: 'carlos', password: 'letmein', email: 'carlos@corp.test', role: 'user' },
+      ]));
+      return;
+    }
+    res.writeHead(404); res.end('not found');
+  }, async (port) => {
+    const diag = await runDiagnostics(`http://127.0.0.1:${port}`, 'Bearer some-session-token', { allowActiveProbes: true });
+    const exposed = (diag.apiSecFindings || []).find((f) => /Exposed User Object Endpoint/i.test(f.testName));
+    assert.ok(exposed, 'expected the broadened probe to catch the /admin/users list');
+    assert.equal(exposed!.endpoint, '/admin/users');
+    assert.equal(exposed!.evidence!.signal.quote, 'admin@corp.test', 'quotes the first array element\'s identifying field');
+    assert.equal(isProven({ evidence: exposed!.evidence } as any), true);
+  });
+});
+
 test('two-identity BOLA: public endpoint → Unauthenticated Access (§3.1b), not BOLA', async () => {
   await withServer(ordersHandler('public'), async (port) => {
     const diag = await runDiagnostics(`http://127.0.0.1:${port}`, undefined, { allowActiveProbes: true, bolaIdentities: IDS });
@@ -605,6 +633,56 @@ test('smart discovered-parameter fuzzer proves XSS + SQLi and skips an inert par
     // The inert /static?ref param must never be flagged.
     assert.ok(!rt.some((f) => /ref=/.test(f.payload || '')), 'the inert param must not be flagged');
     assert.ok((diag.crawl?.paramsTested || 0) >= 2, 'multiple discovered params were fuzzed');
+  });
+});
+
+test('SAST secret scanning also catches a secret on a non-root JSON endpoint the crawler visits', async () => {
+  // Regression coverage: this used to be a real, confirmed gap (found via this
+  // session's benchmark, test-targets/tier1-owasp-foundation) — analyzeSecrets
+  // only ever ran against the ROOT document's HTML, so a JSON API endpoint like
+  // /api/settings that hardcodes a real-looking secret went completely
+  // unscanned, even though the crawler visits the link and even though the
+  // exact same secret pattern IS detected when it's on the root page.
+  // Built at runtime from base64 so no literal secret is ever committed
+  // (which would trip GitHub's secret push protection).
+  const body = Buffer.from('seclayer-non-root-secret-fixture-02').toString('base64').replace(/[^0-9a-zA-Z]/g, '').slice(0, 26);
+  const handler: http.RequestListener = (req, res) => {
+    const u = new URL(req.url || '/', 'http://127.0.0.1');
+    if (u.pathname === '/api/settings') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ apiKey: `sk_live_${body}` }));
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end('<!doctype html><html><body><a href="/api/settings">settings</a></body></html>');
+  };
+  await withServer(handler, async (port) => {
+    const diag = await runDiagnostics(`http://127.0.0.1:${port}`, undefined, { allowActiveProbes: true });
+    const secret = (diag.sastFindings || []).find((f) => /Stripe/i.test(f.issue));
+    assert.ok(secret, 'expected the secret on /api/settings to be detected');
+    assert.match(secret!.file, /\/api\/settings$/, 'the finding should point at the endpoint that actually leaked it');
+  });
+});
+
+test('cookie-flag checking also catches an insecure cookie set on a non-root page', async () => {
+  // Same class of gap as the secret-scanning fix above: cookie-flag analysis
+  // used to only ever look at the ROOT response's Set-Cookie header.
+  const handler: http.RequestListener = (req, res) => {
+    const u = new URL(req.url || '/', 'http://127.0.0.1');
+    if (u.pathname === '/dashboard') {
+      res.writeHead(200, { 'Content-Type': 'text/html', 'Set-Cookie': 'sessionId=abc123' }); // no HttpOnly
+      res.end('<!doctype html><html><body>dashboard</body></html>');
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end('<!doctype html><html><body><a href="/dashboard">dashboard</a></body></html>');
+  };
+  await withServer(handler, async (port) => {
+    const diag = await runDiagnostics(`http://127.0.0.1:${port}`, undefined, { allowActiveProbes: true });
+    assert.ok(
+      (diag.cookieIssues || []).some((i) => /sessionId.*HttpOnly/i.test(i)),
+      'expected the insecure cookie set on /dashboard (not the root) to be caught',
+    );
   });
 });
 

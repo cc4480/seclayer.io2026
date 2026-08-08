@@ -19,6 +19,40 @@ export const SECURITY_HEADERS = [
   "referrer-policy",
 ];
 
+// Global cap across the WHOLE scan (root + every crawled page), not per-page —
+// callers pass their running count via `alreadyFound` so the cap holds even
+// when this is invoked multiple times.
+export const MAX_COOKIE_ISSUES = 6;
+
+// Evaluates EACH Set-Cookie individually. A prior version concatenated every
+// cookie into one string and substring-tested it, so a flag present on *any*
+// cookie masked its absence on *another* (both a false negative — missing a
+// genuinely insecure cookie — and a misleading blanket finding).
+//
+// Only the two security-critical flags — Secure (over HTTPS) and HttpOnly —
+// are flagged, naming the specific cookie. Missing SameSite is deliberately
+// NOT flagged: modern browsers default absent cookies to SameSite=Lax, so
+// reporting it produces low-signal, false-positive-flavored noise.
+export function cookieFlagIssues(setCookieList: string[], isHttps: boolean, alreadyFound: number): string[] {
+  const issues: string[] = [];
+  const budget = () => alreadyFound + issues.length < MAX_COOKIE_ISSUES;
+  for (const cookie of setCookieList) {
+    if (!budget()) break;
+    const nameMatch = cookie.match(/^\s*([^=;\s]+)=/);
+    const name = nameMatch ? nameMatch[1] : "cookie";
+    // A cookie explicitly scoped to be read by client JS can't carry
+    // HttpOnly by design, so only the Secure gap is a clear issue there.
+    if (isHttps && !/;\s*secure(\s*;|\s*$)/i.test(cookie)) {
+      issues.push(`Cookie "${name}" is set without the Secure attribute over HTTPS`);
+    }
+    if (!budget()) break;
+    if (!/;\s*httponly(\s*;|\s*$)/i.test(cookie)) {
+      issues.push(`Cookie "${name}" is set without the HttpOnly attribute`);
+    }
+  }
+  return issues;
+}
+
 // The initial root fetch gates the WHOLE scan: if it fails we abort with "did
 // not respond" rather than emit a misleading clean report. But many real targets
 // sleep when idle (Replit, Render, Fly and other free-tier PaaS) and cold-start
@@ -95,36 +129,16 @@ export async function runPassiveScan(
     }
     if (result.techLeaked.length) emit?.("recon", `Tech/server signatures disclosed: ${result.techLeaked.join(", ")}.`);
 
-    // Cookie flag analysis — evaluate EACH Set-Cookie individually. A prior
-    // version concatenated every cookie into one string and substring-tested
-    // it, so a flag present on *any* cookie masked its absence on *another*
-    // (both a false negative — missing a genuinely insecure cookie — and a
-    // misleading blanket finding). We now read the real per-cookie list.
-    //
-    // We only flag the two security-critical flags — Secure (over HTTPS) and
-    // HttpOnly — naming the specific cookie. Missing SameSite is deliberately
-    // NOT flagged: modern browsers default absent cookies to SameSite=Lax, so
-    // reporting it produces low-signal, false-positive-flavored noise.
+    // Cookie flag analysis — evaluate EACH Set-Cookie individually (see
+    // cookieFlagIssues below), across the root response. Same function also
+    // runs against every page the crawler visits (scanner.ts), so a cookie
+    // set anywhere in the app — not only on the root response — gets caught.
     const setCookieList: string[] =
       typeof (response.headers as any).getSetCookie === "function"
         ? (response.headers as any).getSetCookie()
         : (result.headers["set-cookie"] ? [result.headers["set-cookie"]] : []);
     const isHttps = url.startsWith("https://");
-    const MAX_COOKIE_ISSUES = 6;
-    for (const cookie of setCookieList) {
-      if (result.cookieIssues.length >= MAX_COOKIE_ISSUES) break;
-      const nameMatch = cookie.match(/^\s*([^=;\s]+)=/);
-      const name = nameMatch ? nameMatch[1] : "cookie";
-      // A cookie explicitly scoped to be read by client JS can't carry
-      // HttpOnly by design, so only the Secure gap is a clear issue there.
-      if (isHttps && !/;\s*secure(\s*;|\s*$)/i.test(cookie)) {
-        result.cookieIssues.push(`Cookie "${name}" is set without the Secure attribute over HTTPS`);
-      }
-      if (result.cookieIssues.length >= MAX_COOKIE_ISSUES) break;
-      if (!/;\s*httponly(\s*;|\s*$)/i.test(cookie)) {
-        result.cookieIssues.push(`Cookie "${name}" is set without the HttpOnly attribute`);
-      }
-    }
+    result.cookieIssues.push(...cookieFlagIssues(setCookieList, isHttps, result.cookieIssues.length));
 
     // 2. SAST secrets + 3. SCA libraries (over the served markup).
     // (DAST CSRF inference from static markup is intentionally omitted — it is

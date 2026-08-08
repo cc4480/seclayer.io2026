@@ -112,3 +112,34 @@ test('crawlSite discovers targets from seeded root HTML without extra fetches fo
   assert.ok(paths.includes('POST /login'));
   assert.ok(paths.includes('GET /api/cart'));
 });
+
+test('crawlSite captures every fetched response (HTML or not) for passive analysis, with Set-Cookie', async () => {
+  // Regression coverage: captures used to not exist at all — a crawled page's
+  // body/headers were discarded the instant it wasn't text/html, so secret-
+  // signature and cookie-flag analysis (which run against captures — see
+  // scanner.ts) never saw non-HTML endpoints like a JSON API response.
+  const seedHtml = `<a href="/api/settings">settings</a><a href="/dashboard">dashboard</a>`;
+  const fetchFn = async (url: string) => {
+    if (url.endsWith('/api/settings')) {
+      return new Response('{"apiKey":"secret-shaped-value"}', { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (url.endsWith('/dashboard')) {
+      return new Response('<!doctype html><html><body>dashboard</body></html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html', 'set-cookie': 'sessionId=abc' },
+      });
+    }
+    return new Response('not found', { status: 404, headers: { 'content-type': 'text/plain' } });
+  };
+  const result = await crawlSite(BASE, fetchFn as any, { seedHtml, maxPages: 5, budgetMs: 2000 });
+
+  const settings = result.captures.find((c) => c.url.endsWith('/api/settings'));
+  assert.ok(settings, 'the JSON endpoint must be captured even though it is never an HTML "page"');
+  assert.equal(settings!.contentType, 'application/json');
+  assert.match(settings!.text, /secret-shaped-value/);
+  assert.ok(!result.pages.includes(settings!.url), 'a non-HTML response is captured but not counted as a crawled page');
+
+  const dashboard = result.captures.find((c) => c.url.endsWith('/dashboard'));
+  assert.ok(dashboard, 'the HTML page must ALSO be captured (captures is a superset of pages)');
+  assert.deepEqual(dashboard!.setCookie, ['sessionId=abc']);
+});

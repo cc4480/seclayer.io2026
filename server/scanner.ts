@@ -13,7 +13,8 @@ import { runAggressiveProbes } from "./aggressiveProbes.js";
 import { runApiSecProbes } from "./apiProbes.js";
 import { probeJwtAuth } from "./jwtProbe.js";
 import { probeDomXss } from "./domXss.js";
-import { runPassiveScan } from "./passiveScan.js";
+import { runPassiveScan, cookieFlagIssues } from "./passiveScan.js";
+import { analyzeSecrets } from "./staticAnalysis.js";
 import { buildScanCoverage } from "./coverage.js";
 import type { DiagnosticResult, ScanOptions } from "./scanTypes.js";
 
@@ -164,6 +165,26 @@ export async function runDiagnostics(
         budgetMs: 15000,
         seedHtml: rootHtml,
       });
+
+      // Extend secret-signature + cookie-flag analysis beyond the root
+      // document to every page the crawler actually visited, HTML or not —
+      // e.g. a JSON API endpoint (like /api/settings) that hardcodes secrets
+      // in its response, or a cookie set by a page other than the root.
+      // Deduped so the same secret/cookie found via multiple pages isn't
+      // repeated in the report.
+      const seenSecretKeys = new Set(result.sastFindings.map((f) => `${f.issue}|${f.file}`));
+      const isHttpsTarget = url.startsWith("https://");
+      for (const capture of crawl.captures) {
+        for (const sf of analyzeSecrets(capture.text, capture.url)) {
+          const key = `${sf.issue}|${sf.file}`;
+          if (seenSecretKeys.has(key)) continue;
+          seenSecretKeys.add(key);
+          result.sastFindings.push(sf);
+        }
+        for (const issue of cookieFlagIssues(capture.setCookie, isHttpsTarget, result.cookieIssues.length)) {
+          if (!result.cookieIssues.includes(issue)) result.cookieIssues.push(issue);
+        }
+      }
 
       // Optional headless rendering: merge JS-rendered links and XHR/fetch
       // endpoints the static crawl cannot see (no-op unless explicitly enabled).

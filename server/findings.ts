@@ -223,7 +223,10 @@ function buildCookieFindings(diag: DiagnosticResult): Finding[] {
   return findings;
 }
 
-// 3. SAST (static code security analysis) findings.
+// 3. SAST (static code security analysis) findings. `sf.file` is a URL for
+// findings from a specific crawled page/endpoint (vs. the historical
+// "Client-served HTML/JavaScript" label for the root document) — surfaced as
+// `endpoint` so a reader can tell WHERE it leaked, not just that it did.
 function buildSastFindings(diag: DiagnosticResult): Finding[] {
   return diag.sastFindings.map((sf) => ({
     id: fid(),
@@ -233,6 +236,7 @@ function buildSastFindings(diag: DiagnosticResult): Finding[] {
     confidence: sf.confidence,
     fix: sf.fix,
     category: "SAST",
+    endpoint: /^https?:\/\//i.test(sf.file) ? sf.file : undefined,
   }));
 }
 

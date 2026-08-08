@@ -12,6 +12,40 @@ import { bolaProbe } from "./bola.js";
 // introspection, exposed-object endpoint, and the BOLA/IDOR authorization probe.
 export const API_PROBE_COUNT = 3;
 
+// Guessable paths for a single admin record OR a "list every user" admin
+// panel. Kept short and specific (not a huge wordlist) to stay a targeted
+// heuristic, not a brute-force directory scan.
+const EXPOSED_USER_OBJECT_PATHS = [
+  "/api/v1/users/admin",
+  "/admin/users",
+  "/api/admin/users",
+  "/api/v1/admin/users",
+];
+
+// Pulls a real identifying value (or, failing that, the key name) out of a
+// JSON body that looks like a user record — a single object (optionally
+// wrapped in .user/.data) OR a list of them, taking the first element. Empty
+// string when nothing recognizable is present, so callers can treat that as
+// "not a match" without a separate boolean.
+function extractUserMarker(jsonText: string): string {
+  try {
+    const obj = JSON.parse(jsonText);
+    let candidate: any = obj?.user ?? obj?.data ?? obj;
+    if (Array.isArray(candidate)) candidate = candidate[0];
+    if (!candidate || typeof candidate !== "object") return "";
+    for (const k of ["email", "username", "role"]) {
+      const v = candidate[k];
+      if (typeof v === "string" && v) return v;
+    }
+    for (const k of ["email", "username", "role"]) {
+      if (k in candidate) return `"${k}"`;
+    }
+  } catch {
+    /* not JSON */
+  }
+  return "";
+}
+
 export async function runApiSecProbes(
   url: string,
   host: string,
@@ -85,49 +119,43 @@ export async function runApiSecProbes(
       /* Ignore fetch errors */
     }
 
-    // 2. Exposed user-object endpoint probe (fixed-path guess). This is a
-    // single-request heuristic: it does NOT prove a cross-tenant authorization
-    // break — that is the separate two-identity BOLA probe below. So it is titled
-    // honestly ("Exposed User Object Endpoint"), never "BOLA", which also keeps it
-    // from colliding with the PROVEN BOLA finding during title-dedup.
-    try {
-      const idorCtl = new AbortController();
-      const idorId = setTimeout(() => idorCtl.abort(), 4000);
-      const idorUrl = `${url}/api/v1/users/admin`;
-      const idorRes = await safeFetch(idorUrl, { headers: apiHeaders, signal: idorCtl.signal });
-      clearTimeout(idorId);
-      const idorText = await idorRes.text();
-      const idorCt = idorRes.headers.get("content-type") || "text/plain";
+    // 2. Exposed user-object endpoint probe (fixed-path guesses). This is a
+    // single-request heuristic per path: it does NOT prove a cross-tenant
+    // authorization break — that is the separate two-identity BOLA probe
+    // below. So it is titled honestly ("Exposed User Object Endpoint"), never
+    // "BOLA", which also keeps it from colliding with the PROVEN BOLA finding
+    // during title-dedup. Covers both a single guessable admin-record path AND
+    // a few common "list every user" admin-panel shapes — the latter returns
+    // an ARRAY, not one object, so the marker extraction below checks the
+    // first array element too. `apiHeaders` already carries any caller-supplied
+    // auth (Bearer/Cookie/etc.), so this also catches the case the PRD calls
+    // "broken access control": an endpoint that checks SOME session exists but
+    // never checks the caller is actually authorized (any logged-in user, not
+    // just an admin, gets the full list).
+    for (const path of EXPOSED_USER_OBJECT_PATHS) {
+      try {
+        const idorCtl = new AbortController();
+        const idorId = setTimeout(() => idorCtl.abort(), 4000);
+        const idorUrl = `${url}${path}`;
+        const idorRes = await safeFetch(idorUrl, { headers: apiHeaders, signal: idorCtl.signal });
+        clearTimeout(idorId);
+        const idorText = await idorRes.text();
+        const idorCt = idorRes.headers.get("content-type") || "text/plain";
 
-      // Only flag when a JSON user object is actually returned — a 200 HTML page
-      // that happens to contain the word "email" is not an exposed record. Quote a
-      // real identifying value (or the key name) so the receipt shows the leak.
-      let marker = "";
-      if (idorRes.status === 200 && /application\/json/i.test(idorCt)) {
-        try {
-          const obj = JSON.parse(idorText);
-          const candidate = obj?.user ?? obj?.data ?? obj;
-          if (candidate && typeof candidate === "object") {
-            for (const k of ["email", "username", "role"]) {
-              const v = (candidate as any)[k];
-              if (typeof v === "string" && v) { marker = v; break; }
-            }
-            if (!marker) {
-              for (const k of ["email", "username", "role"]) {
-                if (k in candidate) { marker = `"${k}"`; break; }
-              }
-            }
-          }
-        } catch { marker = ""; }
-      }
-      if (marker && idorText.includes(marker)) {
+        // Only flag when a JSON user object/list is actually returned — a 200
+        // HTML page that happens to contain the word "email" is not an exposed
+        // record. Quote a real identifying value (or the key name) so the
+        // receipt shows the leak.
+        if (idorRes.status !== 200 || !/application\/json/i.test(idorCt)) continue;
+        const marker = extractUserMarker(idorText);
+        if (!marker || !idorText.includes(marker)) continue;
+
         apiSecFindings.push({
           testName: "Exposed User Object Endpoint",
-          endpoint: "/api/v1/users/admin",
+          endpoint: path,
           severity: "critical",
-          description:
-            "A request to /api/v1/users/admin returned a JSON user/admin record directly. Protected user objects should not be served from a guessable path.",
-          fix: "Require authentication and object-level authorization on user endpoints; do not expose admin/user records at predictable paths.",
+          description: `A request to ${path} returned a JSON user/admin record directly. Protected user objects should not be served from a guessable path, and access to any user-list endpoint must be authorized per-caller, not just gated behind "some session exists".`,
+          fix: "Require authentication AND role-based authorization on user endpoints; do not expose admin/user records at predictable paths.",
           evidence: buildProbeEvidence({
             method: "oracle",
             attackUrl: idorUrl,
@@ -137,12 +165,13 @@ export async function runApiSecProbes(
             matchIndex: idorText.indexOf(marker),
             quote: marker,
             why: "The endpoint returned a JSON user record carrying this identifying field, proving the user/admin object is served directly at this path.",
-            demonstration: `We requested /api/v1/users/admin and the server returned a user record containing ${marker}. A protected user object is reachable directly at this path.`,
+            demonstration: `We requested ${path} and the server returned a user record containing ${marker}. A protected user object is reachable directly at this path.`,
           }),
         });
+        break; // one confirmed hit is enough — the remaining candidates are redundant signal of the same flaw
+      } catch (e) {
+        /* one path's fetch failure never aborts the rest — try the next candidate */
       }
-    } catch (e) {
-      /* Ignore fetch errors */
     }
 
     // 3. Two-identity BOLA / IDOR — proves (or disproves) a cross-tenant read when

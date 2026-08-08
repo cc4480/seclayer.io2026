@@ -23,11 +23,30 @@ export interface InjectableTarget {
   discoveredOnPage?: string;
 }
 
+// One fetched response from the crawl loop, captured regardless of content
+// type (unlike `pages`, which is HTML only) — the raw material for passive
+// analysis (secret signatures, cookie flags) to run against more than just
+// the root document, e.g. a JSON API endpoint like /api/settings that the
+// crawler visits but never treats as an HTML "page" to extract links from.
+export interface CrawlCapture {
+  url: string;
+  status: number;
+  contentType: string;
+  text: string; // capped, see MAX_CAPTURE_CHARS
+  setCookie: string[];
+}
+
 export interface CrawlResult {
   pagesVisited: number;
   pages: string[];
   targets: InjectableTarget[];
+  captures: CrawlCapture[];
 }
+
+// Per-page cap on captured body text — the crawl is already bounded to a
+// handful of pages within a short wall-clock budget, so this is just a
+// backstop against one unexpectedly huge response ballooning memory.
+export const MAX_CAPTURE_CHARS = 300_000;
 
 export interface CrawlOptions {
   maxPages?: number;
@@ -186,6 +205,7 @@ export async function crawlSite(
   const visited = new Set<string>();
   const pages: string[] = [];
   const targets: InjectableTarget[] = [];
+  const captures: CrawlCapture[] = [];
   const queue: Array<{ url: string; depth: number }> = [{ url: stripFragment(rootUrl), depth: 0 }];
 
   const ingestHtml = (html: string, url: string, depth: number) => {
@@ -220,9 +240,16 @@ export async function crawlSite(
           const qp = paramsOf(url);
           if (qp.length) targets.push({ url, method: "GET", params: qp, source: "query" });
           const res = await fetchWithTimeout(fetchFn, url, perRequestMs);
-          if (!/text\/html/i.test(res.headers.get("content-type") || "")) return;
-          const html = await res.text();
-          ingestHtml(html, url, depth);
+          const contentType = res.headers.get("content-type") || "";
+          const setCookie: string[] =
+            typeof (res.headers as any).getSetCookie === "function" ? (res.headers as any).getSetCookie() : [];
+          const text = await res.text().catch(() => "");
+          // Captured regardless of content type — a JSON/plain-text endpoint
+          // (e.g. /api/settings) never becomes an HTML "page" below, but its
+          // body is still fair game for secret-signature/cookie-flag analysis.
+          captures.push({ url, status: res.status, contentType, text: text.slice(0, MAX_CAPTURE_CHARS), setCookie });
+          if (!/text\/html/i.test(contentType)) return;
+          ingestHtml(text, url, depth);
         } catch {
           /* unreachable/blocked page — skip */
         }
@@ -230,5 +257,5 @@ export async function crawlSite(
     );
   }
 
-  return { pagesVisited: pages.length, pages, targets: dedupeTargets(targets) };
+  return { pagesVisited: pages.length, pages, targets: dedupeTargets(targets), captures };
 }
