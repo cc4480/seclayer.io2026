@@ -14,7 +14,7 @@ import { notifyScanComplete } from "./notify.js";
 import * as scanEvents from "./scanEvents.js";
 import type { ScanEventStream } from "./scanEvents.js";
 import type { OobCollaborator } from "./oob.js";
-import type { BolaIdentity } from "../src/types.js";
+import type { BolaIdentity, LoginCredentials } from "../src/types.js";
 
 // There is no cancellation token threaded through the probe pipeline (see
 // db.cancelScan's doc comment), so a canceled scan's in-flight network work
@@ -32,6 +32,7 @@ export function makeProcessScanJob(oobCollaborator?: OobCollaborator) {
     allowActiveProbes: boolean,
     bolaIdentities?: [BolaIdentity, BolaIdentity],
     allowAggressiveProbes?: boolean,
+    loginCredentials?: LoginCredentials,
   ): Promise<void> {
     // Live ticker plumbing, declared out here so the finally can always tear it
     // down regardless of which return/throw path the scan takes.
@@ -76,7 +77,7 @@ export function makeProcessScanJob(oobCollaborator?: OobCollaborator) {
 
       // Active diagnostics (HTTP probing, header/secret/SCA/path checks, fuzzing).
       db.updateScan(scanId, { status: "scanning" });
-      const diagnostics = await runDiagnostics(scan.url, scan.authHeader, { allowActiveProbes, allowAggressiveProbes, bolaIdentities, oob: oobCollaborator, scanId, emit });
+      const diagnostics = await runDiagnostics(scan.url, scan.authHeader, { allowActiveProbes, allowAggressiveProbes, bolaIdentities, loginCredentials, oob: oobCollaborator, scanId, emit });
       if (isCanceled(scanId)) { console.log(`[Job Worker] Scan ${scanId} was canceled mid-flight — skipping analysis.`); return; }
 
       // The rich per-injection events are done; stop the live narrator so the

@@ -8,7 +8,7 @@ import { assertScanTargetSafe } from "../scanner.js";
 import { activeProbesUnlocked } from "../activeProbeGate.js";
 import { retestFinding } from "../retest.js";
 import * as scanEvents from "../scanEvents.js";
-import type { BolaIdentity } from "../../src/types.js";
+import type { BolaIdentity, LoginCredentials } from "../../src/types.js";
 import type { RouteContext } from "./context.js";
 
 // Validate + normalize a client-supplied two-identity BOLA payload. Returns a
@@ -31,6 +31,16 @@ function sanitizeBolaIdentities(raw: any): [BolaIdentity, BolaIdentity] | undefi
   return a && b ? [a, b] : undefined;
 }
 
+// Validate + normalize client-supplied login credentials for the weak-
+// session-token probe. Used for this run only, never persisted.
+function sanitizeLoginCredentials(raw: any): LoginCredentials | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const username = typeof raw.username === "string" ? raw.username.trim() : "";
+  const password = typeof raw.password === "string" ? raw.password : "";
+  if (!username || !password) return undefined;
+  return { username, password };
+}
+
 export function registerScanRoutes(app: express.Express, ctx: RouteContext) {
   const { requireAuth, getUserId, processScanJob } = ctx;
 
@@ -50,6 +60,7 @@ export function registerScanRoutes(app: express.Express, ctx: RouteContext) {
     // Optional two-identity BOLA/IDOR test. Only meaningful on a verified target
     // (active probes gated below); when the shape is invalid it is simply dropped.
     const bolaIdentities = sanitizeBolaIdentities(req.body.bolaIdentities);
+    const loginCredentials = sanitizeLoginCredentials(req.body.loginCredentials);
 
     const user = db.getUser(userId);
     if (!user) {
@@ -102,7 +113,7 @@ export function registerScanRoutes(app: express.Express, ctx: RouteContext) {
     const allowAggressiveProbes = allowActiveProbes && req.body.aggressiveProbes === true;
 
     // Trigger asynchronous background worker flow mimicking the pg-boss worker pipeline
-    processScanJob(scan.id, allowActiveProbes, bolaIdentities, allowAggressiveProbes);
+    processScanJob(scan.id, allowActiveProbes, bolaIdentities, allowAggressiveProbes, loginCredentials);
 
     res.json({ status: "ok", scan });
   });

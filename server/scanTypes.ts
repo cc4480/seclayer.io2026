@@ -1,7 +1,7 @@
 // Shared scan data contracts: the DiagnosticResult produced by runDiagnostics
 // and the ScanOptions that configure it. Extracted so the probe/analysis modules
 // can depend on the shapes without importing the scanner entry point.
-import type { Finding, Severity, ExploitEvidence, BolaIdentity, ScanCoverage } from "../src/types.js";
+import type { Finding, Severity, ExploitEvidence, BolaIdentity, LoginCredentials, ScanCoverage } from "../src/types.js";
 import type { OobCollaborator } from "./oob.js";
 import type { EmitFn } from "./scanEvents.js";
 
@@ -102,6 +102,13 @@ export interface ScanOptions {
   // ownership must still be verified. When absent, the two-identity probe is
   // simply skipped (the rest of the scan is unaffected).
   bolaIdentities?: [BolaIdentity, BolaIdentity];
+
+  // Real credentials for a discovered login form, supplied by the caller for
+  // a target they own — unlocks the weak-session-token probe (one real login,
+  // then an offline attempt to reproduce the resulting token from common weak
+  // recipes). Layered on top of allowAggressiveProbes, like the other
+  // mutating/credentialed probes. Absent → the probe is simply skipped.
+  loginCredentials?: LoginCredentials;
 
   // Out-of-band collaborator used to PROVE blind vulnerabilities: the scanner
   // injects a unique callback URL and, if the target reaches back to it, emits a

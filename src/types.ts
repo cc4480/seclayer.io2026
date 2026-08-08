@@ -78,6 +78,18 @@ export interface BolaIdentity {
   ownMarker?: string;  // a value known to be unique to this identity's data (e.g. its email)
 }
 
+// Real, caller-supplied credentials for a target the caller owns — used ONLY
+// to unlock the weak-session-token probe (server/redTeam/weakSessionToken.ts),
+// which logs in exactly once to capture a token to test for predictability.
+// Never guessed/brute-forced: the scanner still never negotiates or discovers
+// a session on its own, matching the "no autonomous login-form crawling"
+// posture everywhere else — the caller is handing over real credentials
+// explicitly, the same trust model as authHeader/bolaIdentities.
+export interface LoginCredentials {
+  username: string;
+  password: string;
+}
+
 export interface Finding {
   id: string;
   title: string;

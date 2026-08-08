@@ -599,6 +599,64 @@ test('two-identity BOLA: public endpoint → Unauthenticated Access (§3.1b), no
   });
 });
 
+test('runDiagnostics wires loginCredentials end-to-end: discovers the login form, proves a predictable token', async () => {
+  const crypto = await import('node:crypto');
+  const handler: http.RequestListener = (req, res) => {
+    if (req.method === 'POST' && req.url === '/login') {
+      let body = '';
+      req.on('data', (c) => (body += c));
+      req.on('end', () => {
+        const params = new URLSearchParams(body);
+        const token = crypto.createHash('md5')
+          .update(params.get('username') + String(Math.floor(Date.now() / 1000)))
+          .digest('hex');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, token }));
+      });
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end('<!doctype html><html><body>'
+      + '<form action="/login" method="POST"><input name="username"><input name="password" type="password"></form>'
+      + '</body></html>');
+  };
+  await withServer(handler, async (port) => {
+    const diag = await runDiagnostics(`http://127.0.0.1:${port}`, undefined, {
+      allowActiveProbes: true,
+      allowAggressiveProbes: true,
+      loginCredentials: { username: 'carlos', password: 'whatever' },
+    });
+    const weak = (diag.redTeamFindings || []).find((f: any) => /Predictable Session Token/i.test(f.testName));
+    assert.ok(weak, 'expected the weak-session-token probe to run and prove the MD5(username+timestamp) pattern');
+    assert.equal(weak!.severity, 'critical');
+    assert.equal(isProven({ evidence: weak!.evidence } as any), true);
+  });
+});
+
+test('runDiagnostics never runs the weak-session-token probe without loginCredentials or without aggressive tier', async () => {
+  const handler: http.RequestListener = (req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end('<!doctype html><html><body>'
+      + '<form action="/login" method="POST"><input name="username"><input name="password" type="password"></form>'
+      + '</body></html>');
+  };
+  await withServer(handler, async (port) => {
+    // Active but not aggressive, WITH credentials supplied — still must not run.
+    const diagNotAggressive = await runDiagnostics(`http://127.0.0.1:${port}`, undefined, {
+      allowActiveProbes: true,
+      loginCredentials: { username: 'carlos', password: 'whatever' },
+    });
+    assert.ok(!(diagNotAggressive.redTeamFindings || []).some((f: any) => /Predictable Session Token/i.test(f.testName)));
+
+    // Aggressive tier but NO credentials supplied — still must not run.
+    const diagNoCreds = await runDiagnostics(`http://127.0.0.1:${port}`, undefined, {
+      allowActiveProbes: true,
+      allowAggressiveProbes: true,
+    });
+    assert.ok(!(diagNoCreds.redTeamFindings || []).some((f: any) => /Predictable Session Token/i.test(f.testName)));
+  });
+});
+
 test('smart discovered-parameter fuzzer proves XSS + SQLi and skips an inert param', async () => {
   // Root links to three parameterized endpoints; the crawler discovers them and
   // the fuzzer injects. /search reflects (XSS), /item errors (SQLi), /static is inert.

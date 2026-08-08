@@ -4,13 +4,14 @@
 // collaborator) without server.ts owning every handler body.
 import type express from "express";
 import type { OobCollaborator } from "../oob.js";
-import type { BolaIdentity } from "../../src/types.js";
+import type { BolaIdentity, LoginCredentials } from "../../src/types.js";
 
 export type ProcessScanJob = (
   scanId: string,
   allowActiveProbes: boolean,
   bolaIdentities?: [BolaIdentity, BolaIdentity],
   allowAggressiveProbes?: boolean,
+  loginCredentials?: LoginCredentials,
 ) => void;
 
 export type ProcessNmapScanJob = (scanId: string) => void;

@@ -8,6 +8,7 @@ import { parseAuthHeader } from "./evidence.js";
 import { fuzzDiscoveredTargets } from "./paramFuzzer.js";
 import { buildGuessedTargets } from "./paramMiner.js";
 import { probeStoredXss } from "./storedXss.js";
+import { findLoginTarget, probeWeakSessionToken } from "./redTeam/weakSessionToken.js";
 import { runRedTeamProbes } from "./redTeamProbes.js";
 import { runAggressiveProbes } from "./aggressiveProbes.js";
 import { runApiSecProbes } from "./apiProbes.js";
@@ -199,6 +200,28 @@ export async function runDiagnostics(
               .filter((t) => t.params.length > 0),
           ];
           allTargets = dedupeTargets([...crawl.targets, ...renderedTargets]);
+        }
+      }
+
+      // Weak-session-token probe: only runs when the caller explicitly supplied
+      // real login credentials for a target they own (never guessed) — logs in
+      // ONCE against a discovered login-shaped form and tries to reproduce the
+      // resulting token from common weak (seed, algorithm) recipes. Aggressive
+      // tier, same trust bar as the other credentialed/mutating probes below.
+      // Deliberately runs BEFORE discovered-parameter fuzzing: fuzzing hits
+      // every discovered form (including this same login form) with many
+      // payloads, which can exhaust a target's own login rate limiter before
+      // this probe's one legitimate login gets a turn — so it goes first.
+      if (allowAggressiveProbes && opts.loginCredentials) {
+        const loginTarget = findLoginTarget(allTargets);
+        if (loginTarget) {
+          emit?.("system", `Testing session token strength via ${loginTarget.url}…`);
+          try {
+            const weakToken = await probeWeakSessionToken(loginTarget, opts.loginCredentials, { ...headers, "Cache-Control": "no-cache" });
+            if (weakToken) result.redTeamFindings = [...(result.redTeamFindings || []), weakToken];
+          } catch (e) {
+            console.warn("Weak session-token probe encountered an error", e);
+          }
         }
       }
 
