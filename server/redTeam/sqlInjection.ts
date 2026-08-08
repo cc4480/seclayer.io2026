@@ -8,8 +8,19 @@ import type { ProbeContext, RedTeamFinding } from "./types.js";
 
 // Match specific database error signatures only — never bare "syntax error",
 // which appears in unrelated content and causes false positives.
+// "near "X": syntax error" is SQLite's own raw parser error text, produced
+// identically by every Node SQLite binding (better-sqlite3, node:sqlite,
+// sqlite3) — none of which actually throw "SQLite3::"/"SQLiteException"
+// (those are PHP/Java driver class-name prefixes, not what a Node app's
+// error message looks like), so real SQLite injection went undetected until
+// this was added. Confirmed by scanning a genuine better-sqlite3 target
+// (test-targets/tier1-owasp-foundation) — see its vulnerabilities.json. The
+// quotes are matched as \\?" (an OPTIONAL backslash before each) because a
+// JSON-encoded response body (e.g. `res.json({ error: err.message })`, the
+// obvious way to surface this) escapes them to \" — a bare `"` in the
+// pattern never matches that and silently misses the common case.
 const SQL_ERROR_SIGNATURE =
-  /(SQL syntax;|valid MySQL result|mysqli?_fetch|ORA-\d{4,5}|PLS-\d{4,5}|PostgreSQL.*?ERROR|PG::\w*Error|SQLSTATE\[|SQLite3?::|SQLiteException|Unclosed quotation mark after the character string|quoted string not properly terminated|Microsoft OLE DB Provider for SQL Server|ODBC SQL Server Driver|Npgsql\.)/i;
+  /(SQL syntax;|valid MySQL result|mysqli?_fetch|ORA-\d{4,5}|PLS-\d{4,5}|PostgreSQL.*?ERROR|PG::\w*Error|SQLSTATE\[|SQLite3?::|SQLiteException|SQLITE_ERROR|near \\?".*?\\?": syntax error|Unclosed quotation mark after the character string|quoted string not properly terminated|Microsoft OLE DB Provider for SQL Server|ODBC SQL Server Driver|Npgsql\.)/i;
 
 export async function probeSqlInjection(ctx: ProbeContext): Promise<RedTeamFinding | null> {
   const attackUrl = `${ctx.url}/?id=%27%20OR%201%3D1--`;

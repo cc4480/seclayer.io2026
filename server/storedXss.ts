@@ -43,9 +43,13 @@ async function timedFetch(url: string, init: RequestInit): Promise<Response> {
 }
 
 // Candidate pages a stored value might surface on: the form's own action URL
-// (many simple apps post to and render the same URL) and the origin root.
-function displayCandidates(actionUrl: string): string[] {
+// (many simple apps post to and render the same URL), the page the form was
+// discovered on (a common REST-style split — e.g. a form on /post/1 posting
+// to /api/comments, where /post/1 is the only page that actually renders
+// it), and the origin root.
+function displayCandidates(actionUrl: string, discoveredOnPage?: string): string[] {
   const out = [actionUrl];
+  if (discoveredOnPage) out.push(discoveredOnPage);
   try {
     out.push(new URL(actionUrl).origin + "/");
   } catch { /* actionUrl not absolute — skip the root candidate */ }
@@ -90,7 +94,7 @@ export async function probeStoredXss(
 
       // 2. Re-fetch candidate display pages with a fresh GET that never carried
       //    the payload. If it comes back, it was stored.
-      for (const displayUrl of displayCandidates(t.url)) {
+      for (const displayUrl of displayCandidates(t.url, t.discoveredOnPage)) {
         let res: Response;
         try {
           res = await timedFetch(displayUrl, { headers });

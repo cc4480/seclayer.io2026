@@ -15,6 +15,12 @@ export interface InjectableTarget {
   // POST body encoding. Defaults to form-urlencoded; "json" makes the fuzzer send
   // an application/json body (for API endpoints that only accept JSON).
   contentType?: "form" | "json";
+  // For a "form" target, the page the <form> was found on — often DIFFERENT
+  // from its action URL (e.g. a form on /post/1 posting to /api/comments).
+  // The stored-XSS probe needs this: it's frequently the only page that
+  // actually renders the persisted value back, so it must be a display
+  // candidate alongside the action URL and site root.
+  discoveredOnPage?: string;
 }
 
 export interface CrawlResult {
@@ -98,7 +104,7 @@ export function extractForms(html: string, baseUrl: string): InjectableTarget[] 
     let f: RegExpExecArray | null;
     while ((f = fieldRe.exec(inner))) fields.add(f[1]);
     if (fields.size > 0) {
-      targets.push({ url, method, params: [...fields], source: "form" });
+      targets.push({ url, method, params: [...fields], source: "form", discoveredOnPage: baseUrl });
     }
   }
   return targets;

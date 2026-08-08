@@ -69,6 +69,77 @@ test("no finding when the app escapes stored output (no false positive)", async 
   });
 });
 
+// A REST-style split: POST goes to /api/comments (which never renders HTML
+// back), and the ONLY page that displays stored comments is /post/1 — a
+// different URL entirely. Regression coverage for discoveredOnPage: without
+// it, displayCandidates only tries the action URL and site root, neither of
+// which is /post/1, so the real stored XSS would go undetected.
+async function withSplitCommentApp(fn: (port: number) => Promise<void>) {
+  const stored: string[] = [];
+  const readBody = (req: http.IncomingMessage) =>
+    new Promise<string>((r) => { let d = ""; req.on("data", (c) => (d += c)); req.on("end", () => r(d)); });
+
+  const server = http.createServer(async (req, res) => {
+    if (req.method === "POST" && req.url === "/api/comments") {
+      const text = new URLSearchParams(await readBody(req)).get("text") || "";
+      stored.push(text);
+      res.writeHead(201, { "Content-Type": "application/json" });
+      return res.end('{"success":true}');
+    }
+    if (req.url === "/post/1") {
+      const items = stored.map((c) => `<p>${c}</p>`).join(""); // unescaped
+      res.writeHead(200, { "Content-Type": "text/html" });
+      return res.end(`<!doctype html><html><body>${items}</body></html>`);
+    }
+    res.writeHead(404, { "Content-Type": "text/html" });
+    res.end("<!doctype html><html><body>not found</body></html>");
+  });
+
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+  const port = (server.address() as AddressInfo).port;
+  const prevEnv = process.env.NODE_ENV;
+  const prevAllow = process.env.SCAN_DEV_ALLOW_HOSTS;
+  try {
+    process.env.NODE_ENV = "development";
+    process.env.SCAN_DEV_ALLOW_HOSTS = `127.0.0.1:${port}`;
+    await fn(port);
+  } finally {
+    if (prevEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = prevEnv;
+    if (prevAllow === undefined) delete process.env.SCAN_DEV_ALLOW_HOSTS; else process.env.SCAN_DEV_ALLOW_HOSTS = prevAllow;
+    await new Promise((r) => server.close(r));
+  }
+}
+
+test("confirms stored XSS when the display page differs from the form's action URL (discoveredOnPage)", async () => {
+  await withSplitCommentApp(async (port) => {
+    const target: InjectableTarget = {
+      url: `http://127.0.0.1:${port}/api/comments`,
+      method: "POST",
+      params: ["text"],
+      source: "form",
+      discoveredOnPage: `http://127.0.0.1:${port}/post/1`,
+    };
+    const findings = await probeStoredXss([target], HEADERS);
+    assert.equal(findings.length, 1, "expected one stored-XSS finding via the discovered display page");
+    assert.match(findings[0].evidence.attack.request, /^GET \/post\/1 HTTP\/1\.1/m);
+  });
+});
+
+test("misses the same stored XSS when discoveredOnPage is absent (documents the limitation this fixes)", async () => {
+  await withSplitCommentApp(async (port) => {
+    const target: InjectableTarget = {
+      url: `http://127.0.0.1:${port}/api/comments`,
+      method: "POST",
+      params: ["text"],
+      source: "form",
+      // no discoveredOnPage — only the action URL (/api/comments, never
+      // renders HTML) and the site root (never registered, 404s) are tried.
+    };
+    const findings = await probeStoredXss([target], HEADERS);
+    assert.equal(findings.length, 0);
+  });
+});
+
 test("no finding for a GET-only target (nothing to submit)", async () => {
   await withGuestbook(false, async (port) => {
     const getTarget: InjectableTarget = { url: `http://127.0.0.1:${port}/`, method: "GET", params: ["q"], source: "query" };

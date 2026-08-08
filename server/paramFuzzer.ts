@@ -37,8 +37,12 @@ export async function fuzzDiscoveredTargets(
   let budget = MAX_REQUESTS;
   let paramsTested = 0;
 
+  // Kept in sync with server/redTeam/sqlInjection.ts's SQL_ERROR_SIGNATURE —
+  // see its comment for why the bare "near "X": syntax error"/SQLITE_ERROR
+  // patterns matter: they're SQLite's actual raw Node-driver error text,
+  // not the "SQLite3::"/"SQLiteException" PHP/Java class-name prefixes.
   const sqlErrorSig =
-    /(SQL syntax;|valid MySQL result|mysqli?_fetch|ORA-\d{4,5}|PLS-\d{4,5}|PostgreSQL.*?ERROR|PG::\w*Error|SQLSTATE\[|SQLite3?::|SQLiteException|Unclosed quotation mark after the character string|quoted string not properly terminated|Microsoft OLE DB Provider for SQL Server|ODBC SQL Server Driver|Npgsql\.)/i;
+    /(SQL syntax;|valid MySQL result|mysqli?_fetch|ORA-\d{4,5}|PLS-\d{4,5}|PostgreSQL.*?ERROR|PG::\w*Error|SQLSTATE\[|SQLite3?::|SQLiteException|SQLITE_ERROR|near \\?".*?\\?": syntax error|Unclosed quotation mark after the character string|quoted string not properly terminated|Microsoft OLE DB Provider for SQL Server|ODBC SQL Server Driver|Npgsql\.)/i;
 
   const buildUrl = (base: string, param: string, value: string): string => {
     const u = new URL(base);

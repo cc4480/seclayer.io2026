@@ -44,6 +44,7 @@ test('extractForms captures action, method, and field names', () => {
   const login = forms.find((f) => f.url.endsWith('/login'))!;
   assert.equal(login.method, 'POST');
   assert.deepEqual(login.params.sort(), ['password', 'username']);
+  assert.equal(login.discoveredOnPage, BASE, 'stamps the page the form was found on, not just its action URL');
   const search = forms.find((f) => f.url.endsWith('/search'))!;
   assert.equal(search.method, 'GET');
   assert.deepEqual(search.params.sort(), ['cat', 'q']);
