@@ -26,8 +26,18 @@ const loginLimiter = rateLimit({
   message: { error: 'Too many login attempts, please try again later.' },
 });
 
+// better-sqlite3 throws (rather than just not matching) when a bound
+// parameter isn't a primitive — e.g. a NoSQL-style injection payload like
+// {"$ne": null}, which the discovered-parameter fuzzer legitimately tries
+// once /login is a known form target. That's an uncaught exception, not a
+// clean 401, so guard the type before ever touching the DB.
+function isPlainString(v) {
+  return typeof v === 'string';
+}
+
 function login(req, res) {
   const { username, password } = req.body || {};
+  if (!isPlainString(username) || !isPlainString(password)) return res.status(401).json({ error: 'invalid credentials' });
   const user = db.prepare('SELECT * FROM users WHERE username = ? AND password = ?').get(username, password);
   if (!user) return res.status(401).json({ error: 'invalid credentials' });
 
@@ -39,6 +49,7 @@ function login(req, res) {
 
 function loginHardened(req, res) {
   const { username, password } = req.body || {};
+  if (!isPlainString(username) || !isPlainString(password)) return res.status(401).json({ error: 'invalid credentials' });
   const user = db.prepare('SELECT * FROM users WHERE username = ? AND password = ?').get(username, password);
   if (!user) return res.status(401).json({ error: 'invalid credentials' });
 

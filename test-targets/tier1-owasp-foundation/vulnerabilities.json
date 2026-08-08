@@ -2,7 +2,7 @@
   "tier": 1,
   "appName": "OWASP Foundation Test Fixture",
   "resultsVerifiedAt": "2026-08-08",
-  "resultsScanId": "scan_634ce1e33d61bdbe",
+  "resultsScanId": "scan_a9c23e6ed997bd27",
   "vulnerabilities": [
     {
       "id": "T1-SQLi-001",
@@ -44,8 +44,8 @@
       "endpoint": "POST /login",
       "cwe": "CWE-384",
       "severity": "Critical",
-      "actualResult": "NOT DETECTED — the one remaining gap, and NOT closed alongside the other three (deliberately, pending a product-scope decision, not a further bug).",
-      "notes": "Two distinct sub-issues, both genuinely untestable black-box with the scanner's current, deliberate design: (1) token PREDICTABILITY — proving an MD5(username+timestamp) token is weak requires either knowing the algorithm or real statistical entropy analysis across many samples, neither of which exists. (2) the insecure Set-Cookie flags (httpOnly:false, secure:false) on THIS specific response — the cookie-flag check now runs against every crawled page's response (fixed alongside T1-DataExposure-001), but /login is POST-only and only reachable by actually submitting valid credentials, which the scanner does not do: prd.md's non-goals explicitly rule out 'authenticated multi-step crawling (e.g. following a login form)' — auth is a single supplied header, never a session the crawler negotiates itself. Closing this for real means either building genuine token-entropy analysis, or revisiting that scope boundary (having the scanner submit speculative credentials) — a product decision, not a quick fix."
+      "actualResult": "DETECTED — \"Predictable Session Token (Weak Seed Hash)\", CRITICAL, real evidence: an exact byte-for-byte hash match against the live captured token.",
+      "notes": "Closed via a new, deliberately narrow probe (server/redTeam/weakSessionToken.ts), NOT generic statistical entropy analysis — entropy testing was considered and rejected for this exact case: MD5's output is uniformly distributed regardless of input entropy, so a hash of a weak seed is statistically indistinguishable from a real CSPRNG output. What actually works: with real credentials the CALLER explicitly supplies (never guessed — matches the trust model of authHeader/bolaIdentities, does not reopen prd.md's 'no autonomous login-form crawling' non-goal), log in exactly once, then try to reproduce the captured token OFFLINE from a small set of common (seed, algorithm) recipes across a short timestamp window. An exact match is definitive proof, not a probabilistic guess. New scan option `loginCredentials` threaded through routes/scans.ts -> scanWorker.ts -> scanner.ts. Along the way, fixed a real crash in this fixture's own auth.js (better-sqlite3 throws, not just fails to match, when a bound parameter isn't a string — hit once /login became a fuzzed discovered-form target) and reordered the probe to run before discovered-parameter fuzzing so it gets a clean shot at the login rate limiter."
     },
     {
       "id": "T1-AccessControl-001",
