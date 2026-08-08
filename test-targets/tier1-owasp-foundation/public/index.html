@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+<head><title>Tier 1 — OWASP Foundation Test Fixture</title></head>
+<body>
+<h1>OWASP Foundation Test Fixture</h1>
+<p>Intentionally vulnerable — see <code>vulnerabilities.json</code>. Local testing only.</p>
+
+<h2>User directory</h2>
+<input id="search" placeholder="search users">
+<button onclick="fetch('/api/users?search=' + encodeURIComponent(document.getElementById('search').value)).then(r=>r.json()).then(d=>document.getElementById('results').textContent = JSON.stringify(d))">Search</button>
+<pre id="results"></pre>
+
+<h2>Navigation</h2>
+<ul>
+  <li><a href="/profile?name=Guest">My Profile</a></li>
+  <li><a href="/post/1">Blog Post #1</a></li>
+  <li><a href="/post-safe/1">Blog Post #1 (sanitized thread)</a></li>
+  <li><a href="/api/invoice/1">My Invoice (requires login)</a></li>
+  <li><a href="/admin/users">Admin — User Management</a></li>
+  <li><a href="/api/settings">App Settings</a></li>
+</ul>
+
+<h2>Login</h2>
+<form onsubmit="event.preventDefault();fetch('/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:document.getElementById('u').value,password:document.getElementById('p').value})}).then(r=>r.json()).then(d=>document.getElementById('loginResult').textContent=JSON.stringify(d))">
+  <input id="u" name="username" placeholder="username" value="carlos">
+  <input id="p" name="password" placeholder="password" type="password">
+  <button type="submit">Log in</button>
+</form>
+<pre id="loginResult"></pre>
+
+</body>
+</html>

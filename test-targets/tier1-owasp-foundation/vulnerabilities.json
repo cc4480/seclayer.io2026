@@ -1,0 +1,86 @@
+{
+  "tier": 1,
+  "appName": "OWASP Foundation Test Fixture",
+  "resultsVerifiedAt": "2026-08-08",
+  "resultsScanId": "scan_a0a43100290b83c6",
+  "vulnerabilities": [
+    {
+      "id": "T1-SQLi-001",
+      "type": "SQL Injection (Error-Based)",
+      "endpoint": "GET /api/users?search=",
+      "cwe": "CWE-89",
+      "severity": "Critical",
+      "actualResult": "DETECTED — \"SQL Injection (discovered parameter \\\"search\\\" on /api/users)\", CRITICAL, confidence:high, real evidence",
+      "notes": "Initially MISSED on the first real scan: server/redTeam/sqlInjection.ts's/server/paramFuzzer.ts's SQL_ERROR_SIGNATURE regex had no pattern matching better-sqlite3's actual raw error text (\"near \\\"X\\\": syntax error\") — it only had \"SQLite3::\"/\"SQLiteException\", which are PHP/Java driver class-name prefixes that never appear in a real Node app. Fixed in this session (both files) and re-verified detecting."
+    },
+    {
+      "id": "T1-XSS-Reflected-001",
+      "type": "Cross-Site Scripting (Reflected)",
+      "endpoint": "GET /profile?name=",
+      "cwe": "CWE-79",
+      "severity": "High",
+      "actualResult": "DETECTED — \"Reflected XSS (discovered parameter \\\"name\\\" on /profile)\", HIGH, confidence:high, real evidence. Worked on the very first scan, no fix needed."
+    },
+    {
+      "id": "T1-XSS-Stored-001",
+      "type": "Cross-Site Scripting (Stored)",
+      "endpoint": "POST /api/comments, GET /post/:id",
+      "cwe": "CWE-79",
+      "severity": "Critical",
+      "actualResult": "DETECTED — \"Stored XSS (discovered form field \\\"text\\\" on /api/comments)\", CRITICAL, confidence:high, real evidence",
+      "notes": "Initially MISSED: server/storedXss.ts only re-checked the form's action URL and the site root for the persisted payload — never the page the form was actually found ON, which for a REST-style split (form on /post/1, action /api/comments) is neither. Added InjectableTarget.discoveredOnPage (stamped by server/crawler.ts's extractForms) and had displayCandidates() include it; re-verified detecting. Also had to fix a fixture bug: the form had no postId field, so the crawler's raw POST (bypassing this page's own onsubmit JS) 400'd before ever storing anything."
+    },
+    {
+      "id": "T1-IDOR-001",
+      "type": "Insecure Direct Object Reference",
+      "endpoint": "GET /api/invoice/:id",
+      "cwe": "CWE-639",
+      "severity": "High",
+      "actualResult": "DETECTED — \"Broken Object Level Authorization (BOLA)\", CRITICAL, confidence:high, real evidence. Worked on the very first scan (with bolaIdentities supplied), no fix needed."
+    },
+    {
+      "id": "T1-Auth-001",
+      "type": "Broken Authentication (predictable session token)",
+      "endpoint": "POST /login",
+      "cwe": "CWE-384",
+      "severity": "Critical",
+      "actualResult": "NOT DETECTED (confirmed gap) — no finding about the token itself. Seclayer has no probe that captures multiple tokens and analyzes them for a predictable pattern. The insecure cookie flags (httpOnly:false, secure:false) were NOT separately flagged either in this run — worth a closer look at whether the cookie-flag check ran against this specific cookie."
+    },
+    {
+      "id": "T1-AccessControl-001",
+      "type": "Broken Access Control (missing role check)",
+      "endpoint": "GET /admin/users",
+      "cwe": "CWE-276",
+      "severity": "Critical",
+      "actualResult": "NOT DETECTED (confirmed gap) — the fixed-path 'Exposed User Object Endpoint' probe only checks /api/v1/users/admin, not arbitrary admin paths, and there is no generic 'authenticated-but-unauthorized' detector for custom endpoints."
+    },
+    {
+      "id": "T1-DataExposure-001",
+      "type": "Sensitive Data Exposure",
+      "endpoint": "GET /api/settings",
+      "cwe": "CWE-200",
+      "severity": "High",
+      "actualResult": "NOT DETECTED (confirmed gap) — SAST secret-signature scanning (server/passiveScan.ts's analyzeSecrets) only ever runs over the root page's HTML, never crawled sub-pages or JSON API responses."
+    }
+  ],
+  "negativeControls": [
+    {
+      "id": "T1-NC-001",
+      "description": "Sanitized HTML in a parallel comment thread — should NOT be flagged as XSS",
+      "endpoint": "GET /post-safe/:id",
+      "actualResult": "HELD — no Stored XSS finding referenced /post-safe or /api/comments-safe in the real scan; only the genuinely-vulnerable /api/comments thread was flagged."
+    },
+    {
+      "id": "T1-NC-002",
+      "description": "Rate-limited login (5 attempts / 15 min) — should not be reported as brute-forceable",
+      "endpoint": "POST /login",
+      "actualResult": "HELD — manually verified the limiter returns 429 after 5 attempts/15min; no brute-force finding was reported."
+    },
+    {
+      "id": "T1-NC-003",
+      "description": "Properly hardened login (random token, httpOnly+secure+sameSite=strict cookie) — should not be flagged for weak cookie flags",
+      "endpoint": "POST /login-hardened",
+      "actualResult": "HELD — not independently exercised by the crawler (no discoverable link to it), so this is an absence-of-false-positive by construction rather than a verified pass. Not a strong signal either way."
+    }
+  ]
+}
