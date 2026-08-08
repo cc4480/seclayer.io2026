@@ -2,7 +2,7 @@
   "tier": 1,
   "appName": "OWASP Foundation Test Fixture",
   "resultsVerifiedAt": "2026-08-08",
-  "resultsScanId": "scan_a0a43100290b83c6",
+  "resultsScanId": "scan_634ce1e33d61bdbe",
   "vulnerabilities": [
     {
       "id": "T1-SQLi-001",
@@ -44,7 +44,8 @@
       "endpoint": "POST /login",
       "cwe": "CWE-384",
       "severity": "Critical",
-      "actualResult": "NOT DETECTED (confirmed gap) — no finding about the token itself. Seclayer has no probe that captures multiple tokens and analyzes them for a predictable pattern. The insecure cookie flags (httpOnly:false, secure:false) were NOT separately flagged either in this run — worth a closer look at whether the cookie-flag check ran against this specific cookie."
+      "actualResult": "NOT DETECTED — the one remaining gap, and NOT closed alongside the other three (deliberately, pending a product-scope decision, not a further bug).",
+      "notes": "Two distinct sub-issues, both genuinely untestable black-box with the scanner's current, deliberate design: (1) token PREDICTABILITY — proving an MD5(username+timestamp) token is weak requires either knowing the algorithm or real statistical entropy analysis across many samples, neither of which exists. (2) the insecure Set-Cookie flags (httpOnly:false, secure:false) on THIS specific response — the cookie-flag check now runs against every crawled page's response (fixed alongside T1-DataExposure-001), but /login is POST-only and only reachable by actually submitting valid credentials, which the scanner does not do: prd.md's non-goals explicitly rule out 'authenticated multi-step crawling (e.g. following a login form)' — auth is a single supplied header, never a session the crawler negotiates itself. Closing this for real means either building genuine token-entropy analysis, or revisiting that scope boundary (having the scanner submit speculative credentials) — a product decision, not a quick fix."
     },
     {
       "id": "T1-AccessControl-001",
@@ -52,7 +53,8 @@
       "endpoint": "GET /admin/users",
       "cwe": "CWE-276",
       "severity": "Critical",
-      "actualResult": "NOT DETECTED (confirmed gap) — the fixed-path 'Exposed User Object Endpoint' probe only checks /api/v1/users/admin, not arbitrary admin paths, and there is no generic 'authenticated-but-unauthorized' detector for custom endpoints."
+      "actualResult": "DETECTED — \"Exposed User Object Endpoint\", CRITICAL, real evidence quoting the leaked field, endpoint:/admin/users",
+      "notes": "Initially MISSED: server/apiProbes.ts's exposed-user-object check only tried ONE fixed path (/api/v1/users/admin) and only understood a single JSON object, not a list. Broadened to a small candidate-path list (EXPOSED_USER_OBJECT_PATHS) including /admin/users, and made the marker extraction array-aware (checks the first element of a JSON array too — a 'list every user' admin panel is exactly this shape). Reuses the caller-supplied authHeader that was already threaded through, so this also required passing a top-level authHeader on the scan (not just bolaIdentities) to reach an endpoint gated behind 'some session exists'."
     },
     {
       "id": "T1-DataExposure-001",
@@ -60,7 +62,8 @@
       "endpoint": "GET /api/settings",
       "cwe": "CWE-200",
       "severity": "High",
-      "actualResult": "NOT DETECTED (confirmed gap) — SAST secret-signature scanning (server/passiveScan.ts's analyzeSecrets) only ever runs over the root page's HTML, never crawled sub-pages or JSON API responses."
+      "actualResult": "DETECTED — \"Exposed Credential Signature (Stripe Secret Key)\", CRITICAL, endpoint:http://127.0.0.1:4101/api/settings",
+      "notes": "Initially MISSED: SAST secret-signature scanning (server/staticAnalysis.ts's analyzeSecrets) only ever ran over the root page's HTML — a JSON endpoint discovered by the crawler was fetched (for parameter mining) but its body was discarded unread whenever the content-type wasn't text/html. Added InjectableTarget-adjacent CrawlCapture (server/crawler.ts) so the crawler captures EVERY fetched response body/headers regardless of content type, then server/scanner.ts runs analyzeSecrets AND the cookie-flag check against every capture, not just the root. The finding's endpoint now names which page actually leaked it (server/findings.ts maps sf.file → Finding.endpoint when it's a URL)."
     }
   ],
   "negativeControls": [
