@@ -14,6 +14,7 @@ import { runRedTeamProbes } from "./redTeamProbes.js";
 import { runAggressiveProbes } from "./aggressiveProbes.js";
 import { runApiSecProbes, exposedUserListInCapture } from "./apiProbes.js";
 import { probeJwtAuth } from "./jwtProbe.js";
+import { probeI18nAuthBypass } from "./i18nProbe.js";
 import { probeDomXss } from "./domXss.js";
 import { runPassiveScan, cookieFlagIssues } from "./passiveScan.js";
 import { analyzeSecrets, analyzeDataDumpExposure } from "./staticAnalysis.js";
@@ -202,6 +203,26 @@ export async function runDiagnostics(
           if (!(result.apiSecFindings || []).some((f) => `${f.testName}|${f.endpoint}` === key)) {
             result.apiSecFindings = [...(result.apiSecFindings || []), listFinding];
           }
+        }
+      }
+
+      // Locale-route auth bypass: unlike the checks above this makes NEW
+      // requests (a locale-swapped sibling of each discovered /en//es/ path),
+      // so it's gated behind verified ownership like the other active probes,
+      // even though it's read-only. Every URL the crawl fetched at all (not
+      // just ones that became "pages") is a candidate, since a 401/403 JSON
+      // response never becomes a page but is exactly the gated half of the
+      // differential this needs.
+      if (allowActiveProbes) {
+        try {
+          const i18nFinding = await probeI18nAuthBypass(
+            url,
+            crawl.captures.map((c) => c.url),
+            { ...headers, "Cache-Control": "no-cache" },
+          );
+          if (i18nFinding) result.redTeamFindings = [...(result.redTeamFindings || []), i18nFinding];
+        } catch (e) {
+          console.warn("i18n auth-bypass probe encountered an error", e);
         }
       }
 
