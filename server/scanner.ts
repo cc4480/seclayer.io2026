@@ -16,6 +16,7 @@ import { runApiSecProbes, exposedUserListInCapture, exposedCredentialListInCaptu
 import { probeJwtAuth, extractJwtSecretCandidates } from "./jwtProbe.js";
 import { probeI18nAuthBypass } from "./i18nProbe.js";
 import { extractUrlKeyPairs, probeCredentialUrlPairs } from "./credentialChainProbe.js";
+import { probePrototypePollution } from "./prototypePollutionProbe.js";
 import { probeDomXss } from "./domXss.js";
 import { runPassiveScan, cookieFlagIssues } from "./passiveScan.js";
 import { analyzeSecrets, analyzeDataDumpExposure } from "./staticAnalysis.js";
@@ -278,6 +279,24 @@ export async function runDiagnostics(
           if (i18nFinding) result.redTeamFindings = [...(result.redTeamFindings || []), i18nFinding];
         } catch (e) {
           console.warn("i18n auth-bypass probe encountered an error", e);
+        }
+      }
+
+      // Server-side prototype pollution (AGGRESSIVE tier). Needs discovered POST
+      // endpoints, so it runs here (after the crawl) rather than in the root-only
+      // aggressive orchestrator above. It POSTs a benign body then the "json
+      // spaces" gadget and proves pollution via a response-formatting flip — the
+      // one probe that leaves a transient (cosmetic, self-healing) trace, so it's
+      // gated behind the aggressive+ownership tier and reverts the gadget on a hit.
+      if (allowAggressiveProbes) {
+        const postUrls = [
+          ...new Set(crawl.targets.filter((t) => t.method === "POST").map((t) => t.url)),
+        ];
+        try {
+          const ppFinding = await probePrototypePollution(url, postUrls, { ...headers, "Cache-Control": "no-cache" });
+          if (ppFinding) result.redTeamFindings = [...(result.redTeamFindings || []), ppFinding];
+        } catch (e) {
+          console.warn("prototype-pollution probe encountered an error", e);
         }
       }
 

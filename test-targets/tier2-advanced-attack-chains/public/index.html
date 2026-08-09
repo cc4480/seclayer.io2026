@@ -20,6 +20,13 @@
 </form>
 <pre id="resetResult"></pre>
 
+<h2>Restore session</h2>
+<form action="/api/restore-session" method="POST" onsubmit="event.preventDefault();fetch('/api/restore-session',{method:'POST',headers:{'Content-Type':'application/json'},body:document.getElementById('sess').value}).then(r=>r.json()).then(d=>document.getElementById('restoreResult').textContent=JSON.stringify(d))">
+  <input id="sess" name="sessionData" placeholder="session JSON" value='{"theme":"dark"}'>
+  <button type="submit">Restore</button>
+</form>
+<pre id="restoreResult"></pre>
+
 <h2>Navigation</h2>
 <ul>
   <li><a href="/api/admin/settings">Admin Settings</a> (requires a valid token)</li>

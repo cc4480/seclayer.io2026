@@ -19,6 +19,17 @@ const express = require('express');
 
 const router = express.Router();
 
+// The app's OWN response-formatting config, a plain object read via bracket
+// access below. This is the observable "gadget" a black-box scanner needs:
+// modern Express (>=4.21) hardened its own `app.get('json spaces')` to ignore
+// Object.prototype, so the framework no longer leaks the pollution — but an
+// application that keeps its own settings object and reads a value out of it
+// with unguarded bracket access (extremely common) is still fully exposed.
+// `appResponseConfig['json spaces']` inherits a polluted Object.prototype
+// value, so formatting flips from compact to indented once the prototype is
+// polluted. This is a realistic app-level gadget, not bespoke instrumentation.
+const appResponseConfig = {};
+
 function unsafeMerge(target, src) {
   for (const key in src) {
     if (src[key] && typeof src[key] === 'object' && !Array.isArray(src[key])) {
@@ -31,17 +42,35 @@ function unsafeMerge(target, src) {
   return target;
 }
 
+// Serialize using the app's own configured indentation, read with unguarded
+// bracket access (the app-level gadget described above).
+function sendConfigured(res, payload) {
+  const spaces = appResponseConfig['json spaces'] || 0;
+  res.type('application/json').send(JSON.stringify(payload, null, spaces));
+}
+
 router.post('/api/restore-session', (req, res) => {
-  const sessionData = req.body && req.body.sessionData;
-  if (typeof sessionData !== 'string') return res.status(400).json({ error: 'sessionData required' });
   let decoded;
-  try {
-    decoded = JSON.parse(Buffer.from(sessionData, 'base64').toString('utf8'));
-  } catch {
-    return res.status(400).json({ error: 'invalid session data' });
+  if (req.body && typeof req.body.sessionData === 'string') {
+    // Legacy "restore this serialized blob" shape (base64-wrapped) — kept so the
+    // fixture still covers that variant.
+    try {
+      decoded = JSON.parse(Buffer.from(req.body.sessionData, 'base64').toString('utf8'));
+    } catch {
+      return res.status(400).json({ error: 'invalid session data' });
+    }
+  } else if (req.body && typeof req.body === 'object' && !Array.isArray(req.body)) {
+    // Mainstream shape: a settings/session object deep-merged straight from the
+    // request body — by far the more common real-world sink (config merge,
+    // profile update, "PATCH my preferences"), and the one a generic scanner
+    // can actually reach without knowing a bespoke wrapper field. A payload
+    // like {"__proto__":{"json spaces":7}} pollutes Object.prototype here.
+    decoded = req.body;
+  } else {
+    return res.status(400).json({ error: 'session data required' });
   }
   const session = unsafeMerge({}, decoded);
-  res.json({ success: true, session });
+  sendConfigured(res, { success: true, session });
 });
 
 // Observable side effect for proving pollution: an unrelated endpoint
