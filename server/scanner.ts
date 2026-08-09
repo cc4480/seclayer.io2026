@@ -17,6 +17,7 @@ import { probeJwtAuth, extractJwtSecretCandidates } from "./jwtProbe.js";
 import { probeI18nAuthBypass } from "./i18nProbe.js";
 import { extractUrlKeyPairs, probeCredentialUrlPairs } from "./credentialChainProbe.js";
 import { probePrototypePollution } from "./prototypePollutionProbe.js";
+import { probePriceManipulation } from "./priceManipulationProbe.js";
 import { probeDomXss } from "./domXss.js";
 import { runPassiveScan, cookieFlagIssues } from "./passiveScan.js";
 import { analyzeSecrets, analyzeDataDumpExposure } from "./staticAnalysis.js";
@@ -297,6 +298,17 @@ export async function runDiagnostics(
           if (ppFinding) result.redTeamFindings = [...(result.redTeamFindings || []), ppFinding];
         } catch (e) {
           console.warn("prototype-pollution probe encountered an error", e);
+        }
+
+        // Business-logic price tampering (client-controlled price honored). Sends
+        // only line items — no payment instrument, no confirmation — so it can
+        // elicit at most a quote/total, never a real charge. Same aggressive+owned
+        // gate + discovered-POST-target set as the prototype-pollution probe.
+        try {
+          const priceFinding = await probePriceManipulation(url, postUrls, { ...headers, "Cache-Control": "no-cache" });
+          if (priceFinding) result.redTeamFindings = [...(result.redTeamFindings || []), priceFinding];
+        } catch (e) {
+          console.warn("price-manipulation probe encountered an error", e);
         }
       }
 

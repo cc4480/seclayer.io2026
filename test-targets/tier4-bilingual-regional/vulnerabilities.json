@@ -30,8 +30,8 @@
       "cwe": "CWE-841",
       "severity": "High",
       "expectSeclayerFinding": "none",
-      "actualResult": "NOT DETECTED, confirmed — no probe exists for this class, by deliberate design (identical reasoning to Tier 2's T2-BizLogic-001).",
-      "notes": "Manually verified working (client-supplied price/currency honored at face value; the *-safe pair correctly looks up the server-side price for the requested currency). Same conclusion as Tier 2's T2-BizLogic-001, reached independently here and re-confirmed rather than assumed: proving this requires actually completing a checkout — a real state-mutating write with potential real-world side effects (a real order, charge, or webhook) on whatever target is scanned. Not built, for the same non-destructive-scanning reason."
+      "actualResult": "DETECTED (new capability) — \"Business-Logic Price Tampering (client-controlled price honored)\", HIGH, confidence:high, RED_TEAM, real differential evidence. Same probe as T2-BizLogic-001.",
+      "notes": "Closed by the same server/priceManipulationProbe.ts built for T2-BizLogic-001 (the two vulns are the same class). The probe sends two checkout requests differing only in unit price, with quantity>1, and proves the flaw when a response field equals price*quantity in BOTH — the server billed the client-supplied price. Non-destructive: no payment instrument and no confirmation are ever sent (so it can only elicit a quote/total, not a real charge), and keying on the computed price*quantity product excludes plain echo endpoints. The MXN/USD currency angle is the same underlying trust-the-client-price bug; the probe does not need to send a currency to prove it. Verified against the live fixture; does NOT fire on /api/checkout-safe."
     },
     {
       "id": "T4-SMS-2FA-001",
@@ -74,8 +74,20 @@
     }
   ],
   "negativeControls": [
-    { "id": "T4-NC-001", "description": "Both /en/account and /es/account are consistently gated — a scanner that flags EVERY /es/* route (rather than genuinely comparing per-route) would be reporting a false positive", "endpoint": "GET /en/account, GET /es/account" },
-    { "id": "T4-NC-002", "description": "SMS verification rate-limited to 3 attempts per 15 minutes; brute-force blocked", "endpoint": "POST /api/auth/verify-sms-safe" },
-    { "id": "T4-NC-003", "description": "Webhook signature always verified regardless of currency; unsigned events rejected", "endpoint": "POST /api/webhooks/stripe-safe" }
+    {
+      "id": "T4-NC-001",
+      "description": "Both /en/account and /es/account are consistently gated — a scanner that flags EVERY /es/* route (rather than genuinely comparing per-route) would be reporting a false positive",
+      "endpoint": "GET /en/account, GET /es/account"
+    },
+    {
+      "id": "T4-NC-002",
+      "description": "SMS verification rate-limited to 3 attempts per 15 minutes; brute-force blocked",
+      "endpoint": "POST /api/auth/verify-sms-safe"
+    },
+    {
+      "id": "T4-NC-003",
+      "description": "Webhook signature always verified regardless of currency; unsigned events rejected",
+      "endpoint": "POST /api/webhooks/stripe-safe"
+    }
   ]
 }

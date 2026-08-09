@@ -38,9 +38,9 @@
       "endpoint": "POST /api/checkout",
       "cwe": "CWE-841",
       "severity": "High",
-      "expectSeclayerFinding": "none",
-      "actualResult": "NOT DETECTED, confirmed — no probe exists for this class, by deliberate design.",
-      "notes": "Considered and rejected building a generic price-manipulation probe. A self-referential differential IS technically possible (submit two different prices for the same cart and check whether the response's chargeAmount tracks whichever value we sent), but proving it requires actually completing a checkout — a real state-mutating write against whatever 'checkout' means on an arbitrary production target (real order creation, inventory/webhook/notification side effects, possibly a real charge). That crosses the product's own non-destructive safety invariant (every other active probe proves itself via a read, an OOB callback, or a response differential — never by completing a transaction). Documented as an intentional scope boundary, not an oversight."
+      "expectSeclayerFinding": "Business-Logic Price Tampering",
+      "actualResult": "DETECTED (new capability) — \"Business-Logic Price Tampering (client-controlled price honored)\", HIGH, confidence:high, RED_TEAM, real differential evidence (unit price 7×qty3 charged 21; unit price 953×qty3 charged 2859 — the total tracked the client price both times).",
+      "notes": "Re-examined and BUILT (server/priceManipulationProbe.ts) after the user pushed for full coverage. The earlier 'requires completing a checkout' objection turned out to be avoidable: the proof is a self-referential DIFFERENTIAL that reads the server's computed total, and it is made non-destructive two ways — (1) it sends NO payment instrument and NO confirmation/commit signal, only line items, so on any correctly-layered checkout it elicits at most a quote/total, never a completed charge (a real charge needs a payment method + a confirm step the probe never provides); (2) it keys the oracle on a COMPUTED product (price × quantity, with quantity>1), so a plain 'echo my input back' endpoint — which reflects the price but never price×quantity — cannot false-positive (verified with a dedicated unit test). Two requests differing only in unit price; if a response field equals price×qty in BOTH, the server bills the client's price → proven. Gated to the aggressive + ownership-verified tier. Verified against the live fixture AND confirmed it does NOT fire on /api/checkout-safe (server-sourced price)."
     },
     {
       "id": "T2-Deser-001",

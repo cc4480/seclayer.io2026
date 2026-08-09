@@ -61,9 +61,9 @@ npm start                    # listens on 127.0.0.1:4102
 
 `vulnerabilities.json`'s `actualResult`/`notes` fields on each entry are the
 real, observed outcome — not a prediction. Final tally, after investigating
-every gap ("find out why, then fix it" — same discipline as Tier 1): **6/8
-detected with real evidence; 2/8 confirmed as deliberate, documented scope
-boundaries, not bugs.**
+every gap ("find out why, then fix it" — same discipline as Tier 1): **7/8
+detected with real evidence; 1/8 (the race condition) a deliberate,
+documented scope boundary, not a bug.**
 
 | ID | Result | Notes |
 |---|---|---|
@@ -72,20 +72,21 @@ boundaries, not bugs.**
 | T2-XXE-001 | ✅ **Detected** | Worked first try |
 | T2-HorzPrivEsc-001 (BOLA) | ✅ **Detected** | Worked first try, with `bolaIdentities` supplied |
 | T2-WeakCrypto-001 (weak reset token) | ✅ **Detected** (new capability) | New `server/weakTokenScan.ts` — scans JSON responses the param-fuzzer captures for short/low-entropy security-token fields. Wired into `server/paramFuzzer.ts` + `server/scanner.ts` |
-| T2-BizLogic-001 (price manipulation) | ⛔ **Not detected — by design** | Proving it requires completing a real checkout (order/inventory/webhook side effects) against an arbitrary target — violates the product's non-destructive guarantee. Not built. |
+| T2-BizLogic-001 (price manipulation) | ✅ **Detected** (new capability) | New `server/priceManipulationProbe.ts` — two checkout requests differing only in unit price; if the charge total tracks the client price (keyed on the computed price×qty, so a plain echo can't false-fire) the server trusts client pricing. Non-destructive: sends no payment instrument and no confirmation, so it elicits at most a quote, never a real charge. Aggressive+owned. |
 | T2-Deser-001 (prototype pollution) | ✅ **Detected** (new capability) | New `server/prototypePollutionProbe.ts` — proves it non-destructively via the benign `json spaces` formatting gadget (a request flips the app's JSON output compact→indented), gated to the aggressive+ownership tier, with a best-effort revert. The "trigger a real side effect" concern is real but here the effect is purely cosmetic whitespace and self-heals on restart — an acceptable trade unlike the two below. Note: modern Express (4.21.2) patched its *own* json-spaces read, so the observable is the app's own unguarded config read (see `vulnerabilities.json`). |
 | T2-RaceCondition-001 | ⛔ **Not detected — by design** | Proving it requires actually causing a double-spend via concurrent requests against a real financial endpoint — same non-destructive boundary. Not built. |
 
-**Why the remaining two vulnerabilities are deliberately left undetected.**
-Every active probe in this codebase (BOLA, NoSQLi, XXE, JWT, weak-token, and
-now prototype pollution) proves itself through a *read*, an out-of-band
-callback, or a response differential — never by completing a state-mutating
-write with real, irreversible consequences. Prototype pollution *looked* like
-it belonged in this bucket, but its proof can be made purely cosmetic (a
-self-healing JSON-formatting change), so it was built (see above). The two
-remaining gaps (price manipulation, race condition) genuinely can only be
-proven by causing the harmful outcome itself — a real order/charge, a real
-double-spend — on whatever target Seclayer is pointed at, which could be
-someone else's production system. That's a different risk category, so these
-were investigated, confirmed genuinely undetectable non-destructively, and
-intentionally not built. See `notes` on each entry in `vulnerabilities.json`.
+**Why the one remaining vulnerability is deliberately left undetected.**
+Every active probe in this codebase (BOLA, NoSQLi, XXE, JWT, weak-token,
+prototype pollution, and now price tampering) proves itself through a *read*,
+an out-of-band callback, or a response differential — never by completing a
+state-mutating write with real, irreversible consequences. Two candidates
+that *looked* like they belonged in the "can't do it safely" bucket turned
+out to have a safe proof and were built: prototype pollution (proof is a
+cosmetic, self-healing formatting change) and price tampering (proof reads the
+server's computed total without ever sending a payment instrument or
+confirmation, so no charge can complete). The one genuine holdout is the race
+condition: its ONLY proof is actually causing the concurrent double-spend —
+mutating a real balance on whatever target Seclayer is pointed at. There is no
+read-only or reversible version, so it stays a documented boundary. See
+`notes` in `vulnerabilities.json`.
