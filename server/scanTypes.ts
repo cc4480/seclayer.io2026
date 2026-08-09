@@ -25,7 +25,7 @@ export interface DiagnosticResult {
   headers: Record<string, string>;
   missingHeaders: string[];
   techLeaked: string[];
-  probedPaths: Array<{ path: string; status: number; exposed: boolean }>;
+  probedPaths: Array<{ path: string; status: number; exposed: boolean; body?: string }>;
   cookieIssues: string[];
 
   // High-fidelity AppSec dimensions

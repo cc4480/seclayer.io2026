@@ -13,8 +13,9 @@ import { findLoginTarget, probeWeakSessionToken } from "./redTeam/weakSessionTok
 import { runRedTeamProbes } from "./redTeamProbes.js";
 import { runAggressiveProbes } from "./aggressiveProbes.js";
 import { runApiSecProbes, exposedUserListInCapture } from "./apiProbes.js";
-import { probeJwtAuth } from "./jwtProbe.js";
+import { probeJwtAuth, extractJwtSecretCandidates } from "./jwtProbe.js";
 import { probeI18nAuthBypass } from "./i18nProbe.js";
+import { extractUrlKeyPairs, probeCredentialUrlPairs } from "./credentialChainProbe.js";
 import { probeDomXss } from "./domXss.js";
 import { runPassiveScan, cookieFlagIssues } from "./passiveScan.js";
 import { analyzeSecrets, analyzeDataDumpExposure } from "./staticAnalysis.js";
@@ -124,17 +125,10 @@ export async function runDiagnostics(
     }
   }
 
-  // JWT auth-weakness probe (signature-not-verified). Only fires when the scan
-  // carries a Bearer JWT and the endpoint enforces auth; read-only. Gated on
-  // ownership; appended to the red-team findings for the shared receipt pipeline.
+  // JWT auth-weakness probe runs AFTER the crawl below (it can use a signing
+  // secret the crawl discovers in a leaked file, e.g. a served .env) — see
+  // the crawl.captures loop.
   if (allowActiveProbes) {
-    try {
-      const jwtFinding = await probeJwtAuth(url, headers);
-      if (jwtFinding) result.redTeamFindings = [...(result.redTeamFindings || []), jwtFinding];
-    } catch (e) {
-      console.warn("JWT auth probe encountered an error", e);
-    }
-
     // DOM-based XSS (headless-browser execution proof). No-ops unless
     // ENABLE_BROWSER_RENDERING is set; non-mutating, so gated on ownership only.
     try {
@@ -203,6 +197,64 @@ export async function runDiagnostics(
           if (!(result.apiSecFindings || []).some((f) => `${f.testName}|${f.endpoint}` === key)) {
             result.apiSecFindings = [...(result.apiSecFindings || []), listFinding];
           }
+        }
+      }
+
+      // Every response body this scan has actually seen the text of, for the
+      // two content-correlation checks below — NOT just crawl.captures,
+      // which only covers pages the crawler itself fetched while following
+      // links. The root document is SEEDED into the crawler (never
+      // "fetched" by it, so it's absent from captures) and a sensitive-path
+      // hit like /.env is fetched by server/perimeter.ts entirely separately
+      // from the crawl. Missing either source means missing exactly the
+      // cases these checks exist for (a key declared on the homepage itself;
+      // a secret leaked via sensitive-path probing rather than a crawled
+      // link) — confirmed by a real miss against the Tier 3 fixture before
+      // this was added.
+      const allScannedText = [
+        rootHtml,
+        ...crawl.captures.map((c) => c.text),
+        ...result.probedPaths.map((p) => p.body).filter((b): b is string => !!b),
+      ];
+
+      // Cross-origin credential chaining: a client-side key paired with the
+      // URL it's for (both disclosed in the SAME served content) is tested
+      // against that OTHER origin — the only probe in this codebase that
+      // ever calls back to somewhere other than the scanned target. The
+      // target origin is one the scanned app's own content named, not a
+      // guess, and reuses safeFetch's existing SSRF gate unchanged. Gated
+      // behind ownership like the other active probes.
+      if (allowActiveProbes) {
+        const urlKeyPairs = allScannedText.flatMap((t) => extractUrlKeyPairs(t));
+        if (urlKeyPairs.length) {
+          try {
+            const chainFinding = await probeCredentialUrlPairs(urlKeyPairs);
+            if (chainFinding) result.apiSecFindings = [...(result.apiSecFindings || []), chainFinding];
+          } catch (e) {
+            console.warn("Credential-chain probe encountered an error", e);
+          }
+        }
+      }
+
+      // JWT auth-weakness probe. Delayed until after the crawl above so it
+      // can also try re-signing with any JWT signing secret the crawl found
+      // leaked in a served file (e.g. .env) — a validly-signed forged token
+      // is a materially stronger proof than the alg:none/tampered-signature
+      // forgeries alone (see extractJwtSecretCandidates in jwtProbe.ts).
+      if (allowActiveProbes) {
+        const secretCandidates = [
+          ...new Set(allScannedText.flatMap((t) => extractJwtSecretCandidates(t))),
+        ];
+        try {
+          const jwtFinding = await probeJwtAuth(
+            url,
+            headers,
+            secretCandidates,
+            crawl.captures.map((c) => c.url),
+          );
+          if (jwtFinding) result.redTeamFindings = [...(result.redTeamFindings || []), jwtFinding];
+        } catch (e) {
+          console.warn("JWT auth probe encountered an error", e);
         }
       }
 

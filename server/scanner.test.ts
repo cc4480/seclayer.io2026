@@ -650,6 +650,82 @@ test('exposed user LIST check does NOT false-positive on a single caller-scoped 
   });
 });
 
+test('credential-chain probe catches a URL/key pair declared only on the ROOT page (not a crawled link)', async () => {
+  // Regression coverage: crawl.captures never includes the root document
+  // (it's SEEDED into the crawler, never "fetched" by it) — a real miss
+  // against the Tier 3 fixture, whose window.SUPABASE_URL/ANON_KEY pair
+  // lives directly on the homepage. Backend is a second server standing in
+  // for the "other origin" the leaked key is for.
+  const backend = http.createServer((req, res) => {
+    if (req.url?.startsWith('/rest/v1/admin_config')) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify([{ id: 1, setting: 'max_users', value: '1000' }]));
+    }
+    res.writeHead(404); res.end('not found');
+  });
+  await new Promise<void>((r) => backend.listen(0, '127.0.0.1', () => r()));
+  const backendPort = (backend.address() as any).port;
+  const prevAllow = process.env.SCAN_DEV_ALLOW_HOSTS;
+  try {
+    await withServer((req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(`<!doctype html><html><body><script>
+        window.SUPABASE_URL = "http://127.0.0.1:${backendPort}";
+        window.SUPABASE_ANON_KEY = "fake-anon-key-value-1234567890";
+      </script></body></html>`);
+    }, async (port) => {
+      process.env.SCAN_DEV_ALLOW_HOSTS = `${process.env.SCAN_DEV_ALLOW_HOSTS},127.0.0.1:${backendPort}`;
+      const diag = await runDiagnostics(`http://127.0.0.1:${port}`, undefined, { allowActiveProbes: true });
+      const finding = (diag.apiSecFindings || []).find((f: any) => /Client-Side Key Grants Unrestricted Backend Access/i.test(f.testName));
+      assert.ok(finding, 'expected the root-page-only credential pair to be caught');
+    });
+  } finally {
+    if (prevAllow === undefined) delete process.env.SCAN_DEV_ALLOW_HOSTS; else process.env.SCAN_DEV_ALLOW_HOSTS = prevAllow;
+    await new Promise((r) => backend.close(r));
+  }
+});
+
+test('JWT secret leaked via sensitive-path probing (not a crawled link) still proves a resign bypass', async () => {
+  // Regression coverage: server/perimeter.ts's sensitive-path probe fetches
+  // /.env entirely separately from the crawler, and used to discard the
+  // body after just checking "is this exposed" — a real miss for the Tier 3
+  // fixture, whose leaked SUPABASE_JWT_SECRET is only ever reachable this
+  // way (nothing links to /.env).
+  const crypto = await import('node:crypto');
+  const SECRET = 'leaked-via-sensitive-path-secret-1234567890';
+  function verify(token: string): boolean {
+    const parts = token.split('.');
+    if (parts.length !== 3) return false;
+    const [h, p, s] = parts;
+    const expected = crypto.createHmac('sha256', SECRET).update(`${h}.${p}`).digest('base64url');
+    return s === expected;
+  }
+  const b64url = (s: string) => Buffer.from(s, 'utf8').toString('base64url');
+  const realToken = `${b64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))}.${b64url(JSON.stringify({ sub: 'alice' }))}.` + 'x'.repeat(20);
+  await withServer((req, res) => {
+    if (req.url === '/.env') {
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      return res.end(`APP_JWT_SECRET=${SECRET}\nPORT=4103\n`);
+    }
+    if (req.url === '/api/account') {
+      const authz = req.headers.authorization;
+      const token = authz ? authz.replace(/^Bearer\s+/i, '') : '';
+      if (!token || !verify(token)) {
+        res.writeHead(401, { 'Content-Type': 'text/html' });
+        return res.end('<html>401 Unauthorized</html>');
+      }
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      return res.end('<html><body>Welcome — properly verified account page</body></html>');
+    }
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end('<!doctype html><html><body>homepage</body></html>');
+  }, async (port) => {
+    const diag = await runDiagnostics(`http://127.0.0.1:${port}`, `Bearer ${realToken}`, { allowActiveProbes: true });
+    const finding = (diag.redTeamFindings || []).find((f: any) => /leaked-secret-resign/i.test(f.testName));
+    assert.ok(finding, 'expected the sensitive-path-leaked secret to prove a resign bypass');
+  });
+});
+
 test('two-identity BOLA: public endpoint → Unauthenticated Access (§3.1b), not BOLA', async () => {
   await withServer(ordersHandler('public'), async (port) => {
     const diag = await runDiagnostics(`http://127.0.0.1:${port}`, undefined, { allowActiveProbes: true, bolaIdentities: IDS });

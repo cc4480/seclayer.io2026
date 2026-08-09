@@ -108,7 +108,18 @@ export async function scanPerimeter(host: string, hostname: string, result: Diag
       clearTimeout(probeId);
 
       const exposed = probeRes.status === 200 && probe.matches(body);
-      result.probedPaths.push({ path: probe.path, status: probeRes.status, exposed });
+      // Retain the body only when actually exposed (capped — these are
+      // small config-shaped files, not arbitrary large responses) so
+      // downstream checks (e.g. leaked-secret/credential extraction in
+      // server/jwtProbe.ts, server/credentialChainProbe.ts) can inspect what
+      // this probe already fetched, instead of every such check needing its
+      // own separate request to the same sensitive path.
+      result.probedPaths.push({
+        path: probe.path,
+        status: probeRes.status,
+        exposed,
+        ...(exposed ? { body: body.slice(0, 50_000) } : {}),
+      });
     } catch (err) {
       result.probedPaths.push({ path: probe.path, status: 0, exposed: false });
     }

