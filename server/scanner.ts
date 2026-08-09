@@ -12,11 +12,11 @@ import { probeStoredXss } from "./storedXss.js";
 import { findLoginTarget, probeWeakSessionToken } from "./redTeam/weakSessionToken.js";
 import { runRedTeamProbes } from "./redTeamProbes.js";
 import { runAggressiveProbes } from "./aggressiveProbes.js";
-import { runApiSecProbes } from "./apiProbes.js";
+import { runApiSecProbes, exposedUserListInCapture } from "./apiProbes.js";
 import { probeJwtAuth } from "./jwtProbe.js";
 import { probeDomXss } from "./domXss.js";
 import { runPassiveScan, cookieFlagIssues } from "./passiveScan.js";
-import { analyzeSecrets } from "./staticAnalysis.js";
+import { analyzeSecrets, analyzeDataDumpExposure } from "./staticAnalysis.js";
 import { buildScanCoverage } from "./coverage.js";
 import type { DiagnosticResult, ScanOptions } from "./scanTypes.js";
 
@@ -183,8 +183,25 @@ export async function runDiagnostics(
           seenSecretKeys.add(key);
           result.sastFindings.push(sf);
         }
+        for (const df of analyzeDataDumpExposure(capture.text, capture.url)) {
+          const key = `${df.issue}|${df.file}`;
+          if (seenSecretKeys.has(key)) continue;
+          seenSecretKeys.add(key);
+          result.sastFindings.push(df);
+        }
         for (const issue of cookieFlagIssues(capture.setCookie, isHttpsTarget, result.cookieIssues.length)) {
           if (!result.cookieIssues.includes(issue)) result.cookieIssues.push(issue);
+        }
+        // Passive — no new request, just inspecting what the crawler already
+        // fetched — so this runs unconditionally like the checks above, not
+        // gated behind allowActiveProbes (unlike the fixed-path exposed-
+        // user-object probe in apiProbes.ts, which makes its own requests).
+        const listFinding = exposedUserListInCapture(capture.text, capture.url);
+        if (listFinding) {
+          const key = `${listFinding.testName}|${listFinding.endpoint}`;
+          if (!(result.apiSecFindings || []).some((f) => `${f.testName}|${f.endpoint}` === key)) {
+            result.apiSecFindings = [...(result.apiSecFindings || []), listFinding];
+          }
         }
       }
 

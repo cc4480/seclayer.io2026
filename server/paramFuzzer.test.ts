@@ -84,6 +84,34 @@ test('fuzzer confirms SQL injection in a POST form field (PROVEN, differential b
   });
 });
 
+test('fuzzer confirms SQLi via a REAL raw `pg` (node-postgres) error message (regression)', async () => {
+  // Confirmed empirically against a real local Postgres instance
+  // (test-targets/tier3-baas-supabase): a genuine `pg` client's syntax error
+  // for the fuzzer's very first breaker (a bare "'") is exactly
+  // `unterminated quoted string at or near "' limit 10"` — not the
+  // "PostgreSQL.*?ERROR"/"PG::\w*Error" wrapped forms other-language
+  // drivers print, which is all the previous signature covered.
+  await withServer((req, res) => {
+    const u = new URL(req.url || '/', 'http://127.0.0.1');
+    const query = u.searchParams.get('query') || '';
+    let html = '<!doctype html><html><body>results';
+    if (query.includes("'")) {
+      html += `<pre>{"error":"unterminated quoted string at or near \\"' limit 10\\""}</pre>`;
+    }
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(html + '</body></html>');
+  }, async (port) => {
+    const targets: InjectableTarget[] = [
+      { url: `http://127.0.0.1:${port}/api/search`, method: 'GET', params: ['query'], source: 'query' },
+    ];
+    const { findings } = await fuzzDiscoveredTargets(targets, HEADERS);
+    const sqli = findings.find((f) => /SQL Injection/i.test(f.testName));
+    assert.ok(sqli, 'expected a SQLi finding from the real pg driver error text');
+    assert.equal(sqli.severity, 'critical');
+    assert.match(sqli.evidence.signal.quote, /unterminated quoted string at or near/i);
+  });
+});
+
 test('fuzzer reports no false positive for a POST form that safely echoes into JSON', async () => {
   // Reflects the posted value, but as application/json — the XSS execution gate
   // must reject it, and there is no DB error, so nothing should be reported.

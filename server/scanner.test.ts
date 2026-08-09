@@ -589,6 +589,67 @@ test('exposed user-object probe also catches a "list every user" ARRAY response 
   });
 });
 
+test('exposed user LIST is caught via crawl-discovered links even off the fixed candidate paths', async () => {
+  // Tier 3 benchmark shape (test-targets/tier3-baas-supabase): a linked JSON
+  // endpoint with a path name nothing on EXPOSED_USER_OBJECT_PATHS would ever
+  // guess, returning every user's record to an unauthenticated caller. This
+  // is a passive check over what the crawler already fetched — must fire
+  // even with allowActiveProbes: false, unlike the fixed-path probe.
+  await withServer((req, res) => {
+    const u = new URL(req.url || '/', 'http://127.0.0.1');
+    if (u.pathname === '/') {
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end('<!doctype html><html><body><a href="/api/profiles">profiles</a></body></html>');
+      return;
+    }
+    if (u.pathname === '/api/profiles') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify([
+        { user_id: 'a', email: 'alice@corp.test', sensitive_data: 'alice-secret' },
+        { user_id: 'b', email: 'bob@corp.test', sensitive_data: 'bob-secret' },
+      ]));
+      return;
+    }
+    res.writeHead(404); res.end('not found');
+  }, async (port) => {
+    const diag = await runDiagnostics(`http://127.0.0.1:${port}`, undefined, { allowActiveProbes: false });
+    const exposed = (diag.apiSecFindings || []).find((f) => /Exposed User List Endpoint/i.test(f.testName));
+    assert.ok(exposed, 'expected the crawl-based check to catch /api/profiles even in passive mode');
+    assert.match(exposed!.endpoint, /\/api\/profiles$/);
+    assert.equal(exposed!.evidence!.signal.quote, 'alice@corp.test');
+  });
+});
+
+test('exposed user LIST check does NOT false-positive on a single caller-scoped record or a repeated one', async () => {
+  await withServer((req, res) => {
+    const u = new URL(req.url || '/', 'http://127.0.0.1');
+    if (u.pathname === '/') {
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end('<!doctype html><html><body><a href="/api/me">me</a> <a href="/api/dupes">dupes</a></body></html>');
+      return;
+    }
+    if (u.pathname === '/api/me') {
+      // Legitimate "my own profile" shape — a single record, not a list.
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ email: 'alice@corp.test', role: 'user' }));
+      return;
+    }
+    if (u.pathname === '/api/dupes') {
+      // Same record twice — not "multiple distinct users".
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify([
+        { email: 'alice@corp.test', role: 'user' },
+        { email: 'alice@corp.test', role: 'user' },
+      ]));
+      return;
+    }
+    res.writeHead(404); res.end('not found');
+  }, async (port) => {
+    const diag = await runDiagnostics(`http://127.0.0.1:${port}`, undefined, { allowActiveProbes: false });
+    assert.equal((diag.apiSecFindings || []).some((f) => /Exposed User List Endpoint/i.test(f.testName)), false);
+  });
+});
+
 test('two-identity BOLA: public endpoint → Unauthenticated Access (§3.1b), not BOLA', async () => {
   await withServer(ordersHandler('public'), async (port) => {
     const diag = await runDiagnostics(`http://127.0.0.1:${port}`, undefined, { allowActiveProbes: true, bolaIdentities: IDS });
@@ -719,6 +780,31 @@ test('SAST secret scanning also catches a secret on a non-root JSON endpoint the
     const secret = (diag.sastFindings || []).find((f) => /Stripe/i.test(f.issue));
     assert.ok(secret, 'expected the secret on /api/settings to be detected');
     assert.match(secret!.file, /\/api\/settings$/, 'the finding should point at the endpoint that actually leaked it');
+  });
+});
+
+test('database dump exposure is caught on a crawler-discovered backup file, even though it is not JSON/HTML', async () => {
+  // Same crawl-capture pattern as the secret-scanning test above: a linked
+  // .sql file the crawler follows (test-targets/tier3-baas-supabase's
+  // /backups/db-backup-*.sql shape) is neither HTML nor JSON, so it never
+  // becomes a "page" — but its body is still fair game for signature
+  // analysis, same as any other captured response.
+  const handler: http.RequestListener = (req, res) => {
+    const u = new URL(req.url || '/', 'http://127.0.0.1');
+    if (u.pathname === '/backups/db-backup.sql') {
+      res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
+      res.end('--\n-- PostgreSQL database dump\n--\n\nCOPY public.profiles (id, email) FROM stdin;\n1\talice@corp.test\n\\.\n');
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end('<!doctype html><html><body><a href="/backups/db-backup.sql">backup</a></body></html>');
+  };
+  await withServer(handler, async (port) => {
+    const diag = await runDiagnostics(`http://127.0.0.1:${port}`, undefined, { allowActiveProbes: false });
+    const dump = (diag.sastFindings || []).find((f) => /Exposed Database Backup/i.test(f.issue));
+    assert.ok(dump, 'expected the crawler-discovered backup file to be flagged');
+    assert.match(dump!.file, /\/backups\/db-backup\.sql$/);
+    assert.equal(dump!.severity, 'critical');
   });
 });
 

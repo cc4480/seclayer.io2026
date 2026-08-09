@@ -19,8 +19,16 @@ import type { ProbeContext, RedTeamFinding } from "./types.js";
 // JSON-encoded response body (e.g. `res.json({ error: err.message })`, the
 // obvious way to surface this) escapes them to \" — a bare `"` in the
 // pattern never matches that and silently misses the common case.
+// "syntax error at (or near|end of input)" / "unterminated quoted
+// string/identifier at or near" is the same story for the `pg` npm package
+// (node-postgres) — the RAW message Postgres's own server sends back, not
+// the "PostgreSQL.*?ERROR"/"PG::\w*Error" wrapped forms other-language
+// drivers print. Confirmed empirically against a real local Postgres
+// instance (test-targets/tier3-baas-supabase) — a real `pg` client's syntax
+// error is exactly `unterminated quoted string at or near "' limit 10"` /
+// `syntax error at or near ")"`, matching neither existing pattern.
 const SQL_ERROR_SIGNATURE =
-  /(SQL syntax;|valid MySQL result|mysqli?_fetch|ORA-\d{4,5}|PLS-\d{4,5}|PostgreSQL.*?ERROR|PG::\w*Error|SQLSTATE\[|SQLite3?::|SQLiteException|SQLITE_ERROR|near \\?".*?\\?": syntax error|Unclosed quotation mark after the character string|quoted string not properly terminated|Microsoft OLE DB Provider for SQL Server|ODBC SQL Server Driver|Npgsql\.)/i;
+  /(SQL syntax;|valid MySQL result|mysqli?_fetch|ORA-\d{4,5}|PLS-\d{4,5}|PostgreSQL.*?ERROR|PG::\w*Error|SQLSTATE\[|SQLite3?::|SQLiteException|SQLITE_ERROR|near \\?".*?\\?": syntax error|syntax error at (?:or near|end of input)|unterminated quoted (?:string|identifier) at or near|Unclosed quotation mark after the character string|quoted string not properly terminated|Microsoft OLE DB Provider for SQL Server|ODBC SQL Server Driver|Npgsql\.)/i;
 
 export async function probeSqlInjection(ctx: ProbeContext): Promise<RedTeamFinding | null> {
   const attackUrl = `${ctx.url}/?id=%27%20OR%201%3D1--`;

@@ -100,6 +100,47 @@ export function extractResourceRefs(htmlText: string): string {
   return refs.join("\n");
 }
 
+// --- SAST: exposed database backup/dump signatures ------------------------------
+// Distinctive boilerplate every mainstream dump tool emits verbatim — the kind
+// of text that essentially never appears in legitimate prose, unlike a bare
+// "CREATE TABLE" (which a blog post *about* SQL could easily contain). A
+// world-readable pg_dump/mysqldump file is a common, severe real-world
+// exposure (an accidental public backup, a leftover debug endpoint) distinct
+// from a credential leak — same signature-match shape as SECRET_SIGNATURES
+// above, screened separately so the report names it accurately.
+const DATA_DUMP_SIGNATURES = [
+  { name: "PostgreSQL Database Dump", regex: /--\s*PostgreSQL database dump/i },
+  { name: "PostgreSQL Database Dump", regex: /COPY\s+\S+\s*\([^)]*\)\s*FROM\s+stdin;/i },
+  { name: "MySQL Database Dump", regex: /--\s*MySQL dump/i },
+  { name: "SQLite Database Dump", regex: /PRAGMA foreign_keys\s*=\s*OFF;/i },
+];
+export const DATA_DUMP_SIGNATURE_COUNT = DATA_DUMP_SIGNATURES.length;
+
+export function analyzeDataDumpExposure(
+  bodyText: string,
+  source = "Client-served HTML/JavaScript",
+): DiagnosticResult["sastFindings"] {
+  const findings: DiagnosticResult["sastFindings"] = [];
+  if (!bodyText) return findings;
+
+  for (const sig of DATA_DUMP_SIGNATURES) {
+    const m = sig.regex.exec(bodyText);
+    if (m) {
+      findings.push({
+        file: source,
+        issue: `Exposed Database Backup (${sig.name})`,
+        severity: "critical",
+        confidence: "high",
+        type: "database_dump_exposure",
+        description: `A response matching the format of a ${sig.name} was served from a publicly reachable path. This typically contains complete table contents — every row of every table it covers — for anyone who requests the URL.`,
+        fix: "Remove this file from any web-reachable path immediately. Store backups outside the web root (or in access-controlled/private object storage with signed URLs), and rotate any credentials or session tokens the dump exposed.",
+      });
+      break; // one confirmed signature is enough; further matches are redundant signal
+    }
+  }
+  return findings;
+}
+
 // --- SCA: vulnerable-library footprints in markup -----------------------------
 // A library is only flagged when its version regex actually matches a known
 // vulnerable range in a RESOURCE URL the page loads (src/href), not merely

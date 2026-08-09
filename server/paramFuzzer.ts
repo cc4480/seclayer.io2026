@@ -54,10 +54,15 @@ export async function fuzzDiscoveredTargets(
 
   // Kept in sync with server/redTeam/sqlInjection.ts's SQL_ERROR_SIGNATURE —
   // see its comment for why the bare "near "X": syntax error"/SQLITE_ERROR
-  // patterns matter: they're SQLite's actual raw Node-driver error text,
-  // not the "SQLite3::"/"SQLiteException" PHP/Java class-name prefixes.
+  // patterns matter: they're SQLite's actual raw Node-driver error text, not
+  // the "SQLite3::"/"SQLiteException" PHP/Java class-name prefixes. Same
+  // story for "syntax error at (or near|end of input)"/"unterminated quoted
+  // string/identifier at or near": the RAW error text a real `pg` (node-
+  // postgres) client throws, confirmed against a real local Postgres
+  // instance — not the "PostgreSQL.*?ERROR"/"PG::\w*Error" wrapped forms
+  // other-language drivers print.
   const sqlErrorSig =
-    /(SQL syntax;|valid MySQL result|mysqli?_fetch|ORA-\d{4,5}|PLS-\d{4,5}|PostgreSQL.*?ERROR|PG::\w*Error|SQLSTATE\[|SQLite3?::|SQLiteException|SQLITE_ERROR|near \\?".*?\\?": syntax error|Unclosed quotation mark after the character string|quoted string not properly terminated|Microsoft OLE DB Provider for SQL Server|ODBC SQL Server Driver|Npgsql\.)/i;
+    /(SQL syntax;|valid MySQL result|mysqli?_fetch|ORA-\d{4,5}|PLS-\d{4,5}|PostgreSQL.*?ERROR|PG::\w*Error|SQLSTATE\[|SQLite3?::|SQLiteException|SQLITE_ERROR|near \\?".*?\\?": syntax error|syntax error at (?:or near|end of input)|unterminated quoted (?:string|identifier) at or near|Unclosed quotation mark after the character string|quoted string not properly terminated|Microsoft OLE DB Provider for SQL Server|ODBC SQL Server Driver|Npgsql\.)/i;
 
   const buildUrl = (base: string, param: string, value: string): string => {
     const u = new URL(base);

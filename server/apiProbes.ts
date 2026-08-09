@@ -46,6 +46,60 @@ function extractUserMarker(jsonText: string): string {
   return "";
 }
 
+// Broader than the fixed candidate-path check above: any crawler-discovered
+// JSON response that turns out to be an ARRAY of 2+ DISTINCT user-shaped
+// records (each carrying an email/username/role field) is inherently
+// suspicious regardless of its path — a caller only ever legitimately gets
+// back ONE record for themselves ("my own profile"), never a list of
+// several different people's. Requiring 2+ DISTINCT records (not just "has
+// an email field") is what keeps this from false-positiving on an ordinary
+// single-record response. Operates on an already-fetched capture (no new
+// request), mirroring analyzeSecrets' "scan every crawled response" shape
+// rather than the fixed-path probe above's own targeted requests.
+export function exposedUserListInCapture(jsonText: string, source: string): any | null {
+  if (!jsonText || jsonText.length > 300_000) return null;
+  const trimmed = jsonText.trim();
+  if (!trimmed.startsWith("[")) return null; // must itself be a JSON array
+
+  let arr: unknown;
+  try {
+    arr = JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(arr) || arr.length < 2) return null;
+
+  const markerOf = (o: unknown): string | null => {
+    if (!o || typeof o !== "object") return null;
+    for (const k of ["email", "username", "role"]) {
+      const v = (o as Record<string, unknown>)[k];
+      if (typeof v === "string" && v) return v;
+    }
+    return null;
+  };
+  const markers = arr.map(markerOf);
+  if (markers.some((m) => m === null)) return null; // every element must qualify
+  const distinct = new Set(markers as string[]);
+  if (distinct.size < 2) return null; // same record repeated isn't "multiple users"
+
+  const marker = markers[0] as string;
+  return {
+    testName: "Exposed User List Endpoint",
+    endpoint: source,
+    severity: "critical",
+    description: `A request to ${source} returned a JSON array of ${arr.length} distinct user records directly, with no per-caller authorization narrowing the result to the caller's own data. Any user list endpoint must be authorized per-caller, not just gated behind "some session exists" (or nothing at all).`,
+    fix: "Require authentication AND row-level/ownership authorization on this endpoint so it returns only the caller's own record(s), never every user's.",
+    evidence: {
+      method: "oracle",
+      attack: { request: `GET ${source}`, response: windowAround(jsonText, jsonText.indexOf(marker), marker.length, 600) },
+      signal: { quote: marker, offsetInResponse: 0, why: `The response is a JSON array of ${distinct.size} distinct users' records (identified by "${marker}" and others), not a single caller-scoped record.` },
+      demonstration: `We fetched ${source} (as discovered while crawling) and the response contained ${distinct.size} different users' records in one array, including one identified by "${marker}".`,
+      reproduction: `curl -s "${source}"`,
+      capturedAt: new Date().toISOString(),
+    },
+  };
+}
+
 export async function runApiSecProbes(
   url: string,
   host: string,

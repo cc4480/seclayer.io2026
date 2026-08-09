@@ -26,6 +26,7 @@
   "exclude": [
     "mcp-server",
     "dist",
-    "node_modules"
+    "node_modules",
+    "test-targets/tier3-baas-supabase/supabase/functions"
   ]
 }

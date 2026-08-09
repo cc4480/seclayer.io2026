@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { analyzeLibraries, extractResourceRefs, analyzeSecrets } from './staticAnalysis.js';
+import { analyzeLibraries, extractResourceRefs, analyzeSecrets, analyzeDataDumpExposure } from './staticAnalysis.js';
 
 const scriptTag = (url: string) => `<html><head><script src="${url}"></script></head><body></body></html>`;
 
@@ -48,4 +48,37 @@ test('secret detection screens low-entropy placeholders but flags a high-entropy
   const detected = analyzeSecrets('const k = "sk_live_' + body + '";');
   assert.equal(detected.length, 1, 'a high-entropy sk_live-shaped key is a real detection');
   assert.match(detected[0].issue, /Stripe/);
+});
+
+test('flags a world-readable PostgreSQL pg_dump (header comment)', () => {
+  const dump = `--\n-- PostgreSQL database dump\n--\n\nSET statement_timeout = 0;\n`;
+  const findings = analyzeDataDumpExposure(dump, 'http://target/backups/db.sql');
+  assert.equal(findings.length, 1);
+  assert.match(findings[0].issue, /PostgreSQL Database Dump/);
+  assert.equal(findings[0].severity, 'critical');
+  assert.equal(findings[0].file, 'http://target/backups/db.sql');
+});
+
+test('flags a world-readable PostgreSQL dump via a bare COPY ... FROM stdin block (no header)', () => {
+  const dump = `COPY public.profiles (id, user_id, email) FROM stdin;\n1\tuuid\talice@corp.test\n\\.\n`;
+  const findings = analyzeDataDumpExposure(dump, 'http://target/backups/db.sql');
+  assert.equal(findings.length, 1);
+  assert.match(findings[0].issue, /PostgreSQL Database Dump/);
+});
+
+test('flags a world-readable mysqldump', () => {
+  const dump = `-- MySQL dump 10.13  Distrib 8.0.34\nCREATE TABLE users (id int);\n`;
+  const findings = analyzeDataDumpExposure(dump, 'http://target/backup.sql');
+  assert.equal(findings.length, 1);
+  assert.match(findings[0].issue, /MySQL Database Dump/);
+});
+
+test('does NOT flag ordinary prose that merely mentions SQL/dumps/tables', () => {
+  const prose = '<html><body><p>Learn how to CREATE TABLE and dump your data with pg_dump.</p></body></html>';
+  assert.deepEqual(analyzeDataDumpExposure(prose, 'http://target/blog/post'), []);
+});
+
+test('does NOT flag an empty or unrelated body', () => {
+  assert.deepEqual(analyzeDataDumpExposure('', 'http://target/'), []);
+  assert.deepEqual(analyzeDataDumpExposure('<html><body>hello</body></html>', 'http://target/'), []);
 });
