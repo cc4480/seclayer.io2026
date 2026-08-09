@@ -95,21 +95,19 @@ comment in the script.
 `vulnerabilities.json`'s `actualResult`/`notes` fields on each entry are the
 real, observed outcome — not a prediction. Final tally, after investigating
 every gap ("find out why, then fix it" — same discipline as Tier 1/2):
-**4/9 detected with real evidence (2 of those via new detection capabilities,
-1 via fixing a real product bug), 1/9 partially detected (the leak half of a
-three-step attack chain), 1/9 confirmed non-reproducible on the modern
-platform (not a scanner gap), 2/9 confirmed genuine architectural gaps
-(cross-origin credential-chaining), 1/9 predicted but not independently
-confirmed this session.**
+**5/9 detected with real evidence (4 of those via new detection capabilities,
+1 via fixing a real product bug), 1/9 confirmed non-reproducible on the modern
+platform (not a scanner gap), 2/9 confirmed genuine architectural gaps,
+1/9 predicted but not independently confirmed this session.**
 
 | ID | Result | Notes |
 |---|---|---|
 | T3-RLS-Bypass-001 (`/api/profiles`) | ✅ **Detected** (new capability) | New `exposedUserListInCapture()` in `server/apiProbes.ts` — flags a crawled JSON array of 2+ distinct user records reachable with no auth. Wired into the existing passive crawl-capture loop. |
 | T3-VectorDB-Injection-001 (`/api/search`) | ✅ **Detected** (after a fix) | The real `pg` driver's raw syntax-error text (`unterminated quoted string at or near "..."`, `syntax error at or near "..."`) matched neither the wrapped-driver nor SQLite patterns already in `SQL_ERROR_SIGNATURE` — same bug class as the Tier 1 SQLite fix, now for Postgres. Fixed in `server/redTeam/sqlInjection.ts` + `server/paramFuzzer.ts`. |
 | T3-Backup-Exposure-001 (`/backups/*.sql`) | ✅ **Detected** (new capability) | New `analyzeDataDumpExposure()` in `server/staticAnalysis.ts` — signature-matches real pg_dump/mysqldump boilerplate on any crawled response, regardless of content-type. |
-| T3-JWT-Secret-001 (`.env` leak → forge → bypass) | 🟡 **Partially detected** | The `.env` leak itself IS caught (`Exposed Critical Resource File`) — a real, actionable finding by itself. The full forge-and-bypass chain (manually verified real) isn't independently demonstrated; no code path weaponizes a discovered secret against a different endpoint. |
+| T3-JWT-Secret-001 (`.env` leak → forge → bypass) | ✅ **Detected** (new capability) | Both halves now caught: the `.env` leak (`Exposed Critical Resource File`) AND the forge-and-bypass itself (`JWT Signature Not Verified (leaked-secret-resign)`) — a validly-signed forged token, proven via a real 401-vs-200 differential against `/api/profiles-safe`. New `extractJwtSecretCandidates()` + a `leaked-secret-resign` forgery variant in `server/jwtProbe.ts`. Getting this to fire live also required broadening `probeJwtAuth`'s candidate-path list beyond its fixed guess-list (`/api/admin`, `/api/me`, ...) to include crawl-discovered URLs — this app's real protected route, `/api/profiles-safe`, doesn't look like any of the guesses. |
 | T3-Realtime-Hijack-001 | ⚪ **Does not reproduce** — not a gap | Empirically confirmed on a real local Realtime server: RLS is enforced on `postgres_changes` by default now. Alice reliably receives her own updates, never Bob's. Same "hardened since the PRD was written" pattern as Tier 2's JWT `alg:none`. |
-| T3-AnonKey-Abuse-001 | ⛔ **Not detected — architectural gap** | Requires taking a credential discovered on one origin and testing it against a *different* origin/port. That chaining doesn't exist anywhere in the scanner; a materially larger feature than a probe fix. |
-| T3-EdgeFunc-001 | ⛔ **Not detected — unreachable by design** | Lives on the Supabase origin (54321), not the scanned app (4103); nothing same-origin links to it. Correct same-origin crawler behavior, not a bug. |
+| T3-AnonKey-Abuse-001 | ✅ **Detected** (new capability) | New `server/credentialChainProbe.ts`: pairs a same-prefix URL+key declared in the same served content (`window.SUPABASE_URL`/`window.SUPABASE_ANON_KEY`), then tests that key directly against the *other* origin it names — proven via a real, unauthenticated read of `admin_config` at the raw Supabase REST origin. Reuses `safeFetch`'s existing SSRF gate; the target origin is one the scanned app's own content named, never a guess. |
+| T3-EdgeFunc-001 | ⛔ **Not detected — unreachable by design** | Lives on the Supabase origin (54321), not the scanned app (4103); nothing same-origin links to it. Correct same-origin crawler behavior, not a bug. Extending the credential-chaining capability to also try Edge Function paths would mean guessing function names — the directory-brute-force shape this codebase deliberately avoids — so left as a documented gap. |
 | T3-Unlogged-001 (`/api/tokens`) | ⛔ **Not detected — deliberately narrow scope** | The new exposed-user-list check requires an email/username/role field to qualify a record; `session_tokens` rows have none. Not broadened to match on `"token"` generically — that field name is far too common in legitimate (non-vulnerable) responses (CSRF tokens, pagination cursors) to add without a real false-positive cost. |
 | T3-Storage-001 | 🔵 **Predicted detected, not confirmed** | Manually verified real, same shape as Tier 1/2's proven two-identity BOLA. Not independently exercised this session — the scanning tool available didn't expose `bolaIdentities`. |
