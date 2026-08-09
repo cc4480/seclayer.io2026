@@ -23,6 +23,19 @@
     // admin_config in the migration file.
     window.SUPABASE_URL = "http://127.0.0.1:54321";
     window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0";
+
+    // T3-EdgeFunc-001 — the app's own frontend invokes its Edge Function to
+    // export a report. Real Supabase apps reference their functions in client
+    // code exactly like this (a fetch to <SUPABASE_URL>/functions/v1/<name>, or
+    // supabase.functions.invoke('<name>')), which is how the function name is
+    // discoverable at all — the function itself never validates the token.
+    async function exportSensitiveReport() {
+      const res = await fetch(window.SUPABASE_URL + "/functions/v1/sensitive-task", {
+        method: "POST",
+        headers: { Authorization: "Bearer " + window.SUPABASE_ANON_KEY },
+      });
+      return res.json();
+    }
   </script>
 </body>
 </html>

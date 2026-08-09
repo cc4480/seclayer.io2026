@@ -16,6 +16,7 @@ import { runApiSecProbes, exposedUserListInCapture, exposedCredentialListInCaptu
 import { probeJwtAuth, extractJwtSecretCandidates } from "./jwtProbe.js";
 import { probeI18nAuthBypass } from "./i18nProbe.js";
 import { extractUrlKeyPairs, probeCredentialUrlPairs } from "./credentialChainProbe.js";
+import { probeEdgeFunctionAuth } from "./edgeFunctionProbe.js";
 import { probePrototypePollution } from "./prototypePollutionProbe.js";
 import { probePriceManipulation } from "./priceManipulationProbe.js";
 import { probeDomXss } from "./domXss.js";
@@ -238,6 +239,20 @@ export async function runDiagnostics(
           } catch (e) {
             console.warn("Credential-chain probe encountered an error", e);
           }
+        }
+      }
+
+      // Edge Function auth-bypass: extract any Edge/serverless function URL the
+      // scanned app's own content references (a .../functions/v1/<name> ref or a
+      // functions.invoke('<name>') call + a discovered base URL) and prove it
+      // accepts a forged token where no token is denied. Read-only (GET), like
+      // the JWT probe; the function origin is one the app named, not a guess.
+      if (allowActiveProbes) {
+        try {
+          const edgeFinding = await probeEdgeFunctionAuth(allScannedText, headers);
+          if (edgeFinding) result.redTeamFindings = [...(result.redTeamFindings || []), edgeFinding];
+        } catch (e) {
+          console.warn("Edge Function auth probe encountered an error", e);
         }
       }
 
