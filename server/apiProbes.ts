@@ -100,6 +100,82 @@ export function exposedUserListInCapture(jsonText: string, source: string): any 
   };
 }
 
+// A sibling to exposedUserListInCapture for a DIFFERENT, equally-severe shape:
+// an endpoint that dumps every user's live CREDENTIAL (session token, API key,
+// password, reset code) rather than their profile. session_tokens-style rows
+// (user_id/token/created_at) carry no email/username/role, so the user-list
+// check above deliberately skips them — but a list that pairs a per-user
+// identifier with a secret-shaped value, one row per user, is if anything MORE
+// severe (those are live credentials, directly usable for account takeover).
+//
+// Low false-positive by construction — a match requires ALL of: a JSON ARRAY of
+// 2+ elements; EVERY element carries BOTH a user-identifier field AND a
+// separately-named credential field whose value is a non-trivial string; and 2+
+// DISTINCT credential values across the array. That co-occurrence (N users each
+// with their own secret) essentially never appears in a legitimate response —
+// unlike a bare field named "token", which is everywhere (CSRF tokens,
+// pagination cursors, a single caller's own session), and which this check
+// deliberately does NOT fire on in isolation.
+const USER_ID_FIELDS = ["user_id", "userId", "uid", "account_id", "accountId", "email", "username", "sub", "owner"];
+const CREDENTIAL_FIELDS = ["token", "session_token", "sessionToken", "access_token", "accessToken", "refresh_token", "api_key", "apiKey", "apikey", "secret", "password", "passwd", "private_key", "privateKey", "reset_token", "reset_code"];
+
+export function exposedCredentialListInCapture(jsonText: string, source: string): any | null {
+  if (!jsonText || jsonText.length > 300_000) return null;
+  const trimmed = jsonText.trim();
+  if (!trimmed.startsWith("[")) return null;
+
+  let arr: unknown;
+  try {
+    arr = JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(arr) || arr.length < 2) return null;
+
+  // Which credential field to key on is decided by the FIRST element, then
+  // required consistently across all of them, so a single stray object can't
+  // satisfy the check on behalf of the rest.
+  const first = arr[0];
+  if (!first || typeof first !== "object") return null;
+  const credField = CREDENTIAL_FIELDS.find((k) => {
+    const v = (first as Record<string, unknown>)[k];
+    return typeof v === "string" && v.length >= 8;
+  });
+  if (!credField) return null;
+  const hasUserId = (o: Record<string, unknown>) => USER_ID_FIELDS.some((k) => {
+    const v = o[k];
+    return (typeof v === "string" && v) || typeof v === "number";
+  });
+
+  const creds: string[] = [];
+  for (const el of arr) {
+    if (!el || typeof el !== "object") return null;
+    const o = el as Record<string, unknown>;
+    if (!hasUserId(o)) return null; // every row must tie a secret to an identity
+    const v = o[credField];
+    if (typeof v !== "string" || v.length < 8) return null; // every row must carry the secret
+    creds.push(v);
+  }
+  if (new Set(creds).size < 2) return null; // one constant value repeated isn't a per-user credential dump
+
+  const marker = creds[0];
+  return {
+    testName: "Exposed Credential List Endpoint",
+    endpoint: source,
+    severity: "critical",
+    description: `A request to ${source} returned a JSON array of ${arr.length} records, each pairing a user identifier with a "${credField}" credential value, with no per-caller authorization. This dumps every user's live credential (session token / API key / secret) to any caller — directly usable for account takeover, not merely an information leak.`,
+    fix: `Never return other users' credentials from an API. Require per-caller authorization so this endpoint returns only the caller's own record(s), store credentials hashed (not in plaintext), and treat any credential that was exposed as compromised — rotate/revoke it.`,
+    evidence: {
+      method: "oracle",
+      attack: { request: `GET ${source}`, response: windowAround(jsonText, jsonText.indexOf(marker), marker.length, 600) },
+      signal: { quote: marker, offsetInResponse: 0, why: `The response is a JSON array of ${arr.length} records, each carrying a distinct "${credField}" secret alongside a user identifier — every user's live credential, returned to one request.` },
+      demonstration: `We fetched ${source} (as discovered while crawling) and the response contained ${arr.length} users' "${credField}" values in one array — including "${marker}" — with no authorization scoping the result to a single caller.`,
+      reproduction: `curl -s "${source}"`,
+      capturedAt: new Date().toISOString(),
+    },
+  };
+}
+
 export async function runApiSecProbes(
   url: string,
   host: string,

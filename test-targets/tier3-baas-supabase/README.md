@@ -85,20 +85,20 @@ comment in the script.
 2. `npm run dev` in the repo root.
 3. `scripts/seed.mjs`'s output prints alice's and bob's real access tokens —
    use alice's as `authHeader`. Two-identity BOLA (`bolaIdentities`, own file
-   path per identity) for T3-Storage-001 requires the internal `/api/scans`
-   route directly — the scanning tool used to verify this tier's results
-   didn't expose that option, so T3-Storage-001 is predicted, not confirmed
-   (see `vulnerabilities.json`).
+   path per identity) for T3-Storage-001 is driven through the engine's
+   `bolaIdentities` option (the MCP `seclayer_scan` tool doesn't expose it yet)
+   — confirmed detecting against the live route this way (see
+   `vulnerabilities.json`).
 
 ## Expected / actual results
 
 `vulnerabilities.json`'s `actualResult`/`notes` fields on each entry are the
 real, observed outcome — not a prediction. Final tally, after investigating
 every gap ("find out why, then fix it" — same discipline as Tier 1/2):
-**5/9 detected with real evidence (4 of those via new detection capabilities,
-1 via fixing a real product bug), 1/9 confirmed non-reproducible on the modern
-platform (not a scanner gap), 2/9 confirmed genuine architectural gaps,
-1/9 predicted but not independently confirmed this session.**
+**7/9 detected with real evidence (5 of those via new detection capabilities,
+1 via fixing a real product bug, 1 via the existing two-identity BOLA probe),
+1/9 confirmed non-reproducible on the modern platform (not a scanner gap),
+1/9 a genuine cross-origin architectural gap (T3-EdgeFunc-001).**
 
 | ID | Result | Notes |
 |---|---|---|
@@ -109,5 +109,5 @@ platform (not a scanner gap), 2/9 confirmed genuine architectural gaps,
 | T3-Realtime-Hijack-001 | ⚪ **Does not reproduce** — not a gap | Empirically confirmed on a real local Realtime server: RLS is enforced on `postgres_changes` by default now. Alice reliably receives her own updates, never Bob's. Same "hardened since the PRD was written" pattern as Tier 2's JWT `alg:none`. |
 | T3-AnonKey-Abuse-001 | ✅ **Detected** (new capability) | New `server/credentialChainProbe.ts`: pairs a same-prefix URL+key declared in the same served content (`window.SUPABASE_URL`/`window.SUPABASE_ANON_KEY`), then tests that key directly against the *other* origin it names — proven via a real, unauthenticated read of `admin_config` at the raw Supabase REST origin. Reuses `safeFetch`'s existing SSRF gate; the target origin is one the scanned app's own content named, never a guess. |
 | T3-EdgeFunc-001 | ⛔ **Not detected — unreachable by design** | Lives on the Supabase origin (54321), not the scanned app (4103); nothing same-origin links to it. Correct same-origin crawler behavior, not a bug. Extending the credential-chaining capability to also try Edge Function paths would mean guessing function names — the directory-brute-force shape this codebase deliberately avoids — so left as a documented gap. |
-| T3-Unlogged-001 (`/api/tokens`) | ⛔ **Not detected — deliberately narrow scope** | The new exposed-user-list check requires an email/username/role field to qualify a record; `session_tokens` rows have none. Not broadened to match on `"token"` generically — that field name is far too common in legitimate (non-vulnerable) responses (CSRF tokens, pagination cursors) to add without a real false-positive cost. |
-| T3-Storage-001 | 🔵 **Predicted detected, not confirmed** | Manually verified real, same shape as Tier 1/2's proven two-identity BOLA. Not independently exercised this session — the scanning tool available didn't expose `bolaIdentities`. |
+| T3-Unlogged-001 (`/api/tokens`) | ✅ **Detected** (new capability) | New `exposedCredentialListInCapture()` in `server/apiProbes.ts` — a sibling to the user-list check for the *credential*-dump shape. Fires only on a JSON array of 2+ records where every element pairs a user identifier with a distinct credential-shaped value (`token`/`api_key`/`secret`/...), so it stays low-FP where matching a bare `"token"` field alone would not. |
+| T3-Storage-001 | ✅ **Detected** (existing capability, now confirmed) | Driven the real two-identity probe (`server/bola.ts`) against the live `/api/files/:ownerId/:filename` route — surfaces as **Unauthenticated Access to Protected Resource** (PROVEN), the honest/stronger label since the route enforces no auth at all. Same confirmation path as T1-IDOR-001 / T2-HorzPrivEsc-001. Note: reachable via the engine's `bolaIdentities`, which the MCP scan tool doesn't yet expose. |

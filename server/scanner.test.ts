@@ -650,6 +650,37 @@ test('exposed user LIST check does NOT false-positive on a single caller-scoped 
   });
 });
 
+test('exposed CREDENTIAL list is caught via a crawl-discovered link (Tier3 /api/tokens shape)', async () => {
+  // Tier 3 benchmark shape: /api/tokens dumps every user's live plaintext
+  // session token to an unauthenticated caller. Those rows carry no
+  // email/username/role, so the user-list check above deliberately skips them
+  // — this sibling check keys on the per-user credential field instead.
+  // Passive over what the crawler fetched, so it fires with allowActiveProbes:false.
+  await withServer((req, res) => {
+    const u = new URL(req.url || '/', 'http://127.0.0.1');
+    if (u.pathname === '/') {
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end('<!doctype html><html><body><a href="/api/tokens">tokens</a></body></html>');
+      return;
+    }
+    if (u.pathname === '/api/tokens') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify([
+        { id: '1', user_id: 'aaa', token: 'fake-plaintext-session-token-alice', created_at: 't' },
+        { id: '2', user_id: 'bbb', token: 'fake-plaintext-session-token-bob', created_at: 't' },
+      ]));
+      return;
+    }
+    res.writeHead(404); res.end('not found');
+  }, async (port) => {
+    const diag = await runDiagnostics(`http://127.0.0.1:${port}`, undefined, { allowActiveProbes: false });
+    const exposed = (diag.apiSecFindings || []).find((f) => /Exposed Credential List Endpoint/i.test(f.testName));
+    assert.ok(exposed, 'expected the crawl-based check to catch /api/tokens');
+    assert.match(exposed!.endpoint, /\/api\/tokens$/);
+    assert.match(exposed!.evidence!.signal.quote, /fake-plaintext-session-token/);
+  });
+});
+
 test('credential-chain probe catches a URL/key pair declared only on the ROOT page (not a crawled link)', async () => {
   // Regression coverage: crawl.captures never includes the root document
   // (it's SEEDED into the crawler, never "fetched" by it) — a real miss

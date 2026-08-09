@@ -85,8 +85,11 @@ create table embeddings (
 );
 -- routes/search.js queries this over a direct `pg` connection as the
 -- postgres superuser (that IS the vulnerability's mechanism), so it needs no
--- PostgREST-role grant — this is only for the seed script's insert.
-grant select, insert on embeddings to service_role;
+-- PostgREST-role grant — this is only for the seed script's insert. UPDATE is
+-- granted too because the seed uses upsert (INSERT ... ON CONFLICT DO UPDATE),
+-- which PostgreSQL requires UPDATE privilege for even on a first, conflict-free
+-- insert — without it the seed fails "permission denied for table embeddings".
+grant select, insert, update on embeddings to service_role;
 
 -- === T3-Unlogged-001 (session_tokens) =========================================
 create unlogged table session_tokens (
@@ -95,7 +98,7 @@ create unlogged table session_tokens (
   token text not null,
   created_at timestamptz not null default now()
 );
-grant select, insert on session_tokens to service_role;
+grant select, insert, update on session_tokens to service_role; -- update: seed upsert (see embeddings note)
 
 -- === T3-Storage-001 + T3-NC-004 (storage bucket + policy) ====================
 -- Real Supabase Storage normalizes/rejects literal "../" path traversal
