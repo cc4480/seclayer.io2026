@@ -1,0 +1,107 @@
+{
+  "tier": 3,
+  "appName": "Supabase BaaS Test Fixture",
+  "resultsVerifiedAt": "2026-08-09",
+  "vulnerabilities": [
+    {
+      "id": "T3-RLS-Bypass-001",
+      "type": "RLS Bypass via Service-Role Key Misuse",
+      "endpoint": "GET /api/profiles",
+      "cwe": "CWE-639",
+      "severity": "Critical",
+      "expectSeclayerFinding": "unclear — no existing probe targets this exact shape",
+      "actualResult": "DETECTED (new capability) — \"Exposed User List Endpoint\", CRITICAL, confidence:high, real evidence quoting alice's email.",
+      "notes": "Initially MISSED: no probe recognized 'a crawled JSON endpoint returns an array of 2+ distinct user records, reachable with no auth' as its own finding class — the existing exposed-user-object probe (server/apiProbes.ts) only ever tried a small FIXED candidate-path list (/admin/users etc.), never crawler-discovered links. Added server/apiProbes.ts's exposedUserListInCapture(), wired into server/scanner.ts's existing crawl.captures loop (same place SAST secret-scanning already runs) — passive, no new requests, so it fires even in passive-only mode. Deliberately requires an ARRAY of 2+ DISTINCT records (not just 'has an email field') to avoid false-positiving on an ordinary single-record 'my own profile' response. Re-verified detecting on the live scan.",
+      "adaptationNote": "The PRD's claimed mechanism (a NULL auth.uid() makes the RLS policy 'auth.uid() = user_id' fail OPEN) is not how Postgres actually behaves — a NULL result from a USING clause excludes the row, same as false; RLS is fail-closed on NULL, not fail-open. Rebuilt around the PRD's OWN vulnerable code sample instead, which shows the real, extremely common root cause: a backend API route using the SERVICE ROLE key (which bypasses RLS by design) to serve a request without checking who's actually asking. See supabase/migrations/00000000000001_tier3_schema.sql and routes/profiles.js."
+    },
+    {
+      "id": "T3-AnonKey-Abuse-001",
+      "type": "Supabase Anon Key + Un-RLS'd Table",
+      "endpoint": "GET {SUPABASE_URL}/rest/v1/admin_config (anon key extracted from homepage JS)",
+      "cwe": "CWE-269",
+      "severity": "Critical",
+      "expectSeclayerFinding": "possibly Exposed Credential Signature (SAST), but not the chained exploitation",
+      "actualResult": "NOT DETECTED, confirmed — no probe exists for this class.",
+      "notes": "Manually verified working (anon key in homepage JS + admin_config queryable directly at the raw Supabase REST origin with no auth). NOT fixed: proving this requires taking a credential DISCOVERED at one origin (the scanned app) and testing it against a COMPLETELY DIFFERENT origin/port the scan was never pointed at — a credential-chaining capability that doesn't exist anywhere in the scanner and is a materially larger feature than a scoped probe fix (same category judgment as Tier 2's destructive-action boundary: real, but out of scope for this pass, not silently missed)."
+    },
+    {
+      "id": "T3-JWT-Secret-001",
+      "type": "JWT Secret Disclosure -> Forged Token Defeats Real RLS",
+      "endpoint": "GET /.env, then forged token against GET /api/profiles-safe",
+      "cwe": "CWE-798",
+      "severity": "Critical",
+      "expectSeclayerFinding": "possibly Exposed Credential Signature (SAST) for the .env leak alone",
+      "actualResult": "PARTIALLY DETECTED — the leak half is caught: \"Exposed Critical Resource File (/.env)\", CRITICAL, confidence:high, DAST, confirmed by fetching /.env and matching its content signature. The forge-and-bypass half is NOT independently demonstrated by the scanner.",
+      "notes": "Manually verified the full three-step chain works end-to-end: fetch the leaked SUPABASE_JWT_SECRET from /.env, forge an HS256 token for bob's real user_id signed with that secret, present it to /api/profiles-safe (the ROUTE that correctly forwards the caller's own JWT so real RLS applies) — and it's accepted, returning bob's row, because PostgREST verifies the (correctly-signed, since the secret leaked) signature and trusts whatever identity it claims. Seclayer's existing sensitive-path probing already catches the .env exposure on its own — a real, actionable, critical finding by itself — but no code path takes a secret discovered this way and uses it to mint and test a forged credential against a different endpoint. That chaining is a genuinely bigger capability than a probe fix, same category as T3-AnonKey-Abuse-001."
+    },
+    {
+      "id": "T3-VectorDB-Injection-001",
+      "type": "SQL Injection in a Vector-Search Endpoint",
+      "endpoint": "GET /api/search?query=",
+      "cwe": "CWE-89",
+      "severity": "High",
+      "expectSeclayerFinding": "SQL Injection (discovered parameter)",
+      "actualResult": "DETECTED (after a fix) — \"SQL Injection (discovered parameter \\\"query\\\" on /api/search)\", CRITICAL, confidence:high, real evidence.",
+      "notes": "Initially MISSED: confirmed empirically (via a real local Postgres instance) that the `pg` npm package's raw syntax-error text — e.g. `unterminated quoted string at or near \"' limit 10\"`, `syntax error at or near \")\"` — matched NEITHER the wrapped `PostgreSQL.*?ERROR`/`PG::\\w*Error` patterns other-language drivers print NOR the SQLite-specific pattern added for Tier 1. Same root-cause CLASS as the Tier 1 SQLite fix, now for Postgres's actual Node driver. Fixed the shared SQL_ERROR_SIGNATURE regex in server/redTeam/sqlInjection.ts and server/paramFuzzer.ts (kept in sync); added a regression test using the exact real error string. Re-verified detecting on the live scan.",
+      "adaptationNote": "The PRD's vulnerable code sample (`embedding=<>sl.${query}` appended to a PostgREST URL) isn't valid PostgREST filter syntax and wouldn't actually execute. Adapted to a realistic version of the SAME root cause: PostgREST's filter DSL can't express pgvector's nearest-neighbor operator, so the endpoint drops to a raw `pg` connection instead — and that's the parameterization boundary that gets forgotten in practice. See routes/search.js."
+    },
+    {
+      "id": "T3-Realtime-Hijack-001",
+      "type": "Supabase Realtime Subscription Hijacking",
+      "endpoint": "wss://.../realtime/v1 — postgres_changes on public:profiles",
+      "cwe": "CWE-639",
+      "severity": "High",
+      "expectSeclayerFinding": "none",
+      "actualResult": "DOES NOT REPRODUCE on the current engine, confirmed empirically — not a scanner gap.",
+      "notes": "Tested against a real local Realtime server (v2.124.2) with the profiles table added to the supabase_realtime publication, exactly as the PRD describes. Alice, subscribed with only the anon key, reliably receives postgres_changes events for her OWN row (confirmed — the broadcast pipe works) but NEVER receives Bob's updates (confirmed — repeated, clean re-runs). Modern Supabase Realtime enforces RLS on postgres_changes by default; the classic 'any subscriber sees every row's changes' footgun the PRD describes has been closed at the platform level. Same pattern as Tier 2's JWT alg:none hardening and this tier's Storage path-traversal hardening — documented honestly as non-reproducible rather than forced. Even if it did reproduce, it would still require a WebSocket client Seclayer doesn't have (see architectural-gap reasoning on the other unreachable findings in this tier)."
+    },
+    {
+      "id": "T3-Backup-Exposure-001",
+      "type": "Publicly Exposed Database Backup",
+      "endpoint": "GET /backups/db-backup-2026-01-15.sql",
+      "cwe": "CWE-278",
+      "severity": "Critical",
+      "expectSeclayerFinding": "possibly Application Surface Mapped / a secret-signature hit inside the dump, but not 'this is a database backup'",
+      "actualResult": "DETECTED (new capability) — \"Exposed Database Backup (PostgreSQL Database Dump)\", CRITICAL, confidence:high, real evidence.",
+      "notes": "Initially MISSED: the file was correctly crawled and captured (crawl.captures covers every fetched response regardless of content-type), but no check recognized raw SQL-dump content as sensitive — analyzeSecrets only matches specific CREDENTIAL signatures (Stripe/AWS/etc.), not database-dump boilerplate. Added server/staticAnalysis.ts's analyzeDataDumpExposure() with distinctive, low-false-positive signatures (`-- PostgreSQL database dump`, `COPY ... FROM stdin;`, `-- MySQL dump`, `PRAGMA foreign_keys = OFF;`) — real dump-tool boilerplate that essentially never appears in legitimate prose, unlike a bare 'CREATE TABLE'. Wired into the same crawl.captures loop as the other passive SAST checks. Re-verified detecting on the live scan.",
+      "adaptationNote": "Local Supabase dev doesn't do automated S3 backups, so this is stood up as a real static file at a real publicly-reachable, crawler-discoverable path — same exposure mechanism (a sensitive file with no access control) as the cloud version, just without needing a real AWS account."
+    },
+    {
+      "id": "T3-EdgeFunc-001",
+      "type": "Edge Function Authorization Bypass",
+      "endpoint": "POST /functions/v1/sensitive-task",
+      "cwe": "CWE-306",
+      "severity": "High",
+      "expectSeclayerFinding": "possibly caught by the JWT probe if it tries this path, otherwise none",
+      "actualResult": "NOT DETECTED, confirmed — unreachable from this scan by design.",
+      "notes": "Manually verified working (accepts any Authorization header, no signature check). NOT a probe bug: the function lives on the Supabase API origin (127.0.0.1:54321), a different origin than the scanned app (127.0.0.1:4103), and nothing on the scanned app links to it. Seclayer's crawler is correctly same-origin-only; discovering this would require either scanning the Supabase origin directly (a separate scan, at which point this becomes a fair test — not attempted this session) or the same cross-origin credential-chaining capability discussed under T3-AnonKey-Abuse-001."
+    },
+    {
+      "id": "T3-Unlogged-001",
+      "type": "Plaintext Session Tokens Exposed (UNLOGGED table)",
+      "endpoint": "GET /api/tokens",
+      "cwe": "CWE-547",
+      "severity": "High",
+      "expectSeclayerFinding": "unclear — same shape question as T3-RLS-Bypass-001",
+      "actualResult": "NOT DETECTED, confirmed — falls outside the new Exposed User List check's deliberately narrow scope.",
+      "notes": "Manually verified working (unauthenticated GET returns every user's live plaintext session token). The new exposedUserListInCapture() check (built for T3-RLS-Bypass-001) requires an email/username/role field to qualify a record as 'user-shaped' — session_tokens rows have none of those (just user_id/token/created_at). Deliberately did NOT broaden the marker fields to include 'token': a field literally named 'token' appears constantly in legitimate, non-vulnerable responses (CSRF tokens, pagination cursors, nextPageToken), and matching on it generically would trade a real detection for a much higher false-positive rate across ordinary apps. A genuine, narrowly-scoped gap, left open rather than forcing a risky broadening."
+    },
+    {
+      "id": "T3-Storage-001",
+      "type": "Storage IDOR via Service-Role Proxy",
+      "endpoint": "GET /api/files/:ownerId/:filename",
+      "cwe": "CWE-22",
+      "severity": "High",
+      "expectSeclayerFinding": "Broken Object Level Authorization",
+      "actualResult": "PREDICTED DETECTED, NOT independently confirmed this session — the scanning tool available this session doesn't expose the bolaIdentities option.",
+      "notes": "Manually verified the vulnerability is real (alice's own client-supplied ownerId returns her file; substituting bob's ownerId returns his) and its negative control works (the safe route derives ownership from the caller's own JWT, no ownerId parameter to manipulate). Same shape as Tier 1/2's PROVEN two-identity BOLA findings (server/bola.ts), just over a third resource type — high confidence this generalizes correctly based on that precedent, but honestly reporting it as unconfirmed rather than assumed, since it wasn't actually exercised end-to-end this session.",
+      "adaptationNote": "Real Supabase Storage normalizes/rejects literal '../' path traversal server-side — not naively vulnerable to that in the current engine (same story as Tier 2's jsonwebtoken alg:none hardening). Adapted to the realistic, common version of a Storage authorization bug instead: a backend route proxying downloads via the SERVICE ROLE key without checking the requester's own identity against the object's owner. See routes/files.js."
+    }
+  ],
+  "negativeControls": [
+    { "id": "T3-NC-001", "description": "Profiles served via the caller's own forwarded JWT so real RLS applies — cross-user access blocked", "endpoint": "GET /api/profiles-safe" },
+    { "id": "T3-NC-002", "description": "Both PostgREST (real signature check) and the Edge Function counterpart validate the JWT signature — forged/tampered tokens rejected", "endpoint": "GET /api/profiles-safe with a bad signature; POST /functions/v1/sensitive-task-safe" },
+    { "id": "T3-NC-003", "description": "Parameterized query — same search feature, no injection possible", "endpoint": "GET /api/search-safe?query=" },
+    { "id": "T3-NC-004", "description": "Storage served via the caller's own JWT so the real owner-scoped RLS policy applies", "endpoint": "GET /api/files-safe/:filename" }
+  ]
+}

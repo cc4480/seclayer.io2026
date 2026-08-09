@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Tier 3 Fixture — Supabase BaaS</title>
+</head>
+<body>
+  <h1>Tier 3 Test Fixture (Supabase BaaS)</h1>
+  <p>Local vulnerable-app benchmark. Local use only.</p>
+
+  <nav>
+    <a href="/api/profiles">Profiles (all)</a>
+    <a href="/api/profiles-safe">Profiles (safe)</a>
+    <a href="/api/tokens">Session tokens</a>
+    <a href="/api/search?query=widget">Search</a>
+    <a href="/backups/db-backup-2026-01-15.sql">Latest backup</a>
+  </nav>
+
+  <script>
+    // T3-AnonKey-Abuse-001 — the anon key is meant to be public (it's shipped
+    // in every Supabase client bundle by design), but it directly unlocks
+    // any table that was never restricted with an RLS policy — see
+    // admin_config in the migration file.
+    window.SUPABASE_URL = "http://127.0.0.1:54321";
+    window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0";
+  </script>
+</body>
+</html>
