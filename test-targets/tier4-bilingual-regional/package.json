@@ -1,0 +1,16 @@
+{
+  "name": "tier4-bilingual-regional-fixture",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tier 4 vulnerable-app benchmark fixture (bilingual/regional commerce) — local use only, never expose to the internet.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node --env-file=.env server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.11.1",
+    "cookie-parser": "^1.4.7",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.4.0"
+  }
+}

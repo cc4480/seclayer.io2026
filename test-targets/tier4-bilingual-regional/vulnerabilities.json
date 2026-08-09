@@ -1,0 +1,81 @@
+{
+  "tier": 4,
+  "appName": "Bilingual Regional Commerce Test Fixture",
+  "resultsVerifiedAt": "2026-08-09",
+  "vulnerabilities": [
+    {
+      "id": "T4-i18n-Bypass-001",
+      "type": "Language Route Auth Bypass",
+      "endpoint": "GET /en/admin/dashboard (gated) vs GET /es/admin/dashboard (not gated)",
+      "cwe": "CWE-639",
+      "severity": "Critical",
+      "expectSeclayerFinding": "unclear — no existing probe compares auth outcomes across locale-swapped sibling paths",
+      "actualResult": "DETECTED (new capability) — \"Language Route Auth Bypass (en gated, es is not)\", CRITICAL, confidence:high, real evidence quoting the unlocked Spanish dashboard content.",
+      "notes": "Initially MISSED: nothing in the scanner ever compared the SAME resource's auth outcome across two different paths — BOLA compares two IDENTITIES on one path, this needed comparing two PATHS for one (anonymous) caller. Built new server/i18nProbe.ts's probeI18nAuthBypass(): for every crawler-discovered path carrying an /en/ or /es/ segment, fetch it with no credentials; if that's gated (401/403), fetch the locale-swapped sibling ALSO with no credentials, and flag if the sibling returns 200. Deliberately symmetric (works whichever locale happens to be the buggy one, not hardcoded to 'en correct, es broken'). Read-only, two GETs, no state mutation — gated behind verified ownership like the other active probes since it's new requests, but otherwise as safe as the JWT/BOLA differentials it's modeled on. Re-verified detecting on the live scan."
+    },
+    {
+      "id": "T4-Token-Reuse-001",
+      "type": "Bilingual Password Reset Token Reuse",
+      "endpoint": "POST /api/es/auth/forgot-password issues a token redeemable via POST /api/en/auth/reset-password",
+      "cwe": "CWE-613",
+      "severity": "High",
+      "expectSeclayerFinding": "none",
+      "actualResult": "NOT DETECTED, confirmed — no probe exists for this class, by deliberate design.",
+      "notes": "Manually verified working (a token issued under /api/es/auth/forgot-password is accepted by /api/en/auth/reset-password, and rejected by the locale-bound *-safe pair). Considered and rejected building a generic cross-locale-reset-redemption probe for two independent reasons, either alone sufficient: (1) PROVING it requires actually completing a password change — a real mutating action with a real consequence (the account's legitimate owner is locked out of their own current password) — the same non-destructive boundary established for Tier 2's price-manipulation/prototype-pollution/race-condition findings. (2) Even setting that aside, this is fundamentally unobservable to a real black-box scanner: in the real world the token is delivered by email, which the scanner has no access to; this fixture only makes the token visible by echoing it in the API response, purely for local testability (same convention as Tier 1's weak-session-token fixture), not because a real attacker could ever see it this way. Documented as an intentional scope boundary."
+    },
+    {
+      "id": "T4-Price-Manip-001",
+      "type": "Regional Price Manipulation (USD vs MXN)",
+      "endpoint": "POST /api/checkout",
+      "cwe": "CWE-841",
+      "severity": "High",
+      "expectSeclayerFinding": "none",
+      "actualResult": "NOT DETECTED, confirmed — no probe exists for this class, by deliberate design (identical reasoning to Tier 2's T2-BizLogic-001).",
+      "notes": "Manually verified working (client-supplied price/currency honored at face value; the *-safe pair correctly looks up the server-side price for the requested currency). Same conclusion as Tier 2's T2-BizLogic-001, reached independently here and re-confirmed rather than assumed: proving this requires actually completing a checkout — a real state-mutating write with potential real-world side effects (a real order, charge, or webhook) on whatever target is scanned. Not built, for the same non-destructive-scanning reason."
+    },
+    {
+      "id": "T4-SMS-2FA-001",
+      "type": "Regional SMS/WhatsApp 2FA Brute Force",
+      "endpoint": "POST /api/auth/verify-sms",
+      "cwe": "CWE-307",
+      "severity": "High",
+      "expectSeclayerFinding": "none",
+      "actualResult": "NOT DETECTED, confirmed — no probe exists for this class, by deliberate design.",
+      "notes": "Manually verified working (10 rapid wrong-code attempts against /api/auth/verify-sms all return 400 with zero throttling; the *-safe pair correctly 429s after 3). Considered and rejected building a generic missing-rate-limit prober. The naive version — fire N wrong-code guesses and check none get throttled — looks safe in isolation (no money moves, no data changes, all guesses fail), but the actual risk is in the TESTING METHODOLOGY itself: against a REAL target that DOES implement a strict lockout policy (e.g. '3 wrong attempts locks the account for 24 hours', a common real design), the act of testing for the absence of a defense would itself TRIP that defense and lock out the legitimate account holder for real — a genuine, uninvited disruption the target owner didn't consent to for a routine scan. Same non-destructive-scanning category as the other three gaps in this tier, just via a different mechanism (risking a real lockout side effect, not a real financial one)."
+    },
+    {
+      "id": "T4-SQLi-Regional-001",
+      "type": "SQL Injection in Regional Business Logic (Estado Parameter)",
+      "endpoint": "GET /api/merchants?estado=",
+      "cwe": "CWE-89",
+      "severity": "Critical",
+      "expectSeclayerFinding": "SQL Injection (discovered parameter)",
+      "actualResult": "DETECTED — \"SQL Injection (discovered parameter \\\"estado\\\" on /api/merchants)\", CRITICAL, confidence:high, real evidence. Worked on the very first scan, no fix needed.",
+      "notes": "Worth recording precisely WHY this worked without a fix, since a related raw-error format (\"unrecognized token: '''\", from the fuzzer's FIRST breaker, a bare single quote) is genuinely NOT matched by the current SQL_ERROR_SIGNATURE regex — confirmed by manual testing. Detection still succeeded because the fuzzer's THIRD breaker (') produces \"near \\\")\\\": syntax error\", which the Tier 3 Postgres-error fix's pattern already covers (it's the same 'near \"X\": syntax error' shape as the Tier 1 SQLite fix). Left the regex as-is rather than adding 'unrecognized token' speculatively — it didn't change this outcome, and only worth adding if a future real miss actually depends on the first breaker specifically."
+    },
+    {
+      "id": "T4-Stripe-Webhook-001",
+      "type": "Stripe Webhook Signature Bypass (Regional Currency Handling)",
+      "endpoint": "POST /api/webhooks/stripe",
+      "cwe": "CWE-347",
+      "severity": "Critical",
+      "expectSeclayerFinding": "none",
+      "actualResult": "NOT DETECTED, confirmed — no probe exists for this class, by deliberate design.",
+      "notes": "Manually verified working (an unsigned forged MXN webhook is accepted and processed — observable via GET /api/webhooks/_debug/processed; the same forged payload against USD or the *-safe pair is correctly rejected with 400). Considered building a differential probe (send an unsigned forged event, compare acceptance across a USD vs non-USD currency claim) since the TECHNIQUE resembles the safe JWT-forgery differential (a single unsigned/forged request, no state to restore). Rejected: unlike a JWT differential (which only proves a GET became reachable — a read), successfully proving THIS bypass means the target's real webhook handler PROCESSES a fake 'payment succeeded' event — on a real target that could mean crediting an account, marking a real order as paid, shipping goods, or emailing a receipt for a payment that never happened. That's a real, consequential side effect, squarely in the same non-destructive-scanning boundary as T4-Price-Manip-001, not a safe read-only differential."
+    },
+    {
+      "id": "T4-Hardcoded-Creds-001",
+      "type": "Hardcoded Laredo SMB API Credentials",
+      "endpoint": "GET /.env",
+      "cwe": "CWE-798",
+      "severity": "Critical",
+      "expectSeclayerFinding": "Exposed Critical Resource File (/.env)",
+      "actualResult": "DETECTED — \"Exposed Critical Resource File (/.env)\", CRITICAL, confidence:high. Worked on the very first scan (same pre-existing sensitive-path capability that caught Tier 3's T3-JWT-Secret-001 leak half), no fix needed."
+    }
+  ],
+  "negativeControls": [
+    { "id": "T4-NC-001", "description": "Both /en/account and /es/account are consistently gated — a scanner that flags EVERY /es/* route (rather than genuinely comparing per-route) would be reporting a false positive", "endpoint": "GET /en/account, GET /es/account" },
+    { "id": "T4-NC-002", "description": "SMS verification rate-limited to 3 attempts per 15 minutes; brute-force blocked", "endpoint": "POST /api/auth/verify-sms-safe" },
+    { "id": "T4-NC-003", "description": "Webhook signature always verified regardless of currency; unsigned events rejected", "endpoint": "POST /api/webhooks/stripe-safe" }
+  ]
+}

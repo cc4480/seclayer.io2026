@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Tier 4 Fixture — Bilingual Regional Commerce</title>
+</head>
+<body>
+  <h1>Tier 4 Test Fixture (Bilingual / Regional Commerce)</h1>
+  <p>Local vulnerable-app benchmark. Local use only.</p>
+
+  <nav>
+    <a href="/en/admin/dashboard">EN Admin Dashboard</a>
+    <a href="/es/admin/dashboard">ES Admin Dashboard (Panel de Administrador)</a>
+    <a href="/en/account">EN Account</a>
+    <a href="/es/account">ES Account (Mi Cuenta)</a>
+    <a href="/api/merchants?estado=Coahuila">Merchants by Estado</a>
+  </nav>
+
+  <form action="/api/en/auth/forgot-password" method="POST">
+    <input type="hidden" name="email" value="carlos@laredo-merchant.local" />
+    <button type="submit">Forgot password (EN)</button>
+  </form>
+
+  <form action="/api/es/auth/forgot-password" method="POST">
+    <input type="hidden" name="email" value="carlos@laredo-merchant.local" />
+    <button type="submit">Olvid&eacute; mi contrase&ntilde;a (ES)</button>
+  </form>
+
+  <form action="/api/checkout" method="POST">
+    <input type="hidden" name="productId" value="1" />
+    <input type="hidden" name="quantity" value="1" />
+    <input type="hidden" name="currency" value="USD" />
+    <input type="hidden" name="price" value="99.99" />
+    <button type="submit">Checkout</button>
+  </form>
+
+  <form action="/api/webhooks/stripe" method="POST">
+    <input type="hidden" name="type" value="payment_intent.succeeded" />
+    <button type="submit">(internal) Stripe webhook receiver</button>
+  </form>
+</body>
+</html>
