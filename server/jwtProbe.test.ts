@@ -86,3 +86,61 @@ test("no-op when the scan carries no Bearer JWT", async () => {
   const finding = await probeJwtAuth("http://127.0.0.1:1/", { "User-Agent": "test" });
   assert.equal(finding, null);
 });
+
+test("flags privilege escalation when the endpoint gates on a role claim in addition to the signature (Tier2-style)", async () => {
+  // A route that (a) accepts an unsigned token — the underlying vuln — but
+  // (b) ALSO checks the token's own role claim before granting access. A
+  // same-claims forgery (alice's real, non-admin payload with the signature
+  // stripped) gets a correct 403 here, which looks identical to "correctly
+  // rejected" — only an ESCALATED-claims forgery can prove the bypass.
+  await withServer((req, res) => {
+    const authz = req.headers.authorization;
+    if (!authz) {
+      res.writeHead(401, { "Content-Type": "text/html" });
+      return res.end("<html>401 Unauthorized</html>");
+    }
+    const parts = authz.replace(/^Bearer\s+/i, "").split(".");
+    let role = "user";
+    try {
+      role = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8")).role;
+    } catch {
+      // malformed payload — treat as no role
+    }
+    if (role !== "admin") {
+      res.writeHead(403, { "Content-Type": "text/html" });
+      return res.end("<html>403 Forbidden</html>");
+    }
+    res.writeHead(200, { "Content-Type": "text/html" });
+    res.end("<html><body>Admin settings — apiKey: sk_test_totally_fake_1234567890</body></html>");
+  }, async (port) => {
+    const finding = await probeJwtAuth(`http://127.0.0.1:${port}/`, headersWith(REAL_JWT));
+    assert.ok(finding, "expected the escalated-role forgery to expose the signature bypass");
+    assert.match(finding!.testName, /alg:none\+escalated-role/);
+  });
+});
+
+test("also catches the bypass on a protected sub-path when the root itself is public", async () => {
+  // Regression coverage: root used to be the ONLY url ever tested. A very
+  // common real shape — a public marketing/nav root, with a specific
+  // sub-path (e.g. /api/admin/settings) actually gated — used to make the
+  // differential's own precondition (no-token -> 401) unmeetable at root,
+  // so the whole probe silently declined on every such target.
+  await withServer((req, res) => {
+    if (req.url === "/api/admin/settings") {
+      if (!req.headers.authorization) {
+        res.writeHead(401, { "Content-Type": "text/html" });
+        return res.end("<html>401 Unauthorized</html>");
+      }
+      res.writeHead(200, { "Content-Type": "text/html" });
+      return res.end("<html><body>Admin settings — apiKey: sk_test_totally_fake_1234567890</body></html>");
+    }
+    // Root is a public page — no auth required at all.
+    res.writeHead(200, { "Content-Type": "text/html" });
+    res.end("<html><body>public homepage</body></html>");
+  }, async (port) => {
+    const finding = await probeJwtAuth(`http://127.0.0.1:${port}/`, headersWith(REAL_JWT));
+    assert.ok(finding, "expected the candidate-path broadening to find the gated sub-path");
+    assert.match(finding!.testName, /JWT Signature Not Verified/);
+    assert.match(finding!.evidence.attack.request, /\/api\/admin\/settings/);
+  });
+});

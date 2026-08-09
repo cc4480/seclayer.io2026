@@ -18,11 +18,17 @@ import { buildHeaderEvidence } from "./aggressive/aggHttp.js";
 import { xssReflectionExecutes } from "./fpFilters.js";
 import type { EmitFn } from "./scanEvents.js";
 
+export interface FuzzCapture {
+  url: string;
+  contentType: string;
+  text: string;
+}
+
 export async function fuzzDiscoveredTargets(
   targets: InjectableTarget[],
   fuzzHeaders: Record<string, string>,
   opts: { aggressive?: boolean; emit?: EmitFn } = {},
-): Promise<{ findings: any[]; paramsTested: number }> {
+): Promise<{ findings: any[]; paramsTested: number; captures: FuzzCapture[] }> {
   // The aggressive tier adds four more injection classes per parameter, so it
   // gets a larger request budget and a longer wall-clock cap.
   const aggressive = !!opts.aggressive;
@@ -36,6 +42,15 @@ export async function fuzzDiscoveredTargets(
   const reported = new Set<string>(); // dedupe by testName+endpoint+param
   let budget = MAX_REQUESTS;
   let paramsTested = 0;
+
+  // Every response body this pass fetches, for cross-cutting checks that run
+  // over the RESPONSE content rather than looking for an injection signature
+  // (e.g. weakTokenScan.ts) — this fuzzer already exercises every discovered
+  // POST endpoint, so it's the only place that ever sees these bodies at all.
+  // Capped independently of MAX_REQUESTS so it can't grow unbounded even on a
+  // very chatty target.
+  const MAX_CAPTURES = 30;
+  const captures: FuzzCapture[] = [];
 
   // Kept in sync with server/redTeam/sqlInjection.ts's SQL_ERROR_SIGNATURE —
   // see its comment for why the bare "near "X": syntax error"/SQLITE_ERROR
@@ -112,6 +127,11 @@ export async function fuzzDiscoveredTargets(
     reqBody?: string;
     reqContentType?: string;
   };
+  const captureResponse = (url: string, res: Response, text: string): void => {
+    if (captures.length >= MAX_CAPTURES) return;
+    captures.push({ url, contentType: res.headers.get("content-type") || "", text: text.slice(0, 100_000) });
+  };
+
   const sendInjection = async (t: InjectableTarget, param: string, value: string): Promise<Sent> => {
     if (t.method === "POST") {
       const body = postBody(t, param, value);
@@ -125,13 +145,16 @@ export async function fuzzDiscoveredTargets(
           body,
           signal: ctl.signal,
         });
-        return { res, text: await res.text(), attackUrl: t.url, reqMethod: "POST", reqBody: body, reqContentType: contentType };
+        const text = await res.text();
+        captureResponse(t.url, res, text);
+        return { res, text, attackUrl: t.url, reqMethod: "POST", reqBody: body, reqContentType: contentType };
       } finally {
         clearTimeout(id);
       }
     }
     const url = buildUrl(t.url, param, value);
     const { res, text } = await probe(url);
+    captureResponse(url, res, text);
     return { res, text, attackUrl: url, reqMethod: "GET" };
   };
 
@@ -554,5 +577,5 @@ export async function fuzzDiscoveredTargets(
     }
   }
 
-  return { findings, paramsTested };
+  return { findings, paramsTested, captures };
 }

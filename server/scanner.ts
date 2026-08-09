@@ -5,7 +5,8 @@ import { detectTechTags } from "./techprofile.js";
 import { renderPage, isRenderingEnabled } from "./render.js";
 import { safeFetch, assertTargetIsScannable } from "./ssrf.js";
 import { parseAuthHeader } from "./evidence.js";
-import { fuzzDiscoveredTargets } from "./paramFuzzer.js";
+import { fuzzDiscoveredTargets, type FuzzCapture } from "./paramFuzzer.js";
+import { weakTokenFindings } from "./weakTokenScan.js";
 import { buildGuessedTargets } from "./paramMiner.js";
 import { probeStoredXss } from "./storedXss.js";
 import { findLoginTarget, probeWeakSessionToken } from "./redTeam/weakSessionToken.js";
@@ -228,7 +229,7 @@ export async function runDiagnostics(
       // Mapping (crawl) is always allowed — it's passive same-origin GETs.
       // Fuzzing the discovered parameters is an active exploit attempt, so it
       // is gated behind verified domain ownership like the other red-team probes.
-      let fuzz = { findings: [] as any[], paramsTested: 0 };
+      let fuzz = { findings: [] as any[], paramsTested: 0, captures: [] as FuzzCapture[] };
       if (allowActiveProbes) {
         // Fuzz both GET query parameters and POST form fields the crawler mapped.
         // The fuzzer sends each payload with the target's own method (query string
@@ -265,6 +266,19 @@ export async function runDiagnostics(
         if (fuzzTargets.length) emit?.("system", `Fuzzing ${fuzzTargets.length} parameterized endpoint(s) (discovered + mined) with injection payloads…`);
         fuzz = await fuzzDiscoveredTargets(fuzzTargets, { ...headers, "Cache-Control": "no-cache" }, { aggressive: allowAggressiveProbes, emit });
         result.redTeamFindings = [...(result.redTeamFindings || []), ...fuzz.findings];
+
+        // Fuzzing is the only pass that ever POSTs to these endpoints, so it's
+        // the only place a JSON response like a password-reset token is ever
+        // seen — scan every response it captured for weak/low-entropy security
+        // tokens the app put in its own body (see weakTokenScan.ts).
+        for (const capture of fuzz.captures) {
+          for (const wf of weakTokenFindings(capture.text, capture.url)) {
+            const key = `${wf.issue}|${wf.file}`;
+            if (seenSecretKeys.has(key)) continue;
+            seenSecretKeys.add(key);
+            result.sastFindings.push(wf);
+          }
+        }
       }
 
       // Stored/persistent XSS over discovered POST forms. Aggressive tier: it
