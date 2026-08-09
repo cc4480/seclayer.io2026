@@ -275,7 +275,7 @@ function buildRedTeamFindings(diag: DiagnosticResult): Finding[] {
     title: rt.testName,
     description: rt.description,
     severity: rt.severity,
-    confidence: "high",
+    confidence: rt.confidence ?? "high", // most probes prove it; an observational one can declare "medium"
     fix: rt.fix,
     category: "RED_TEAM",
     evidence: rt.evidence, // exploit receipt, when the probe captured one

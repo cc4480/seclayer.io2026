@@ -20,6 +20,7 @@ import { probeEdgeFunctionAuth } from "./edgeFunctionProbe.js";
 import { probePrototypePollution } from "./prototypePollutionProbe.js";
 import { probePriceManipulation } from "./priceManipulationProbe.js";
 import { probeWebhookSignatureBypass } from "./webhookSignatureProbe.js";
+import { probeAuthRateLimit } from "./authRateLimitProbe.js";
 import { probeDomXss } from "./domXss.js";
 import { runPassiveScan, cookieFlagIssues } from "./passiveScan.js";
 import { analyzeSecrets, analyzeDataDumpExposure } from "./staticAnalysis.js";
@@ -336,6 +337,16 @@ export async function runDiagnostics(
           if (webhookFinding) result.redTeamFindings = [...(result.redTeamFindings || []), webhookFinding];
         } catch (e) {
           console.warn("webhook-signature probe encountered an error", e);
+        }
+
+        // Missing rate-limit on OTP/2FA verification. Observational (absence of a
+        // control) → reported at MEDIUM confidence, never PROVEN. A small bounded
+        // burst of wrong codes; bails the instant any throttle signal appears.
+        try {
+          const rlFinding = await probeAuthRateLimit(url, postUrls, { ...headers, "Cache-Control": "no-cache" });
+          if (rlFinding) result.redTeamFindings = [...(result.redTeamFindings || []), rlFinding];
+        } catch (e) {
+          console.warn("auth-rate-limit probe encountered an error", e);
         }
       }
 

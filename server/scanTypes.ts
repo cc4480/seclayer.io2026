@@ -15,6 +15,13 @@ export interface RedTeamFinding {
   description: string;
   fix: string;
   evidence?: ExploitEvidence;
+  // Almost every red-team probe proves its finding (a captured receipt or a
+  // clean differential) and is reported at "high". A probe that can only make
+  // an OBSERVATIONAL, non-provable claim — e.g. "no rate-limiting seen in N
+  // attempts", where absence can't be positively proven — sets this to
+  // "medium" so it is surfaced honestly as needs-verification, not PROVEN.
+  // Omitted → treated as "high" (the existing behavior).
+  confidence?: "low" | "medium" | "high";
 }
 
 export interface DiagnosticResult {

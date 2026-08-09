@@ -43,9 +43,10 @@ npm start   # listens on 127.0.0.1:4104
 `vulnerabilities.json`'s `actualResult`/`notes` fields on each entry are the
 real, observed outcome — not a prediction. Final tally, after investigating
 every gap ("find out why, then fix it" — same discipline as Tiers 1–3):
-**5/7 detected with real evidence (3 via new detection capabilities, 2
-already working with no fix needed), 2/7 confirmed as deliberate, documented
-non-destructive-scanning boundaries.**
+**6/7 detected (5 at high confidence with real PROVEN evidence, 1 —
+SMS-2FA — at MEDIUM confidence / needs-verification, since absence of a rate
+limit can't be positively proven); 1/7 (cross-locale token reuse) a genuine
+non-destructive boundary.**
 
 | ID | Result | Notes |
 |---|---|---|
@@ -54,26 +55,28 @@ non-destructive-scanning boundaries.**
 | T4-Hardcoded-Creds-001 (`.env` leak) | ✅ **Detected** | Same pre-existing sensitive-path capability that caught Tier 3's JWT-secret leak. |
 | T4-Token-Reuse-001 (cross-locale reset token) | ⛔ **Not detected — by design** | Proving it means actually changing a real password (locks out the legitimate owner) — AND is fundamentally unobservable to a real scanner anyway (the token is delivered by email in the real world; this fixture only echoes it for local testability). Not built. |
 | T4-Price-Manip-001 (USD/MXN price) | ✅ **Detected** (new capability) | Closed by the same `server/priceManipulationProbe.ts` built for T2-BizLogic-001 (same class). Two checkout requests differing only in unit price; fires when the charge total tracks the client price (keyed on computed price×qty, so echoes can't false-fire). Non-destructive — no payment instrument or confirmation is sent, so no charge can complete. |
-| T4-SMS-2FA-001 (missing rate limit) | ⛔ **Not detected — by design** | The naive "fire N guesses, check none are throttled" technique risks tripping a REAL target's lockout policy and locking out its legitimate user — a real, uninvited disruption. Not built. |
+| T4-SMS-2FA-001 (missing rate limit) | 🟡 **Detected — MEDIUM confidence** (new capability) | New `server/authRateLimitProbe.ts` — a small bounded burst (6 wrong codes) that bails the instant any throttle signal appears (429, `RateLimit-*`/`Retry-After`, or a lockout message). The one finding intentionally NOT at high confidence / not PROVEN: absence of a control can't be positively proven from a bounded sample. Fires on `/api/auth/verify-sms`; correctly stays quiet on the rate-limited `-safe` sibling. |
 | T4-Stripe-Webhook-001 (currency-conditional signature check) | ✅ **Detected** (new capability) | New `server/webhookSignatureProbe.ts` — the signature skip is gated on *currency*, not event type, so the probe sends a zero-amount `charge.failed` (a FAILURE event) for a *nonexistent* entity: accepting it processes nothing of value. Proof is the differential — same invalid signature rejected for USD, accepted for MXN. This is the less-invasive route that replaced the earlier "would process a forged payment" objection. |
 
-**Why four vulnerabilities were deliberately left undetected.** All four
-share the same root property as Tier 2's price-manipulation/prototype-
-pollution/race-condition gaps: every active probe already in this codebase
-(BOLA, NoSQLi, XXE, JWT, weak-token, the new i18n differential) proves itself
-via a read, an out-of-band callback, or a response differential — never by
-completing a real mutating action or risking a real defensive side effect
-(account lockout) against a live target. These four can only be proven by
-crossing that line, so they were investigated, confirmed genuinely
-undetected, and intentionally not built — a permanent, principled boundary
-for black-box scanning, not a gap to revisit. See `notes` on each entry in
-`vulnerabilities.json` for the full reasoning.
+**Why the one remaining vulnerability is genuinely undetectable.** Three of
+the four originally-undetected vulns here were re-examined and closed once a
+safe oracle was found: price tampering (reads a quote, no payment sent),
+webhook bypass (a zero-amount failure event for a nonexistent entity — nothing
+of value is processed), and SMS-2FA (a small bounded burst at honest medium
+confidence). The one true holdout is **cross-locale reset-token reuse**: it is
+double-blocked. The reset token is email-delivered, so a black-box scanner
+never sees it (this fixture only echoes it for local testability); and
+redeeming it changes the victim's password — a destructive, account-altering
+write. It cannot be proven non-destructively, and it isn't reachable even with
+a destructive mode unless the scanner is handed a real emailed token. See
+`notes` in `vulnerabilities.json`.
 
 ## All four tiers — final tally
 
-| Tier | Detected | Documented non-destructive/architectural boundary | New/fixed capabilities this session |
+| Tier | Detected | Documented non-destructive boundary | Not a vulnerability |
 |---|---|---|---|
-| 1 (OWASP Foundation) | 7/7 | 0 | 5 |
-| 2 (Advanced Attack Chains) | 5/8 | 3/8 | 2 |
-| 3 (Supabase BaaS) | 4/9 (+1 predicted, +1 partial) | 2/9 architectural + 1/9 non-reproducible | 3 |
-| 4 (Bilingual/Regional) | 5/7 | 2/7 | 1 |
+| 1 (OWASP Foundation) | 7/7 | 0 | 0 |
+| 2 (Advanced Attack Chains) | 7/8 | 1/8 (race condition) | 0 |
+| 3 (Supabase BaaS) | 8/9 | 0 | 1/9 (Realtime-hijack, hardened) |
+| 4 (Bilingual/Regional) | 6/7 (1 at medium confidence) | 1/7 (token reuse) | 0 |
+| **Total** | **28/31** | **2** (race condition, token reuse) | **1** (not a real vuln) |
