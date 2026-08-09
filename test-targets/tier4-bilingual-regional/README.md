@@ -43,8 +43,8 @@ npm start   # listens on 127.0.0.1:4104
 `vulnerabilities.json`'s `actualResult`/`notes` fields on each entry are the
 real, observed outcome — not a prediction. Final tally, after investigating
 every gap ("find out why, then fix it" — same discipline as Tiers 1–3):
-**4/7 detected with real evidence (2 via new detection capabilities, 2
-already working with no fix needed), 3/7 confirmed as deliberate, documented
+**5/7 detected with real evidence (3 via new detection capabilities, 2
+already working with no fix needed), 2/7 confirmed as deliberate, documented
 non-destructive-scanning boundaries.**
 
 | ID | Result | Notes |
@@ -55,7 +55,7 @@ non-destructive-scanning boundaries.**
 | T4-Token-Reuse-001 (cross-locale reset token) | ⛔ **Not detected — by design** | Proving it means actually changing a real password (locks out the legitimate owner) — AND is fundamentally unobservable to a real scanner anyway (the token is delivered by email in the real world; this fixture only echoes it for local testability). Not built. |
 | T4-Price-Manip-001 (USD/MXN price) | ✅ **Detected** (new capability) | Closed by the same `server/priceManipulationProbe.ts` built for T2-BizLogic-001 (same class). Two checkout requests differing only in unit price; fires when the charge total tracks the client price (keyed on computed price×qty, so echoes can't false-fire). Non-destructive — no payment instrument or confirmation is sent, so no charge can complete. |
 | T4-SMS-2FA-001 (missing rate limit) | ⛔ **Not detected — by design** | The naive "fire N guesses, check none are throttled" technique risks tripping a REAL target's lockout policy and locking out its legitimate user — a real, uninvited disruption. Not built. |
-| T4-Stripe-Webhook-001 (currency-conditional signature check) | ⛔ **Not detected — by design** | Proving it means the target's real webhook handler processes a fake "payment succeeded" event — real order/credit/email side effects on a live target. Not built. |
+| T4-Stripe-Webhook-001 (currency-conditional signature check) | ✅ **Detected** (new capability) | New `server/webhookSignatureProbe.ts` — the signature skip is gated on *currency*, not event type, so the probe sends a zero-amount `charge.failed` (a FAILURE event) for a *nonexistent* entity: accepting it processes nothing of value. Proof is the differential — same invalid signature rejected for USD, accepted for MXN. This is the less-invasive route that replaced the earlier "would process a forged payment" objection. |
 
 **Why four vulnerabilities were deliberately left undetected.** All four
 share the same root property as Tier 2's price-manipulation/prototype-
@@ -76,4 +76,4 @@ for black-box scanning, not a gap to revisit. See `notes` on each entry in
 | 1 (OWASP Foundation) | 7/7 | 0 | 5 |
 | 2 (Advanced Attack Chains) | 5/8 | 3/8 | 2 |
 | 3 (Supabase BaaS) | 4/9 (+1 predicted, +1 partial) | 2/9 architectural + 1/9 non-reproducible | 3 |
-| 4 (Bilingual/Regional) | 4/7 | 3/7 | 1 |
+| 4 (Bilingual/Regional) | 5/7 | 2/7 | 1 |

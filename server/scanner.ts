@@ -19,6 +19,7 @@ import { extractUrlKeyPairs, probeCredentialUrlPairs } from "./credentialChainPr
 import { probeEdgeFunctionAuth } from "./edgeFunctionProbe.js";
 import { probePrototypePollution } from "./prototypePollutionProbe.js";
 import { probePriceManipulation } from "./priceManipulationProbe.js";
+import { probeWebhookSignatureBypass } from "./webhookSignatureProbe.js";
 import { probeDomXss } from "./domXss.js";
 import { runPassiveScan, cookieFlagIssues } from "./passiveScan.js";
 import { analyzeSecrets, analyzeDataDumpExposure } from "./staticAnalysis.js";
@@ -324,6 +325,17 @@ export async function runDiagnostics(
           if (priceFinding) result.redTeamFindings = [...(result.redTeamFindings || []), priceFinding];
         } catch (e) {
           console.warn("price-manipulation probe encountered an error", e);
+        }
+
+        // Webhook signature-verification bypass. Sends only a zero-amount
+        // FAILURE event for a nonexistent entity, so acceptance processes nothing
+        // of value — proving the (conditional) signature skip without a real
+        // payment side effect. Same aggressive+owned gate + discovered-POST set.
+        try {
+          const webhookFinding = await probeWebhookSignatureBypass(url, postUrls, { ...headers, "Cache-Control": "no-cache" });
+          if (webhookFinding) result.redTeamFindings = [...(result.redTeamFindings || []), webhookFinding];
+        } catch (e) {
+          console.warn("webhook-signature probe encountered an error", e);
         }
       }
 
