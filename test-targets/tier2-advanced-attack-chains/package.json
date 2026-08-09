@@ -1,0 +1,16 @@
+{
+  "name": "seclayer-vulnapp-tier2-advanced-attack-chains",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Intentionally vulnerable Tier 2 benchmark app (see vulnerabilities.json) — real Express/JWT code, for exercising Seclayer's detection against multi-step/chained flaws. NOT for production, NOT for internet exposure.",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.4.1",
+    "jsonwebtoken": "^9.0.2"
+  }
+}

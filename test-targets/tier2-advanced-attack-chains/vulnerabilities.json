@@ -1,0 +1,108 @@
+{
+  "tier": 2,
+  "appName": "Advanced Attack Chains Test Fixture",
+  "resultsVerifiedAt": "2026-08-09",
+  "vulnerabilities": [
+    {
+      "id": "T2-PrivEsc-001",
+      "type": "Privilege Escalation via JWT Tampering (alg:none)",
+      "endpoint": "GET /api/admin/settings",
+      "cwe": "CWE-347",
+      "severity": "Critical",
+      "expectSeclayerFinding": "JWT Signature Not Verified",
+      "actualResult": "DETECTED — \"JWT Signature Not Verified (alg:none+escalated-role)\", CRITICAL, confidence:high, real evidence",
+      "notes": "Initially MISSED, in two rounds. (1) The probe only ever tested the scan's ROOT url — fixed by adding a short COMMON_PROTECTED_PATHS candidate list to server/jwtProbe.ts. (2) Still missed after that fix: the forged alg:none token reused the caller's OWN (non-admin) claims verbatim, so this route's additional `role !== 'admin'` check correctly 403'd the forgery, masking the real signature-bypass bug. Added a second forgery variant that also ESCALATES role/isAdmin/admin claims in the forged payload (server/jwtProbe.ts's escalatedPayloadB64) — this is the textbook 'alg:none + role:admin' attack the vulnerability class is named for. Re-verified detecting on the live scan.",
+      "adaptationNote": "jsonwebtoken v9.0.3 (confirmed empirically) hard-requires a signature once a secret is supplied, closing the classic alg:none bypass at the library level even with 'none' in the algorithms allowlist. Reproduced faithfully via a hand-rolled verifier (auth.js) instead — the realistic real-world shape of this bug (homegrown/old JWT handling), not a jsonwebtoken misconfiguration."
+    },
+    {
+      "id": "T2-NoSQLi-001",
+      "type": "NoSQL Injection (operator authentication bypass)",
+      "endpoint": "POST /api/login",
+      "cwe": "CWE-943",
+      "severity": "Critical",
+      "expectSeclayerFinding": "Active NoSQL Injection (operator authentication bypass)",
+      "actualResult": "DETECTED — \"Active NoSQL Injection (operator authentication bypass)\", CRITICAL, confidence:high, real evidence. Worked on the very first scan, no fix needed."
+    },
+    {
+      "id": "T2-XXE-001",
+      "type": "XML External Entity (XXE) Injection",
+      "endpoint": "POST /upload",
+      "cwe": "CWE-611",
+      "severity": "Critical",
+      "expectSeclayerFinding": "Active XML External Entity (XXE) — out-of-band",
+      "actualResult": "DETECTED — \"Active XML External Entity (XXE) — out-of-band\", CRITICAL, confidence:high, real out-of-band evidence. Worked on the very first scan, no fix needed."
+    },
+    {
+      "id": "T2-BizLogic-001",
+      "type": "Business Logic Bypass — Price Manipulation",
+      "endpoint": "POST /api/checkout",
+      "cwe": "CWE-841",
+      "severity": "High",
+      "expectSeclayerFinding": "none",
+      "actualResult": "NOT DETECTED, confirmed — no probe exists for this class, by deliberate design.",
+      "notes": "Considered and rejected building a generic price-manipulation probe. A self-referential differential IS technically possible (submit two different prices for the same cart and check whether the response's chargeAmount tracks whichever value we sent), but proving it requires actually completing a checkout — a real state-mutating write against whatever 'checkout' means on an arbitrary production target (real order creation, inventory/webhook/notification side effects, possibly a real charge). That crosses the product's own non-destructive safety invariant (every other active probe proves itself via a read, an OOB callback, or a response differential — never by completing a transaction). Documented as an intentional scope boundary, not an oversight."
+    },
+    {
+      "id": "T2-Deser-001",
+      "type": "Insecure Deserialization",
+      "endpoint": "POST /api/restore-session",
+      "cwe": "CWE-502",
+      "severity": "Critical",
+      "expectSeclayerFinding": "none",
+      "actualResult": "NOT DETECTED, confirmed — no probe exists for this class, by deliberate design.",
+      "notes": "Considered and rejected building a generic prototype-pollution probe. This fixture's own proof mechanism (GET /api/debug/polluted-check) is bespoke instrumentation built purely so *I* could manually verify the exploit — no real target exposes anything like it, so there's no generic black-box oracle to check against without a much less reliable technique (polluting a marker and hoping it later leaks into some other unrelated response). More importantly, the vulnerability's proof mechanism is itself global-state corruption: polluting Object.prototype for the whole running process, which can crash or corrupt unrelated request handling on a real target for as long as it stays up. Same non-destructive safety boundary as T2-BizLogic-001 and T2-RaceCondition-001 — documented as an intentional scope boundary.",
+      "adaptationNote": "PHP's unserialize()+magic-method RCE has no direct Node.js analog. Adapted to the real Node equivalent: prototype pollution via an unguarded recursive merge (a genuine, common, CVE-worthy Node vulnerability class with comparable impact). Confirmed working manually with an observable side effect (a separate, unrelated endpoint's plain object inherits the polluted property)."
+    },
+    {
+      "id": "T2-HorzPrivEsc-001",
+      "type": "Horizontal Privilege Escalation via ID Enumeration",
+      "endpoint": "GET /api/document/:id/share",
+      "cwe": "CWE-639",
+      "severity": "High",
+      "expectSeclayerFinding": "Broken Object Level Authorization",
+      "actualResult": "DETECTED — Broken Object Level Authorization, HIGH, confidence:high, real evidence, when scanned with two bolaIdentities (alice's JWT → doc 1001, bob's JWT → doc 1002). Worked on the very first scan, no fix needed — same shape as Tier 1's proven invoice IDOR."
+    },
+    {
+      "id": "T2-RaceCondition-001",
+      "type": "Race Condition in Fund Transfer",
+      "endpoint": "POST /api/transfer",
+      "cwe": "CWE-362",
+      "severity": "High",
+      "expectSeclayerFinding": "none",
+      "actualResult": "NOT DETECTED, confirmed — no probe exists for this class, by deliberate design.",
+      "notes": "Considered and rejected building a generic concurrent-request race prober. Proving a race condition REQUIRES actually causing the double-spend/inconsistent state on the target — firing concurrent duplicate financial-transfer requests at an arbitrary production target risks real, un-reversible financial damage, not just a proof-of-concept read. This is fundamentally different from every other active probe in this codebase (BOLA/NoSQLi/XXE/JWT all prove themselves via a read, an OOB callback, or a response differential, never by completing a mutating financial operation). Documented as an intentional scope boundary consistent with the product's 'never writes or degrades the target' guarantee, not an oversight."
+    },
+    {
+      "id": "T2-WeakCrypto-001",
+      "type": "Insecure Cryptography — Weak Random Token",
+      "endpoint": "POST /api/forgot-password",
+      "cwe": "CWE-338",
+      "severity": "High",
+      "expectSeclayerFinding": "none specific to token length/entropy",
+      "actualResult": "DETECTED (new capability) — \"Weak/Predictable Security Token (token)\", HIGH, confidence:medium. Real captured token value + ~57-bit entropy estimate in the finding.",
+      "notes": "Initially MISSED: no probe evaluated a JSON response field's length/charset for adequate entropy. Unlike Tier 1's T1-Auth-001 (a HASH of a weak seed — statistically indistinguishable from random, so entropy analysis of the hash itself can't work), this token IS directly low-entropy by construction (~11 base36 chars from Math.random()), which IS a tractable, generic, low-false-positive pattern: a new server/weakTokenScan.ts scans every JSON response the param-fuzzer's own requests capture for security-token-named fields (token/otp/passcode/verificationCode/resetCode) whose value is short (8-24 chars) AND estimated below 64 bits of entropy — deliberately excluding bare numeric OTPs (their threat model is rate-limiting, not entropy) and anything outside that length band, to keep false positives low on legitimate apps. Wired into server/paramFuzzer.ts (captures every response it fetches) and server/scanner.ts (runs the check over those captures). Re-verified detecting on the live scan."
+    }
+  ],
+  "negativeControls": [
+    {
+      "id": "T2-NC-001",
+      "description": "Rate-limited endpoint (10/hour) — should not be reported as brute-forceable",
+      "endpoint": "POST /api/forgot-password"
+    },
+    {
+      "id": "T2-NC-002",
+      "description": "Properly verified JWT (real jsonwebtoken verify(), algorithms locked to ['HS256']) — should not accept the forged alg:none token",
+      "endpoint": "GET /api/admin/settings-hardened"
+    },
+    {
+      "id": "T2-NC-003",
+      "description": "Server-sourced price, ignores client-supplied price — should not honor a manipulated price",
+      "endpoint": "POST /api/checkout-safe"
+    },
+    {
+      "id": "T2-NC-004",
+      "description": "Atomic (no yield point between check and deduct) — should not allow a double-spend under concurrent requests",
+      "endpoint": "POST /api/transfer-safe"
+    }
+  ]
+}
