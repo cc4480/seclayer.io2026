@@ -41,6 +41,14 @@ export const config = {
   port: Number(process.env.PORT) || 3000,
   isProd: process.env.NODE_ENV === 'production',
   role: parseRole(process.env.SECLAYER_ROLE),
+  // Max scans allowed to run concurrently IN THIS PROCESS. Each scan is heavy
+  // (minutes of CPU + hundreds of network calls + an nmap subprocess), so an
+  // unbounded burst of scan requests could exhaust the instance's memory,
+  // sockets, and event loop. Excess scans wait (their row stays 'queued', which
+  // recoverStuckScans already sweeps on a crash) until a slot frees. Also the
+  // natural per-worker concurrency cap once scans move to a worker fleet.
+  // MAX_CONCURRENT_SCANS overrides; default 4.
+  maxConcurrentScans: Math.max(1, Number(process.env.MAX_CONCURRENT_SCANS) || 4),
   // Surfaced by the health endpoint. Set APP_VERSION at build/deploy time (e.g.
   // to the git SHA or release tag) so operators can confirm which build is live.
   appVersion: clean(process.env.APP_VERSION) || 'dev',

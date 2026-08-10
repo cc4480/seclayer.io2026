@@ -15,6 +15,8 @@ import * as scanEvents from "./scanEvents.js";
 import type { ScanEventStream } from "./scanEvents.js";
 import type { OobCollaborator } from "./oob.js";
 import type { BolaIdentity, LoginCredentials } from "../src/types.js";
+import { Semaphore } from "./semaphore.js";
+import { config } from "./config.js";
 
 // There is no cancellation token threaded through the probe pipeline (see
 // db.cancelScan's doc comment), so a canceled scan's in-flight network work
@@ -27,7 +29,14 @@ function isCanceled(scanId: string): boolean {
 }
 
 export function makeProcessScanJob(oobCollaborator?: OobCollaborator) {
-  return async function processScanJob(
+  // Cap concurrent in-process scans so a burst can't spawn unbounded
+  // runDiagnostics work and exhaust this instance. Shared across every caller
+  // (dashboard "scan now", MCP, and the monitoring worker) so none can bypass
+  // the cap. Excess scans wait here while their row stays 'queued' — crash-safe,
+  // since recoverStuckScans sweeps 'queued' on the next boot.
+  const scanSlots = new Semaphore(config.maxConcurrentScans);
+
+  const runScanJob = async function (
     scanId: string,
     allowActiveProbes: boolean,
     bolaIdentities?: [BolaIdentity, BolaIdentity],
@@ -154,5 +163,18 @@ export function makeProcessScanJob(oobCollaborator?: OobCollaborator) {
       if (liveNarrator) clearInterval(liveNarrator);
       if (stream) stream.close();
     }
+  };
+
+  // Public entry point: acquire a scan slot (waiting while over the concurrency
+  // cap — the row stays 'queued' until then) and run the job. Same signature and
+  // fire-and-forget/awaitable contract as before, so every call site is unchanged.
+  return function processScanJob(
+    scanId: string,
+    allowActiveProbes: boolean,
+    bolaIdentities?: [BolaIdentity, BolaIdentity],
+    allowAggressiveProbes?: boolean,
+    loginCredentials?: LoginCredentials,
+  ): Promise<void> {
+    return scanSlots.run(() => runScanJob(scanId, allowActiveProbes, bolaIdentities, allowAggressiveProbes, loginCredentials));
   };
 }
