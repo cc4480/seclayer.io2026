@@ -11,13 +11,11 @@ import { hashToken, maskKey } from './dbCrypto.js';
 const DB_FILE = process.env.DB_PATH || path.join(process.cwd(), 'data.sqlite');
 
 // --- URL + scoring helpers ---------------------------------------------------
-export function cleanUrl(urlStr: string): string {
-  try {
-    return urlStr.replace(/https?:\/\//i, '').replace(/\/+$/, '').trim().toLowerCase();
-  } catch {
-    return String(urlStr || '').trim().toLowerCase();
-  }
-}
+// cleanUrl now lives in ./urlClean.js (shared with the Postgres adapter, which
+// must not import this module); re-exported here so existing `import { cleanUrl }
+// from './db.js'` call sites keep working.
+export { cleanUrl } from './urlClean.js';
+import { cleanUrl } from './urlClean.js';
 
 // Re-exported for callers/tests that recompute a score from a finding set.
 export const recalculateScore = scoreFindings;

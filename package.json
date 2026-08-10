@@ -15,6 +15,7 @@
     "test": "node --import tsx --test \"server/**/*.test.ts\" \"src/**/*.test.ts\""
   },
   "dependencies": {
+    "@types/pg": "^8.21.0",
     "better-sqlite3": "^12.10.0",
     "cookie-parser": "^1.4.7",
     "dotenv": "^17.2.3",
@@ -24,6 +25,7 @@
     "jspdf-autotable": "^5.0.8",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
+    "pg": "^8.23.0",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "stripe": "^22.2.0",

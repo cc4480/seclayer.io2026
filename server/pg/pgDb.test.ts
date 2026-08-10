@@ -84,16 +84,19 @@ test("getOrCreateUser runs a real transaction: BEGIN, both INSERTs on the client
   assert.equal(pg.clientCalls[1].params[1], "new@b.co");
 });
 
-test("addCredits transaction updates users + api_keys + inserts a transaction row", async () => {
+test("addCredits transaction reads the user then updates users + api_keys + inserts a transaction row", async () => {
   const pg = new MockPg().respond("WHERE id", [USER_ROW]);
   const db = new PostgresDb(pg);
   await db.addCredits("u1", 10, "purchase", "sess_123");
   const clientSql = pg.clientCalls.map((c) => c.text);
+  // The credit read + all writes run on the SAME client (one transaction) for a
+  // consistent read-modify-write: BEGIN, SELECT user, UPDATE x2, INSERT, COMMIT.
   assert.equal(clientSql[0], "BEGIN");
-  assert.match(clientSql[1], /UPDATE users SET credits/);
-  assert.match(clientSql[2], /UPDATE api_keys SET credits/);
-  assert.match(clientSql[3], /INSERT INTO transactions/);
-  assert.equal(clientSql[4], "COMMIT");
+  assert.match(clientSql[1], /SELECT \* FROM users WHERE id/);
+  assert.match(clientSql[2], /UPDATE users SET credits/);
+  assert.match(clientSql[3], /UPDATE api_keys SET credits/);
+  assert.match(clientSql[4], /INSERT INTO transactions/);
+  assert.equal(clientSql[5], "COMMIT");
 });
 
 test("a throw inside a transaction ROLLBACKs and releases the client", async () => {
