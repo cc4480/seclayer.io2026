@@ -26,6 +26,14 @@ for Node), which ripples through every `db.*` call site.
   correctly. **This is exactly the class of bug a mock-pg test would NOT catch —
   concrete proof the adapter body must be validated against a real Postgres.**
 
+- **`server/pg/pgClient.ts` + `server/pg/pgDb.ts` (`PostgresDb`)** — the adapter
+  infrastructure (get/all/run helpers, async-native BEGIN/COMMIT/ROLLBACK
+  transaction helper) + the mock-tested critical core (auth/sessions, users,
+  credits, scans, api-key validation, health). Reuses SqliteDb's SQL verbatim via
+  `toPositional` + `normalizeRow`. **Mock-tested 7/7** (correct `$n` SQL, params,
+  camelCase mapping, transaction sequencing, rollback). The remaining SqliteDb
+  methods follow the identical pattern.
+
 ## Remaining — needs a live Postgres to build + validate responsibly
 A `DATABASE_URL` connection string (a free Neon/Supabase instance is enough) is
 required for these, so the adapter and the async conversion can be validated
