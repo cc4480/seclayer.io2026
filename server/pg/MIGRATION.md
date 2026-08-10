@@ -16,6 +16,15 @@ for Node), which ripples through every `db.*` call site.
   `$1,$2,…` (quote-aware). This lets the adapter **reuse the exact SQL strings
   from `server/db.ts` verbatim** instead of hand-rewriting 115 queries — the
   single biggest source of adapter risk, removed. Unit-tested.
+- **`server/pg/pgRowCase.ts` (`normalizeRow`)** — resolves a real trap:
+  Postgres folds unquoted identifiers to lower case, so `SELECT *` returns
+  `createdat`/`userid`/`aisummary`, but `server/dbMappers.ts` reads camelCase
+  (`row.createdAt`, …) → every camelCase field would silently be `undefined`.
+  The adapter runs each row through `normalizeRow` before the mappers; SQLite is
+  unaffected, so the mappers stay identical for both backends. Unit-tested,
+  including a test that a real pg-shaped row feeds `rowToUser`/`rowToScan`
+  correctly. **This is exactly the class of bug a mock-pg test would NOT catch —
+  concrete proof the adapter body must be validated against a real Postgres.**
 
 ## Remaining — needs a live Postgres to build + validate responsibly
 A `DATABASE_URL` connection string (a free Neon/Supabase instance is enough) is
