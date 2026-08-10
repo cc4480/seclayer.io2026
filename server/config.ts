@@ -18,9 +18,29 @@ const stripeConfigured = !!clean(process.env.STRIPE_SECRET_KEY) && !!clean(proce
 const freeModeEnv = clean(process.env.FREE_MODE);
 const freeMode = freeModeEnv === 'true' ? true : freeModeEnv === 'false' ? false : !stripeConfigured;
 
+// Deployment role for THIS instance. Controls which in-process background
+// workers run here and whether this instance performs boot-time scan recovery.
+//   'all'    (default) — single-node: serve HTTP AND run monitoring/digest/backup
+//            workers + boot recovery. Backwards-compatible with every existing
+//            single-instance deployment.
+//   'web'    — serve HTTP only. NO background workers, NO boot-time scan recovery.
+//            Run many of these behind the load balancer when scaling out, so the
+//            monitoring scans, digest emails, and backups are NOT duplicated on
+//            every instance (they would be, otherwise — each ran its own timers).
+//   'worker' — run the background workers + boot recovery, no public HTTP surface
+//            needed (still binds a port for health checks).
+// NOTE: a real multi-instance ('web' × N + 'worker') deployment ALSO requires a
+// shared/networked database — the current local SQLite file can't be shared
+// across machines. See the scale-out readiness notes.
+export function parseRole(raw: string | undefined = process.env.SECLAYER_ROLE): 'web' | 'worker' | 'all' {
+  const r = clean(raw)?.toLowerCase();
+  return r === 'web' || r === 'worker' ? r : 'all';
+}
+
 export const config = {
   port: Number(process.env.PORT) || 3000,
   isProd: process.env.NODE_ENV === 'production',
+  role: parseRole(process.env.SECLAYER_ROLE),
   // Surfaced by the health endpoint. Set APP_VERSION at build/deploy time (e.g.
   // to the git SHA or release tag) so operators can confirm which build is live.
   appVersion: clean(process.env.APP_VERSION) || 'dev',
@@ -104,6 +124,14 @@ export function validateConfigOnBoot(): boolean {
         prodCriticalMissing = true;
       }
     }
+  }
+
+  if (config.role !== 'all') {
+    warnings.push(
+      config.role === 'web'
+        ? "SECLAYER_ROLE=web — this instance serves HTTP only; background workers (monitoring, digest, backups) and boot-time scan recovery are DISABLED here. Ensure exactly one 'worker'/'all' instance runs them, and that all instances share a networked database (SQLite cannot be shared across instances)."
+        : "SECLAYER_ROLE=worker — this instance runs background workers + boot recovery. Make sure a networked database is shared with the web instances (SQLite cannot be shared across instances)."
+    );
   }
 
   for (const w of warnings) console.warn(`[config] ${w}`);

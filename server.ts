@@ -35,14 +35,20 @@ async function startServer() {
   const PORT = config.port;
 
   // Resilience: fail (and refund) any scan orphaned by a prior process's
-  // crash/redeploy before it can ever be found stuck by a user.
-  const recovered = db.recoverStuckScans();
-  if (recovered > 0) {
-    console.log(`[server] Recovered ${recovered} scan(s) left mid-flight by a prior process — marked failed and refunded.`);
-  }
-  const recoveredNmap = db.recoverStuckNmapScans();
-  if (recoveredNmap > 0) {
-    console.log(`[server] Recovered ${recoveredNmap} network reconnaissance scan(s) left mid-flight by a prior process — marked failed and refunded.`);
+  // crash/redeploy before it can ever be found stuck by a user. Only the
+  // worker-bearing roles do this — a 'web' instance booting must NOT sweep
+  // scans a worker instance is actively running and mark them failed. On a
+  // single-node deployment (role 'all', the default) this runs exactly as before.
+  const runsWorkers = config.role !== 'web';
+  if (runsWorkers) {
+    const recovered = db.recoverStuckScans();
+    if (recovered > 0) {
+      console.log(`[server] Recovered ${recovered} scan(s) left mid-flight by a prior process — marked failed and refunded.`);
+    }
+    const recoveredNmap = db.recoverStuckNmapScans();
+    if (recoveredNmap > 0) {
+      console.log(`[server] Recovered ${recoveredNmap} network reconnaissance scan(s) left mid-flight by a prior process — marked failed and refunded.`);
+    }
   }
 
   // Network Reconnaissance (nmap) feature detection — probed once at boot and
@@ -158,10 +164,18 @@ async function startServer() {
   // Public site-policy files: robots.txt + RFC 9116 security.txt.
   registerWellKnownRoutes(app);
 
-  // Continuous-monitoring worker (60s tick).
-  startMonitorWorker(processScanJob);
-  startDigestWorker();
-  startBackupWorker();
+  // In-process background workers (continuous monitoring 60s tick, daily digest,
+  // periodic DB backup). Gated by role so that when scaling horizontally, only
+  // the 'worker'/'all' instances run them — otherwise EVERY web instance would
+  // run its own timers and duplicate the monitoring scans, digest emails, and
+  // backups N times over. Single-node ('all', the default) is unchanged.
+  if (runsWorkers) {
+    startMonitorWorker(processScanJob);
+    startDigestWorker();
+    startBackupWorker();
+  } else {
+    console.log('[server] role=web — background workers (monitoring, digest, backups) disabled on this instance.');
+  }
 
   // Unknown API routes return JSON 404 (not the SPA shell).
   app.use('/api', (req, res) => {
