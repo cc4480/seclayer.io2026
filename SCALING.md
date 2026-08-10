@@ -60,6 +60,10 @@ DB). Scan throughput scales by adding workers, decoupled from web traffic.
   Gates the background workers + boot recovery so multiple web instances don't
   duplicate monitoring/digest/backups. `server/config.ts`, `server.ts`.
 - **Pluggable rate-limit store** with a Redis-ready seam. `server/rateLimit.ts`.
+- **Concurrent-scan cap** (`MAX_CONCURRENT_SCANS`, default 4) — bounds in-process
+  scans so a burst can't exhaust the instance; excess scans wait in `queued`
+  (crash-safe). `server/semaphore.ts`, `server/scanWorker.ts`. This is also the
+  per-worker concurrency control Step 2's worker fleet reuses.
 
 ### 🔴 Step 1 — Postgres (THE GATE — nothing else scales until this is done)
 Everything downstream depends on a shared, networked, async database.
