@@ -1,4 +1,5 @@
 import { crawlSite, targetsFromHtml, dedupeTargets, paramsOf, InjectableTarget } from "./crawler.js";
+import { discoverAndParseApi } from "./openapi.js";
 import { runTemplates, selectTemplates } from "./templateEngine.js";
 import { TEMPLATES } from "./templates.js";
 import { detectTechTags } from "./techprofile.js";
@@ -415,10 +416,32 @@ export async function runDiagnostics(
           emit?.("recon", `Parameter mining: ${guessed.length} path(s), ${total} candidate parameter(s) to fuzz.`);
         }
 
-        // Fuzz discovered + mined parameters. Add a JSON-body twin for API-looking
-        // endpoints so injection is exercised over application/json, not only
-        // form-encoded bodies (many APIs accept only JSON).
-        let fuzzTargets = dedupeTargets([...discovered, ...guessed]);
+        // API-first testing: discover an OpenAPI/Swagger spec and fuzz every
+        // DECLARED operation's parameters — the full API surface, not just what
+        // the crawl referenced. GET operations (reads) run here under active
+        // probing; POST operations (which can create state) are held to the
+        // aggressive opt-in, the same non-destructive line the rest of the fuzzer
+        // draws. Same-origin only, via the SSRF-guarded authedFetch.
+        let apiTargets: InjectableTarget[] = [];
+        try {
+          const api = await discoverAndParseApi(url, authedFetch, {
+            explicitUrl: opts.apiSchemaUrl,
+            includePost: allowAggressiveProbes,
+          });
+          if (api) {
+            apiTargets = api.targets;
+            let specPath = api.specUrl;
+            try { specPath = new URL(api.specUrl).pathname; } catch { /* keep full */ }
+            emit?.("recon", `API schema: ${api.format} at ${specPath} — ${api.operationCount} declared operation(s) queued for fuzzing.`);
+          }
+        } catch (e) {
+          console.warn("API-schema discovery encountered an error", e);
+        }
+
+        // Fuzz discovered + mined + schema-declared parameters. Add a JSON-body
+        // twin for API-looking endpoints so injection is exercised over
+        // application/json, not only form-encoded bodies (many APIs accept only JSON).
+        let fuzzTargets = dedupeTargets([...discovered, ...guessed, ...apiTargets]);
         const apiRe = /\/(api|graphql|rest|v\d)(\/|$)/i;
         const jsonTwins = fuzzTargets
           .filter((t) => apiRe.test(pathOf(t.url)))

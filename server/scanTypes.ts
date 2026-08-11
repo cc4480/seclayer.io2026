@@ -117,6 +117,13 @@ export interface ScanOptions {
   // mutating/credentialed probes. Absent → the probe is simply skipped.
   loginCredentials?: LoginCredentials;
 
+  // Optional owner-supplied OpenAPI/Swagger spec URL. When set, the API-first
+  // fuzzer fetches it directly instead of (or before) auto-discovering one at the
+  // usual well-known paths — useful when the schema lives at a non-standard route.
+  // Same-origin is still enforced and the operations are fuzzed under the same
+  // active/aggressive gating. Absent → auto-discovery only. See server/openapi.ts.
+  apiSchemaUrl?: string;
+
   // Out-of-band collaborator used to PROVE blind vulnerabilities: the scanner
   // injects a unique callback URL and, if the target reaches back to it, emits a
   // PROVEN 'out-of-band' finding. Threaded in by the server only when a reachable

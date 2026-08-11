@@ -11,7 +11,7 @@ export interface InjectableTarget {
   url: string; // absolute URL (for GET targets, includes the query string)
   method: HttpMethod;
   params: string[]; // parameter names available to fuzz
-  source: "query" | "form" | "script";
+  source: "query" | "form" | "script" | "openapi";
   // POST body encoding. Defaults to form-urlencoded; "json" makes the fuzzer send
   // an application/json body (for API endpoints that only accept JSON).
   contentType?: "form" | "json";
