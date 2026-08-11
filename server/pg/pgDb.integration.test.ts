@@ -120,3 +120,29 @@ test("PostgresDb: full adapter breadth against a real Postgres", { skip: !DATABA
     await pool.end().catch(() => {});
   }
 });
+
+// Proves the SELECT ... FOR UPDATE atomicity of deductCredits on a real Postgres:
+// concurrent debits sharing one credit must serialize so exactly one wins (no
+// double-spend, balance never negative). The SQLite path has an equivalent test
+// in server/routes/scans.test.ts; this asserts the production backend directly.
+test("PostgresDb: concurrent deductCredits never double-spends the last credit", { skip: !DATABASE_URL }, async () => {
+  const pool = new pg.Pool({ connectionString: DATABASE_URL, ssl: { rejectUnauthorized: false } });
+  const db = new PostgresDb(pool as unknown as PgPool);
+  const email = `pgconc+${Date.now()}@seclayer.test`;
+  let userId = "";
+  try {
+    const u = await db.getOrCreateUser(email);
+    userId = u.id;
+    await db.deductCredits(u.id, u.credits - 1); // drain to exactly 1
+    assert.equal((await db.getUser(u.id))!.credits, 1);
+
+    const results = await Promise.all(Array.from({ length: 8 }, () => db.deductCredits(u.id, 1)));
+    assert.equal(results.filter(Boolean).length, 1, "exactly one concurrent debit may succeed");
+    assert.equal((await db.getUser(u.id))!.credits, 0, "balance must never go negative");
+  } finally {
+    await pool.query("DELETE FROM transactions WHERE userId = $1", [userId]).catch(() => {});
+    await pool.query("DELETE FROM api_keys WHERE userId = $1", [userId]).catch(() => {});
+    await pool.query("DELETE FROM users WHERE id = $1", [userId]).catch(() => {});
+    await pool.end().catch(() => {});
+  }
+});

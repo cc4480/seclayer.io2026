@@ -64,12 +64,12 @@ export function pruneOldBackups(dir: string, retention: number): string[] {
 // Runs one backup pass: snapshot + prune. Returns the snapshot path, or null if
 // backups are disabled (e.g. in-memory DB). Throws only on a real I/O failure,
 // which the worker tick catches so one failed backup never crashes the process.
-export function runBackup(now: Date = new Date()): string | null {
+export async function runBackup(now: Date = new Date()): Promise<string | null> {
   const cfg = backupConfig();
   if (cfg.disabled) return null;
   fs.mkdirSync(cfg.dir, { recursive: true });
   const dest = path.join(cfg.dir, snapshotFilename(now));
-  db.backupTo(dest);
+  (await db.backupTo(dest));
   pruneOldBackups(cfg.dir, cfg.retention);
   return dest;
 }
@@ -82,9 +82,9 @@ export function startBackupWorker(): NodeJS.Timeout | undefined {
     return undefined;
   }
   console.log(`[backup] Snapshots every ${cfg.intervalHours}h to ${cfg.dir} (keeping ${cfg.retention}).`);
-  const interval = setInterval(() => {
+  const interval = setInterval(async () => {
     try {
-      const dest = runBackup();
+      const dest = await runBackup();
       if (dest) console.log(`[backup] Wrote snapshot ${path.basename(dest)}.`);
     } catch (err) {
       console.error('[backup] Snapshot failed:', err);

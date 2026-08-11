@@ -27,14 +27,14 @@ test('backupConfig disables snapshots for an in-memory database', () => {
   assert.equal(cfg.disabled, true);
 });
 
-test('runBackup is a no-op (returns null) when disabled', () => {
-  assert.equal(runBackup(), null);
+test('runBackup is a no-op (returns null) when disabled', async () => {
+  assert.equal(await runBackup(), null);
 });
 
-test('db.backupTo writes a valid, self-contained SQLite snapshot', () => {
+test('db.backupTo writes a valid, self-contained SQLite snapshot', async () => {
   const dir = tmpDir();
   const dest = path.join(dir, 'snap.sqlite');
-  db.backupTo(dest);
+  (await db.backupTo(dest));
   assert.ok(fs.existsSync(dest), 'snapshot file must exist');
   // VACUUM INTO produces a single clean file — no companion WAL/SHM.
   assert.ok(!fs.existsSync(dest + '-wal'), 'snapshot must not carry a hot WAL');

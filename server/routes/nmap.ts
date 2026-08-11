@@ -39,7 +39,7 @@ export function registerNmapRoutes(app: express.Express, ctx: RouteContext) {
       return res.status(400).json({ status: "error", message: "Target URL is required" });
     }
 
-    const user = db.getUser(userId);
+    const user = (await db.getUser(userId));
     if (!user) {
       return res.status(404).json({ status: "error", message: "User profile not found" });
     }
@@ -57,7 +57,7 @@ export function registerNmapRoutes(app: express.Express, ctx: RouteContext) {
     // Hard authorization gate — no passive fallback exists for nmap (unlike
     // the AppSec scanner, which can run passive-only against an unverified
     // target), so this is a 403, matching the retest route's identical gate.
-    if (!activeProbesUnlocked(userId, url)) {
+    if (!(await activeProbesUnlocked(userId, url))) {
       return res.status(403).json({
         status: "error",
         message: "Verify ownership of this domain first — network reconnaissance requires proven ownership.",
@@ -66,7 +66,7 @@ export function registerNmapRoutes(app: express.Express, ctx: RouteContext) {
 
     // Resource-ceiling guard, not an authorization restriction: at most one
     // in-flight nmap scan per user (see db.hasInFlightNmapScan's doc comment).
-    if (db.hasInFlightNmapScan(userId)) {
+    if ((await db.hasInFlightNmapScan(userId))) {
       return res.status(409).json({
         status: "error",
         message: "You already have a network reconnaissance scan in progress.",
@@ -76,21 +76,21 @@ export function registerNmapRoutes(app: express.Express, ctx: RouteContext) {
     if (!config.freeMode && user.credits < 1) {
       return res.status(402).json({ status: "error", message: "No credits remaining. Please purchase scan credits to continue." });
     }
-    if (!config.freeMode && !db.deductCredits(userId, 1)) {
+    if (!config.freeMode && !(await db.deductCredits(userId, 1))) {
       return res.status(402).json({ status: "error", message: "No credits remaining. Please purchase scan credits to continue." });
     }
 
-    const scan = db.createNmapScan(userId, url);
+    const scan = (await db.createNmapScan(userId, url));
     processNmapScanJob(scan.id); // fire-and-forget, mirrors processScanJob
     res.json({ status: "ok", scan });
   });
 
-  app.get("/api/nmap/scans", requireAuth, (req, res) => {
-    res.json({ scans: db.listNmapScans(getUserId(req)) });
+  app.get("/api/nmap/scans", requireAuth, async (req, res) => {
+    res.json({ scans: (await db.listNmapScans(getUserId(req))) });
   });
 
-  app.get("/api/nmap/scans/:id", requireAuth, (req, res) => {
-    const scan = db.getNmapScan(req.params.id);
+  app.get("/api/nmap/scans/:id", requireAuth, async (req, res) => {
+    const scan = (await db.getNmapScan(req.params.id));
     // 404 (not 403) so a scan id can't be probed for existence — matches
     // /api/scans/:id's identical ownership check.
     if (!scan || scan.userId !== getUserId(req)) {
@@ -101,8 +101,8 @@ export function registerNmapRoutes(app: express.Express, ctx: RouteContext) {
 
   // Live event feed for the progress ticker — identical contract to
   // GET /api/scans/:id/events, reusing the exact same in-memory stream module.
-  app.get("/api/nmap/scans/:id/events", requireAuth, (req, res) => {
-    const scan = db.getNmapScan(req.params.id);
+  app.get("/api/nmap/scans/:id/events", requireAuth, async (req, res) => {
+    const scan = (await db.getNmapScan(req.params.id));
     if (!scan || scan.userId !== getUserId(req)) {
       return res.status(404).json({ status: "error", message: "Scan not found" });
     }
@@ -115,8 +115,8 @@ export function registerNmapRoutes(app: express.Express, ctx: RouteContext) {
   // User-initiated cancellation. Unlike /api/scans/:id/cancel, this also
   // kills the real OS process (nmap is exactly one killable process, unlike
   // the AppSec scanner's many small in-flight HTTP probes).
-  app.post("/api/nmap/scans/:id/cancel", requireAuth, (req, res) => {
-    const scan = db.cancelNmapScan(getUserId(req), req.params.id);
+  app.post("/api/nmap/scans/:id/cancel", requireAuth, async (req, res) => {
+    const scan = (await db.cancelNmapScan(getUserId(req), req.params.id));
     if (!scan) {
       return res.status(409).json({ status: "error", message: "This scan can no longer be canceled — it may already be complete, failed, or not exist." });
     }

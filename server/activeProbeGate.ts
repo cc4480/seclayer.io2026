@@ -16,7 +16,7 @@ import { config } from "./config.js";
 import { db } from "./db.js";
 import { extractDomain } from "./domainVerify.js";
 
-export function activeProbesUnlocked(userId: string, targetUrl: string): boolean {
+export async function activeProbesUnlocked(userId: string, targetUrl: string): Promise<boolean> {
   if (config.allowUnverifiedActiveProbes || config.devSkipDomainVerification) return true;
-  return db.isDomainVerified(userId, extractDomain(targetUrl));
+  return (await db.isDomainVerified(userId, extractDomain(targetUrl)));
 }

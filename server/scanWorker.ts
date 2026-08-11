@@ -24,8 +24,8 @@ import { config } from "./config.js";
 // status/result over the user's cancellation once each stage finishes, and
 // skips starting the next (most importantly, the AI report call) once a
 // cancellation is seen.
-function isCanceled(scanId: string): boolean {
-  return db.getScan(scanId)?.status === "canceled";
+async function isCanceled(scanId: string): Promise<boolean> {
+  return (await db.getScan(scanId))?.status === "canceled";
 }
 
 export function makeProcessScanJob(oobCollaborator?: OobCollaborator) {
@@ -50,13 +50,13 @@ export function makeProcessScanJob(oobCollaborator?: OobCollaborator) {
     try {
       console.log(`[Job Worker] Starting scan ${scanId}`);
 
-      const scan = db.getScan(scanId);
-      if (!scan || isCanceled(scanId)) return;
+      const scan = (await db.getScan(scanId));
+      if (!scan || await isCanceled(scanId)) return;
 
       // The scan owner's personal DeepSeek key (BYOK), when set — used for AI
       // report generation and narration so a user can bring their own AI budget.
       // Falls back to the server-wide key, then local summaries (see resolveApiKey).
-      const userDeepseekKey = db.getUserDeepseekKey(scan.userId);
+      const userDeepseekKey = (await db.getUserDeepseekKey(scan.userId));
 
       let narration: string[] = [];
 
@@ -85,9 +85,9 @@ export function makeProcessScanJob(oobCollaborator?: OobCollaborator) {
       }, 2000);
 
       // Active diagnostics (HTTP probing, header/secret/SCA/path checks, fuzzing).
-      db.updateScan(scanId, { status: "scanning" });
+      (await db.updateScan(scanId, { status: "scanning" }));
       const diagnostics = await runDiagnostics(scan.url, scan.authHeader, { allowActiveProbes, allowAggressiveProbes, bolaIdentities, loginCredentials, oob: oobCollaborator, scanId, emit });
-      if (isCanceled(scanId)) { console.log(`[Job Worker] Scan ${scanId} was canceled mid-flight — skipping analysis.`); return; }
+      if (await isCanceled(scanId)) { console.log(`[Job Worker] Scan ${scanId} was canceled mid-flight — skipping analysis.`); return; }
 
       // The rich per-injection events are done; stop the live narrator so the
       // analysis phase doesn't rack up extra Flash calls.
@@ -98,12 +98,12 @@ export function makeProcessScanJob(oobCollaborator?: OobCollaborator) {
       // Fast (flash), cheap narration of what the sweep actually found — read
       // by the progress UI in place of scripted filler text.
       narration = narration.concat(await narrateScanning(diagnostics, scan.url, userDeepseekKey));
-      db.updateScan(scanId, { status: "analyzing", narrationLog: narration });
+      (await db.updateScan(scanId, { status: "analyzing", narrationLog: narration }));
 
       // Compile findings and generate the analysis report.
       const staticCompiled = compileStaticFindings(diagnostics);
       const outputReport = await generateAiReport(scan.url, diagnostics, staticCompiled, userDeepseekKey);
-      if (isCanceled(scanId)) { console.log(`[Job Worker] Scan ${scanId} was canceled mid-flight — discarding the finished report.`); return; }
+      if (await isCanceled(scanId)) { console.log(`[Job Worker] Scan ${scanId} was canceled mid-flight — discarding the finished report.`); return; }
 
       // Narrate the score the UI will actually display: every read path
       // (getScanWithSuppressedFindings) recalculates it deterministically
@@ -125,8 +125,8 @@ export function makeProcessScanJob(oobCollaborator?: OobCollaborator) {
       });
       if (shot) evidence.screenshot = shot;
 
-      if (isCanceled(scanId)) { console.log(`[Job Worker] Scan ${scanId} was canceled mid-flight — discarding the finished report.`); return; }
-      const completed = db.updateScan(scanId, {
+      if (await isCanceled(scanId)) { console.log(`[Job Worker] Scan ${scanId} was canceled mid-flight — discarding the finished report.`); return; }
+      const completed = (await db.updateScan(scanId, {
         status: "complete",
         score: outputReport.score,
         severity: outputReport.severity,
@@ -137,25 +137,25 @@ export function makeProcessScanJob(oobCollaborator?: OobCollaborator) {
         executiveBreakdown: outputReport.executiveBreakdown,
         evidence,
         completedAt: new Date().toISOString(),
-      });
+      }));
       console.log(`[Job Worker] Completed scan ${scanId}`);
 
       // Fire the user's alert webhook when posture regresses vs the previous
       // scan of this target (non-blocking). Both current and baseline are read
       // through the suppression read-model so a suppressed finding never counts.
-      const owner = db.getUser(completed.userId);
-      const current = db.getScanWithSuppressedFindings(completed);
-      const prior = db.getPreviousCompletedScan(completed.userId, completed.url, completed.id);
-      const priorSuppressed = prior ? db.getScanWithSuppressedFindings(prior) : undefined;
+      const owner = (await db.getUser(completed.userId));
+      const current = (await db.getScanWithSuppressedFindings(completed));
+      const prior = (await db.getPreviousCompletedScan(completed.userId, completed.url, completed.id));
+      const priorSuppressed = prior ? (await db.getScanWithSuppressedFindings(prior)) : undefined;
       notifyScanComplete(owner?.notifyWebhook, current, priorSuppressed);
     } catch (err: any) {
       console.error(`[Job Worker] FAILED scan ${scanId}:`, err?.message || err);
-      if (stream && !isCanceled(scanId)) stream.emit("system", `Scan failed: ${err?.message || "The scan could not be completed."}`);
-      if (isCanceled(scanId)) return; // don't overwrite the user's cancellation with a failure
-      db.updateScan(scanId, {
+      if (stream && !await isCanceled(scanId)) stream.emit("system", `Scan failed: ${err?.message || "The scan could not be completed."}`);
+      if (await isCanceled(scanId)) return; // don't overwrite the user's cancellation with a failure
+      (await db.updateScan(scanId, {
         status: "failed",
         error: err?.message || "The scan could not be completed.",
-      });
+      }));
     } finally {
       // Always tear down the live ticker plumbing, whatever path we exited on.
       // close() marks the stream closed; getSince keeps serving its buffered

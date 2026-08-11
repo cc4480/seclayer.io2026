@@ -24,17 +24,17 @@ test('resolveApiKey: a per-user override wins over the env key; falls back to en
   }
 });
 
-test('db: set / get / clear a user DeepSeek key (trimmed, never surfaced on the User)', () => {
-  const u = db.getOrCreateUser(`ds-${Date.now()}@test.io`);
-  assert.equal(db.getUserDeepseekKey(u.id), null, 'none by default');
+test('db: set / get / clear a user DeepSeek key (trimmed, never surfaced on the User)', async () => {
+  const u = (await db.getOrCreateUser(`ds-${Date.now()}@test.io`));
+  assert.equal((await db.getUserDeepseekKey(u.id)), null, 'none by default');
 
-  db.setUserDeepseekKey(u.id, '  sk-abcdefghijklmnopqrst  ');
-  assert.equal(db.getUserDeepseekKey(u.id), 'sk-abcdefghijklmnopqrst', 'stored trimmed');
+  (await db.setUserDeepseekKey(u.id, '  sk-abcdefghijklmnopqrst  '));
+  assert.equal((await db.getUserDeepseekKey(u.id)), 'sk-abcdefghijklmnopqrst', 'stored trimmed');
   // The raw key must never appear on the client-facing User object.
-  assert.equal((db.getUser(u.id) as any).deepseekApiKey, undefined, 'never leaked via getUser');
+  assert.equal(((await db.getUser(u.id)) as any).deepseekApiKey, undefined, 'never leaked via getUser');
 
-  db.setUserDeepseekKey(u.id, '');
-  assert.equal(db.getUserDeepseekKey(u.id), null, 'empty string clears it');
+  (await db.setUserDeepseekKey(u.id, ''));
+  assert.equal((await db.getUserDeepseekKey(u.id)), null, 'empty string clears it');
 });
 
 async function withAccountApp(userId: string, fn: (base: string) => Promise<void>) {
@@ -60,7 +60,7 @@ async function withAccountApp(userId: string, fn: (base: string) => Promise<void
 }
 
 test('PUT /api/user/deepseek-key sets a key (masked preview, raw never returned), rejects junk, and clears', async () => {
-  const u = db.getOrCreateUser(`ds-route-${Date.now()}@test.io`);
+  const u = (await db.getOrCreateUser(`ds-route-${Date.now()}@test.io`));
   await withAccountApp(u.id, async (base) => {
     const rawKey = 'sk-1234567890abcdefghijklmnop';
 
@@ -72,14 +72,14 @@ test('PUT /api/user/deepseek-key sets a key (masked preview, raw never returned)
     assert.equal(body.deepseekKeySet, true);
     assert.ok(body.deepseekKeyPreview && body.deepseekKeyPreview !== rawKey, 'a masked preview, not the raw key');
     assert.ok(!JSON.stringify(body).includes(rawKey), 'the raw key is never in the response');
-    assert.equal(db.getUserDeepseekKey(u.id), rawKey, 'the raw key is stored server-side');
+    assert.equal((await db.getUserDeepseekKey(u.id)), rawKey, 'the raw key is stored server-side');
 
     // Junk key rejected, existing key untouched.
     const bad = await fetch(`${base}/api/user/deepseek-key`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'nope has spaces' }),
     });
     assert.equal(bad.status, 400);
-    assert.equal(db.getUserDeepseekKey(u.id), rawKey, 'a rejected update does not change the stored key');
+    assert.equal((await db.getUserDeepseekKey(u.id)), rawKey, 'a rejected update does not change the stored key');
 
     // Clear it.
     const clear = await fetch(`${base}/api/user/deepseek-key`, {
@@ -87,6 +87,6 @@ test('PUT /api/user/deepseek-key sets a key (masked preview, raw never returned)
     });
     assert.equal(clear.status, 200);
     assert.equal((await clear.json()).deepseekKeySet, false);
-    assert.equal(db.getUserDeepseekKey(u.id), null);
+    assert.equal((await db.getUserDeepseekKey(u.id)), null);
   });
 });

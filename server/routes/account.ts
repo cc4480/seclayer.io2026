@@ -26,10 +26,10 @@ export function registerAccountRoutes(app: express.Express, ctx: RouteContext) {
   // --- Continuous Monitoring ---
   // Each target is enriched with its most recent scan (any status) so the
   // dashboard can show the last result and link straight to that report.
-  app.get("/api/monitoring", requireAuth, (req, res) => {
+  app.get("/api/monitoring", requireAuth, async (req, res) => {
     const userId = getUserId(req);
-    const monitoredTargets = db.listMonitoredTargets(userId).map((t) => {
-      const last = db.getLatestScanForUrl(userId, t.url);
+    const monitoredTargets = await Promise.all((await db.listMonitoredTargets(userId)).map(async (t) => {
+      const last = (await db.getLatestScanForUrl(userId, t.url));
       return {
         ...t,
         lastScan: last
@@ -43,7 +43,7 @@ export function registerAccountRoutes(app: express.Express, ctx: RouteContext) {
             }
           : null,
       };
-    });
+    }));
     res.json({ monitoredTargets });
   });
 
@@ -67,16 +67,16 @@ export function registerAccountRoutes(app: express.Express, ctx: RouteContext) {
 
     const userId = getUserId(req);
     const normalized = cleanUrl(url);
-    if (db.listMonitoredTargets(userId).some((t) => cleanUrl(t.url) === normalized)) {
+    if ((await db.listMonitoredTargets(userId)).some((t) => cleanUrl(t.url) === normalized)) {
       return res.status(409).json({ error: "This URL is already being monitored." });
     }
 
-    const target = db.addMonitoredTarget(userId, url, {
+    const target = (await db.addMonitoredTarget(userId, url, {
       frequencyDays: Number(frequencyDays) || 7,
       hour: hour == null || hour === "" ? null : Number(hour),
       minute: minute == null || minute === "" ? null : Number(minute),
       weekday: weekday == null || weekday === "" ? null : Number(weekday),
-    });
+    }));
     res.json({ status: "ok", target });
   });
 
@@ -86,13 +86,13 @@ export function registerAccountRoutes(app: express.Express, ctx: RouteContext) {
   //  • edit cadence — any of { frequencyDays, hour, minute, weekday }, so a user
   //    can change how often / when a monitor runs without deleting and
   //    re-creating it. Unspecified schedule fields keep their current value.
-  app.patch("/api/monitoring/:id", requireAuth, (req, res) => {
+  app.patch("/api/monitoring/:id", requireAuth, async (req, res) => {
     const userId = getUserId(req);
     const body = req.body || {};
 
     // Pause/resume.
     if (typeof body.paused === "boolean") {
-      if (!db.setMonitoredPaused(userId, req.params.id, body.paused)) {
+      if (!(await db.setMonitoredPaused(userId, req.params.id, body.paused))) {
         return res.status(404).json({ error: "Monitored target not found" });
       }
       return res.json({ status: "ok", paused: body.paused });
@@ -101,7 +101,7 @@ export function registerAccountRoutes(app: express.Express, ctx: RouteContext) {
     // Edit cadence. Accept a partial change and merge it over the current values.
     const hasSchedule = ["frequencyDays", "hour", "minute", "weekday"].some((k) => k in body);
     if (hasSchedule) {
-      const existing = db.getMonitoredTarget(userId, req.params.id);
+      const existing = (await db.getMonitoredTarget(userId, req.params.id));
       if (!existing) {
         return res.status(404).json({ error: "Monitored target not found" });
       }
@@ -125,7 +125,7 @@ export function registerAccountRoutes(app: express.Express, ctx: RouteContext) {
       if (badRange) {
         return res.status(400).json({ error: "Invalid schedule: frequencyDays ≥ 1, hour 0–23, minute 0–59, weekday 0–6 (0=Sunday)." });
       }
-      const target = db.updateMonitoredSchedule(userId, req.params.id, schedule);
+      const target = (await db.updateMonitoredSchedule(userId, req.params.id, schedule));
       if (!target) {
         return res.status(404).json({ error: "Monitored target not found" });
       }
@@ -143,12 +143,12 @@ export function registerAccountRoutes(app: express.Express, ctx: RouteContext) {
   // scan doesn't cause an immediate duplicate on the next tick.
   app.post("/api/monitoring/:id/scan-now", requireAuth, async (req, res) => {
     const userId = getUserId(req);
-    const target = db.getMonitoredTarget(userId, req.params.id);
+    const target = (await db.getMonitoredTarget(userId, req.params.id));
     if (!target) {
       return res.status(404).json({ error: "Monitored target not found" });
     }
 
-    const user = db.getUser(userId);
+    const user = (await db.getUser(userId));
     if (!user) {
       return res.status(404).json({ error: "User profile not found" });
     }
@@ -166,19 +166,19 @@ export function registerAccountRoutes(app: express.Express, ctx: RouteContext) {
     // Re-check the balance at the moment of deduction (single synchronous
     // read-then-write) so a concurrent launch can't share one credit. Skipped
     // in free mode.
-    if (!config.freeMode && !db.deductCredits(userId, 1)) {
+    if (!config.freeMode && !(await db.deductCredits(userId, 1))) {
       return res.status(402).json({ error: "No credits remaining. Please purchase scan credits to run a scan." });
     }
 
-    const scan = db.createScan(userId, target.url);
-    db.markMonitoredScanned(target.id, new Date().toISOString(), nextRunFor(target));
-    const allowActiveProbes = activeProbesUnlocked(userId, target.url);
+    const scan = (await db.createScan(userId, target.url));
+    (await db.markMonitoredScanned(target.id, new Date().toISOString(), nextRunFor(target)));
+    const allowActiveProbes = await activeProbesUnlocked(userId, target.url);
     processScanJob(scan.id, allowActiveProbes);
     res.json({ status: "ok", scan });
   });
 
-  app.delete("/api/monitoring/:id", requireAuth, (req, res) => {
-    if (!db.removeMonitoredTarget(getUserId(req), req.params.id)) {
+  app.delete("/api/monitoring/:id", requireAuth, async (req, res) => {
+    if (!(await db.removeMonitoredTarget(getUserId(req), req.params.id))) {
       return res.status(404).json({ error: "Monitored target not found" });
     }
     res.json({ status: "ok" });
@@ -199,17 +199,17 @@ export function registerAccountRoutes(app: express.Express, ctx: RouteContext) {
         return res.status(400).json({ status: "error", message: "Webhook must be a public http(s) URL (internal/reserved addresses are not allowed)." });
       }
     }
-    const user = db.setUserWebhook(getUserId(req), url ? url.trim() : null);
+    const user = (await db.setUserWebhook(getUserId(req), url ? url.trim() : null));
     res.json({ status: "ok", notifyWebhook: user?.notifyWebhook ?? null });
   });
 
   // --- Weekly monitoring digest email (opt-in) ---
-  app.put("/api/user/email-digest", requireAuth, (req, res) => {
+  app.put("/api/user/email-digest", requireAuth, async (req, res) => {
     const { enabled } = req.body || {};
     if (typeof enabled !== "boolean") {
       return res.status(400).json({ status: "error", message: "enabled (boolean) is required." });
     }
-    const user = db.setEmailDigest(getUserId(req), enabled);
+    const user = (await db.setEmailDigest(getUserId(req), enabled));
     res.json({ status: "ok", emailDigest: user?.emailDigest ?? false });
   });
 
@@ -217,7 +217,7 @@ export function registerAccountRoutes(app: express.Express, ctx: RouteContext) {
   // Lets a user supply their own DeepSeek key so their scans get full AI reports
   // even when the server has no global key (e.g. free mode). Send an empty/null
   // key to clear it. The raw key is never returned — only a set/preview status.
-  app.put("/api/user/deepseek-key", requireAuth, (req, res) => {
+  app.put("/api/user/deepseek-key", requireAuth, async (req, res) => {
     const { key } = req.body || {};
     if (key != null && typeof key !== "string") {
       return res.status(400).json({ status: "error", message: "key must be a string, or empty to remove." });
@@ -227,16 +227,16 @@ export function registerAccountRoutes(app: express.Express, ctx: RouteContext) {
       return res.status(400).json({ status: "error", message: "That doesn't look like a valid DeepSeek API key (it should start with 'sk-' and contain no spaces)." });
     }
     const userId = getUserId(req);
-    db.setUserDeepseekKey(userId, trimmed || null);
-    res.json({ status: "ok", ...deepseekKeyStatus(db.getUserDeepseekKey(userId)) });
+    (await db.setUserDeepseekKey(userId, trimmed || null));
+    res.json({ status: "ok", ...deepseekKeyStatus((await db.getUserDeepseekKey(userId))) });
   });
 
   // --- Credits ---
-  app.get("/api/credits", requireAuth, (req, res) => {
+  app.get("/api/credits", requireAuth, async (req, res) => {
     const userId = getUserId(req);
-    const user = db.getUser(userId);
+    const user = (await db.getUser(userId));
     if (!user) return res.status(404).json({ message: "User not found" });
-    res.json({ credits: user.credits, transactions: db.listTransactions(userId) });
+    res.json({ credits: user.credits, transactions: (await db.listTransactions(userId)) });
   });
 
   // Real Stripe Checkout. Returns a hosted checkout URL; credits are granted by
@@ -259,19 +259,19 @@ export function registerAccountRoutes(app: express.Express, ctx: RouteContext) {
   });
 
   // API Key routes for developer MCP usecases
-  app.get("/api/keys", requireAuth, (req, res) => {
-    res.json({ keys: db.listApiKeys(getUserId(req)) });
+  app.get("/api/keys", requireAuth, async (req, res) => {
+    res.json({ keys: (await db.listApiKeys(getUserId(req))) });
   });
 
   // The raw key is returned ONLY in this response — it is never stored and
   // will never be shown again. The client must copy it now.
-  app.post("/api/keys", requireAuth, (req, res) => {
-    const { apiKey, rawKey } = db.generateApiKey(getUserId(req));
+  app.post("/api/keys", requireAuth, async (req, res) => {
+    const { apiKey, rawKey } = (await db.generateApiKey(getUserId(req)));
     res.json({ status: "ok", key: apiKey, rawKey });
   });
 
-  app.delete("/api/keys/:id", requireAuth, (req, res) => {
-    if (!db.revokeApiKey(getUserId(req), req.params.id)) {
+  app.delete("/api/keys/:id", requireAuth, async (req, res) => {
+    if (!(await db.revokeApiKey(getUserId(req), req.params.id))) {
       return res.status(404).json({ status: "error", message: "Key not found or could not be revoked" });
     }
     res.json({ status: "ok" });

@@ -12,7 +12,7 @@ const XML_PATHS = ["/", "/xml", "/api", "/api/xml", "/import", "/upload", "/soap
 export async function probeXxe(ctx: ProbeContext): Promise<RedTeamFinding | null> {
   if (!ctx.oob) return null;
 
-  const probe = ctx.oob.issue(ctx.scanId);
+  const probe = await ctx.oob.issue(ctx.scanId);
   const xml =
     `<?xml version="1.0" encoding="UTF-8"?>` +
     `<!DOCTYPE root [<!ENTITY xxe SYSTEM "${probe.url}">]>` +

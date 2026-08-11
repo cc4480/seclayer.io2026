@@ -38,7 +38,7 @@ export function registerMcpRoutes(app: express.Express, ctx: RouteContext) {
 
     // Verify the key. In free mode scans cost nothing, so we validate the key
     // without deducting; otherwise we deduct 1 credit as part of validation.
-    const user = config.freeMode ? db.validateApiKey(apiKey) : db.validateApiKeyAndDeduct(apiKey, 1);
+    const user = config.freeMode ? (await db.validateApiKey(apiKey)) : (await db.validateApiKeyAndDeduct(apiKey, 1));
     if (!user) {
       return res.status(401).json({
         error: config.freeMode
@@ -53,13 +53,13 @@ export function registerMcpRoutes(app: express.Express, ctx: RouteContext) {
     // if the process crashes mid-pipeline, and (c) refundable below if the
     // pipeline throws, rather than the credit silently vanishing with no
     // record of what happened to it.
-    const scan = db.createScan(user.id, url, authHeader);
-    db.updateScan(scan.id, { status: "scanning" });
+    const scan = (await db.createScan(user.id, url, authHeader));
+    (await db.updateScan(scan.id, { status: "scanning" }));
 
     try {
       // Active exploit probing only runs once this key's owner has verified
       // ownership of the target's domain; otherwise passive recon only.
-      const allowActiveProbes = activeProbesUnlocked(user.id, url);
+      const allowActiveProbes = await activeProbesUnlocked(user.id, url);
       // Aggressive tier (SSTI/LFI/XXE/CORS/CRLF/open-redirect/NoSQL/host-header +
       // stored XSS) is a more-invasive OPT-IN — the caller must ask for it, and it
       // still requires active probing to be unlocked, exactly like the dashboard's
@@ -70,10 +70,10 @@ export function registerMcpRoutes(app: express.Express, ctx: RouteContext) {
       const diagnostics = await runDiagnostics(url, authHeader, { allowActiveProbes, allowAggressiveProbes, oob: ctx.oobCollaborator, scanId: scan.id });
       const staticCompiled = compileStaticFindings(diagnostics);
       // Use the key owner's personal DeepSeek key (BYOK) when set.
-      const aiReport = await generateAiReport(url, diagnostics, staticCompiled, db.getUserDeepseekKey(user.id));
+      const aiReport = await generateAiReport(url, diagnostics, staticCompiled, (await db.getUserDeepseekKey(user.id)));
 
       const evidence = compileScanEvidence(diagnostics);
-      db.updateScan(scan.id, {
+      (await db.updateScan(scan.id, {
         status: "complete",
         score: aiReport.score,
         severity: aiReport.severity,
@@ -83,7 +83,7 @@ export function registerMcpRoutes(app: express.Express, ctx: RouteContext) {
         executiveBreakdown: aiReport.executiveBreakdown,
         evidence,
         completedAt: new Date().toISOString(),
-      });
+      }));
 
       res.json({
         success: true,
@@ -99,11 +99,11 @@ export function registerMcpRoutes(app: express.Express, ctx: RouteContext) {
     } catch (err: any) {
       // Refund the credit spent on a failed scan — except in free mode, where
       // none was spent, so the balance is reported unchanged.
-      const creditsRemaining = config.freeMode ? user.credits : db.addCredits(user.id, 1, "purchase").credits;
-      db.updateScan(scan.id, {
+      const creditsRemaining = config.freeMode ? user.credits : (await db.addCredits(user.id, 1, "purchase")).credits;
+      (await db.updateScan(scan.id, {
         status: "failed",
         error: err?.message || "The scan could not be completed.",
-      });
+      }));
       res.status(500).json({ error: "Internal audit scanning failed", details: err.message, creditsRemaining });
     }
   });
@@ -122,20 +122,20 @@ export function registerMcpRoutes(app: express.Express, ctx: RouteContext) {
     message: "MCP read rate limit reached. Please wait a moment before the next call.",
   });
 
-  const keyOwner = (req: express.Request) => {
+  const keyOwner = async (req: express.Request) => {
     const key = (req.header("x-api-key") || req.query.apiKey || "").toString().trim();
-    return key ? db.validateApiKey(key) : null;
+    return key ? (await db.validateApiKey(key)) : null;
   };
 
   // List this key owner's recent scans (compact: no findings bodies), newest
   // first — so an agent can find the id of a scan to fetch in full below.
-  app.get("/api/mcp/scans", mcpReadLimiter, (req, res) => {
-    const user = keyOwner(req);
+  app.get("/api/mcp/scans", mcpReadLimiter, async (req, res) => {
+    const user = await keyOwner(req);
     if (!user) {
       return res.status(401).json({ error: "Invalid or missing API key. Pass it in the X-API-Key header or the apiKey query parameter." });
     }
     const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 100);
-    const scans = db.listScans(user.id).slice(0, limit).map((s) => ({
+    const scans = (await db.listScans(user.id)).slice(0, limit).map((s) => ({
       id: s.id,
       url: s.url,
       status: s.status,
@@ -151,12 +151,12 @@ export function registerMcpRoutes(app: express.Express, ctx: RouteContext) {
   // /api/mcp/scan returns, so an agent (and the MCP formatter) can consume a
   // retrieved report identically to a freshly-run one. Suppression is applied
   // and the score recalculated via the shared read-model.
-  app.get("/api/mcp/scans/:id", mcpReadLimiter, (req, res) => {
-    const user = keyOwner(req);
+  app.get("/api/mcp/scans/:id", mcpReadLimiter, async (req, res) => {
+    const user = await keyOwner(req);
     if (!user) {
       return res.status(401).json({ error: "Invalid or missing API key. Pass it in the X-API-Key header or the apiKey query parameter." });
     }
-    const raw = db.getScan(req.params.id);
+    const raw = (await db.getScan(req.params.id));
     // 404 (not 403) when the scan isn't this owner's, so an id can't probe existence.
     if (!raw || raw.userId !== user.id) {
       return res.status(404).json({ error: "Scan not found." });
@@ -164,7 +164,7 @@ export function registerMcpRoutes(app: express.Express, ctx: RouteContext) {
     if (raw.status !== "complete") {
       return res.status(409).json({ error: `Scan is not complete (status: ${raw.status}). Only completed scans have a report.`, status: raw.status });
     }
-    const scan = db.getScanWithSuppressedFindings(raw);
+    const scan = (await db.getScanWithSuppressedFindings(raw));
     res.json({
       success: true,
       targetUrl: scan.url,

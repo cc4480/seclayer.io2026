@@ -21,8 +21,12 @@ import { cleanUrl } from "../urlClean.js";
 import { toPositional } from "./pgParams.js";
 import { normalizeRow, normalizeRows } from "./pgRowCase.js";
 import type { PgPool, PgQueryable } from "./pgClient.js";
+// Type-only import (erased at runtime), so this does NOT pull server/db.js in —
+// which would instantiate SqliteDb and open the SQLite file. It only makes tsc
+// verify this adapter satisfies the same contract SqliteDb defines.
+import type { Db } from "../db.js";
 
-export class PostgresDb {
+export class PostgresDb implements Db {
   constructor(private readonly pool: PgPool) {}
 
   // --- query helpers (mirror better-sqlite3's .get/.all/.run) ---------------
@@ -155,11 +159,18 @@ export class PostgresDb {
     await this.tx((q) => this._addCreditsWithin(q, userId, amount, type, stripeSessionId));
     return (await this.getUser(userId))!;
   }
+  // Atomic check-and-debit: SELECT ... FOR UPDATE locks the user row for the
+  // duration of the transaction, so a concurrent debit blocks until this one
+  // commits and then reads the already-decremented balance — two requests
+  // sharing a single credit can't both succeed. (SqliteDb gets the same
+  // guarantee for free from its synchronous single-threaded transaction.)
   async deductCredits(userId: string, amount: number): Promise<boolean> {
-    const user = await this.getUser(userId);
-    if (!user || user.credits < amount) return false;
-    await this.addCredits(userId, -amount, "scan_debit");
-    return true;
+    return this.tx(async (q) => {
+      const user = rowToUser(await this.get("SELECT * FROM users WHERE id = ? FOR UPDATE", [userId], q));
+      if (!user || user.credits < amount) return false;
+      await this._addCreditsWithin(q, userId, -amount, "scan_debit");
+      return true;
+    });
   }
   async listTransactions(userId: string): Promise<CreditTransaction[]> {
     return this.all("SELECT * FROM transactions WHERE userId = ? ORDER BY createdAt DESC", [userId]) as Promise<CreditTransaction[]>;
@@ -238,7 +249,9 @@ export class PostgresDb {
     if (!existing) throw new Error("Scan not found");
     const m = { ...existing, ...updates };
     await this.run(
-      "UPDATE scans SET status = ?, score = ?, severity = ?, findings = ?, aiSummary = ?, aiReasoning = ?, narrationLog = ?, executiveBreakdown = ?, evidence = ?, error = ?, completedAt = ? WHERE id = ?",
+      // AND status != 'canceled': a late worker write must never clobber a
+      // user's cancellation (terminal). Mirrors SqliteDb.updateScan.
+      "UPDATE scans SET status = ?, score = ?, severity = ?, findings = ?, aiSummary = ?, aiReasoning = ?, narrationLog = ?, executiveBreakdown = ?, evidence = ?, error = ?, completedAt = ? WHERE id = ? AND status != 'canceled'",
       [m.status, m.score ?? null, m.severity ?? null, m.findings ? JSON.stringify(m.findings) : null, m.aiSummary ?? null, m.aiReasoning ?? null,
        m.narrationLog ? JSON.stringify(m.narrationLog) : null, m.executiveBreakdown ? JSON.stringify(m.executiveBreakdown) : null,
        m.evidence ? JSON.stringify(m.evidence) : null, m.error ?? null, m.completedAt ?? null, id]);
@@ -284,7 +297,8 @@ export class PostgresDb {
     if (!existing) throw new Error("Nmap scan not found");
     const m = { ...existing, ...updates };
     await this.run(
-      "UPDATE nmap_scans SET status = ?, resolvedIp = ?, nmapVersion = ?, result = ?, rawXml = ?, error = ?, startedAt = ?, completedAt = ? WHERE id = ?",
+      // See updateScan: never overwrite a cancellation.
+      "UPDATE nmap_scans SET status = ?, resolvedIp = ?, nmapVersion = ?, result = ?, rawXml = ?, error = ?, startedAt = ?, completedAt = ? WHERE id = ? AND status != 'canceled'",
       [m.status, m.resolvedIp ?? null, m.nmapVersion ?? null, m.result ? JSON.stringify(m.result) : null, m.rawXml ?? null, m.error ?? null, m.startedAt ?? null, m.completedAt ?? null, id]);
     return (await this.getNmapScan(id))!;
   }
@@ -359,9 +373,13 @@ export class PostgresDb {
   async validateApiKeyAndDeduct(apiKeyString: string, quantity = 1): Promise<User | null> {
     const keyRow = await this.get("SELECT * FROM api_keys WHERE key = ?", [hashToken(apiKeyString)]);
     if (!keyRow || !keyRow.active) return null;
-    const user = await this.getUser(keyRow.userId);
-    if (!user || user.credits < quantity) return null;
-    return this.addCredits(user.id, -quantity, "scan_debit");
+    // Lock the user row and check-then-debit atomically (see deductCredits).
+    return this.tx(async (q) => {
+      const user = rowToUser(await this.get("SELECT * FROM users WHERE id = ? FOR UPDATE", [keyRow.userId], q));
+      if (!user || user.credits < quantity) return null;
+      await this._addCreditsWithin(q, keyRow.userId, -quantity, "scan_debit");
+      return rowToUser(await this.get("SELECT * FROM users WHERE id = ?", [keyRow.userId], q)) ?? null;
+    });
   }
   async validateApiKey(apiKeyString: string): Promise<User | null> {
     const keyRow = await this.get("SELECT * FROM api_keys WHERE key = ?", [hashToken(apiKeyString)]);

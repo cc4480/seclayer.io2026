@@ -17,7 +17,7 @@ async function withAccountApp(
   fn: (base: string, userId: string) => Promise<void>,
   opts: { processScanJob?: (scanId: string, allowActiveProbes: boolean) => void } = {},
 ) {
-  const user = db.getOrCreateUser(`account-${Date.now()}-${Math.random()}@test.io`);
+  const user = (await db.getOrCreateUser(`account-${Date.now()}-${Math.random()}@test.io`));
 
   const app = express();
   app.use(express.json());
@@ -49,7 +49,7 @@ test('POST /api/monitoring rejects an unsafe/internal target', async () => {
       body: JSON.stringify({ url: UNSAFE_TARGET }),
     });
     assert.equal(res.status, 400);
-    assert.equal(db.listMonitoredTargets(userId).length, 0, 'no monitor row should be created for a rejected target');
+    assert.equal((await db.listMonitoredTargets(userId)).length, 0, 'no monitor row should be created for a rejected target');
   });
 });
 
@@ -61,7 +61,7 @@ test('POST /api/monitoring accepts a valid, safe target', async () => {
       body: JSON.stringify({ url: SAFE_TARGET, frequencyDays: 1 }),
     });
     assert.equal(res.status, 200);
-    const targets = db.listMonitoredTargets(userId);
+    const targets = (await db.listMonitoredTargets(userId));
     assert.equal(targets.length, 1);
     assert.equal(targets[0].url, SAFE_TARGET);
   });
@@ -82,7 +82,7 @@ test('POST /api/monitoring rejects a duplicate target for the same user (409), r
       body: JSON.stringify({ url: `${SAFE_TARGET}/` }), // same host, trailing slash
     });
     assert.equal(second.status, 409);
-    assert.equal(db.listMonitoredTargets(userId).length, 1, 'still exactly one monitor for this URL');
+    assert.equal((await db.listMonitoredTargets(userId)).length, 1, 'still exactly one monitor for this URL');
   });
 });
 
@@ -103,13 +103,13 @@ test('POST /api/monitoring does not dedupe across different users', async () => 
       body: JSON.stringify({ url: SAFE_TARGET }),
     });
     assert.equal(res.status, 200);
-    assert.equal(db.listMonitoredTargets(userId).length, 1);
+    assert.equal((await db.listMonitoredTargets(userId)).length, 1);
   });
 });
 
 test('GET /api/monitoring only returns the caller\'s own targets', async () => {
-  const otherUser = db.getOrCreateUser(`account-other-${Date.now()}@test.io`);
-  db.addMonitoredTarget(otherUser.id, SAFE_TARGET, 7);
+  const otherUser = (await db.getOrCreateUser(`account-other-${Date.now()}@test.io`));
+  (await db.addMonitoredTarget(otherUser.id, SAFE_TARGET, 7));
 
   await withAccountApp(async (base, userId) => {
     await fetch(`${base}/api/monitoring`, {
@@ -126,14 +126,14 @@ test('GET /api/monitoring only returns the caller\'s own targets', async () => {
 });
 
 test('DELETE /api/monitoring/:id 404s for a target owned by someone else', async () => {
-  const otherUser = db.getOrCreateUser(`account-del-other-${Date.now()}@test.io`);
-  const otherTarget = db.addMonitoredTarget(otherUser.id, SAFE_TARGET, 7);
+  const otherUser = (await db.getOrCreateUser(`account-del-other-${Date.now()}@test.io`));
+  const otherTarget = (await db.addMonitoredTarget(otherUser.id, SAFE_TARGET, 7));
 
   await withAccountApp(async (base) => {
     const res = await fetch(`${base}/api/monitoring/${otherTarget.id}`, { method: 'DELETE' });
     assert.equal(res.status, 404);
   });
-  assert.equal(db.listMonitoredTargets(otherUser.id).length, 1, 'the other user\'s target must be untouched');
+  assert.equal((await db.listMonitoredTargets(otherUser.id)).length, 1, 'the other user\'s target must be untouched');
 });
 
 async function addTarget(base: string, url = SAFE_TARGET): Promise<string> {
@@ -149,28 +149,28 @@ test('PATCH /api/monitoring/:id pauses and resumes a target (and pausing removes
     const id = await addTarget(base);
     // Backdate so it would be due if not paused.
     const past = new Date(Date.now() - 1000).toISOString();
-    db.markMonitoredScanned(id, past, past);
-    assert.ok(db.listDueMonitoredTargets(new Date().toISOString()).some((t) => t.id === id), 'due before pausing');
+    (await db.markMonitoredScanned(id, past, past));
+    assert.ok((await db.listDueMonitoredTargets(new Date().toISOString())).some((t) => t.id === id), 'due before pausing');
 
     const pause = await fetch(`${base}/api/monitoring/${id}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paused: true }),
     });
     assert.equal(pause.status, 200);
-    assert.equal(db.getMonitoredTarget(userId, id)!.paused, true);
-    assert.equal(db.listDueMonitoredTargets(new Date().toISOString()).some((t) => t.id === id), false, 'paused target is not due');
+    assert.equal((await db.getMonitoredTarget(userId, id))!.paused, true);
+    assert.equal((await db.listDueMonitoredTargets(new Date().toISOString())).some((t) => t.id === id), false, 'paused target is not due');
 
     const resume = await fetch(`${base}/api/monitoring/${id}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paused: false }),
     });
     assert.equal(resume.status, 200);
-    assert.equal(db.getMonitoredTarget(userId, id)!.paused, false);
-    assert.ok(db.listDueMonitoredTargets(new Date().toISOString()).some((t) => t.id === id), 'due again after resume');
+    assert.equal((await db.getMonitoredTarget(userId, id))!.paused, false);
+    assert.ok((await db.listDueMonitoredTargets(new Date().toISOString())).some((t) => t.id === id), 'due again after resume');
   });
 });
 
 test('PATCH /api/monitoring/:id rejects a non-boolean and 404s for another user\'s target', async () => {
-  const otherUser = db.getOrCreateUser(`account-patch-other-${Date.now()}@test.io`);
-  const otherTarget = db.addMonitoredTarget(otherUser.id, SAFE_TARGET, 7);
+  const otherUser = (await db.getOrCreateUser(`account-patch-other-${Date.now()}@test.io`));
+  const otherTarget = (await db.addMonitoredTarget(otherUser.id, SAFE_TARGET, 7));
   await withAccountApp(async (base) => {
     const id = await addTarget(base);
     const bad = await fetch(`${base}/api/monitoring/${id}`, {
@@ -183,13 +183,13 @@ test('PATCH /api/monitoring/:id rejects a non-boolean and 404s for another user\
     });
     assert.equal(cross.status, 404);
   });
-  assert.equal(db.getMonitoredTarget(otherUser.id, otherTarget.id)!.paused, false, 'other user\'s target untouched');
+  assert.equal((await db.getMonitoredTarget(otherUser.id, otherTarget.id))!.paused, false, 'other user\'s target untouched');
 });
 
 test('PATCH /api/monitoring/:id edits the cadence and recomputes the next run', async () => {
   await withAccountApp(async (base, userId) => {
     const id = await addTarget(base);
-    const before = db.getMonitoredTarget(userId, id)!;
+    const before = (await db.getMonitoredTarget(userId, id))!;
 
     // Change to a weekly Wednesday 06:30 UTC schedule.
     const res = await fetch(`${base}/api/monitoring/${id}`, {
@@ -197,7 +197,7 @@ test('PATCH /api/monitoring/:id edits the cadence and recomputes the next run', 
       body: JSON.stringify({ frequencyDays: 7, weekday: 3, hour: 6, minute: 30 }),
     });
     assert.equal(res.status, 200);
-    const t = db.getMonitoredTarget(userId, id)!;
+    const t = (await db.getMonitoredTarget(userId, id))!;
     assert.equal(t.frequencyDays, 7);
     assert.equal(t.scanWeekday, 3);
     assert.equal(t.scanHour, 6);
@@ -228,7 +228,7 @@ test('PATCH /api/monitoring/:id merges a partial schedule edit over existing val
       body: JSON.stringify({ hour: 14 }),
     });
     assert.equal(res.status, 200);
-    const t = db.getMonitoredTarget(userId, id)!;
+    const t = (await db.getMonitoredTarget(userId, id))!;
     assert.equal(t.scanHour, 14, 'hour changed');
     assert.equal(t.scanWeekday, 1, 'weekday preserved');
     assert.equal(t.scanMinute, 0, 'minute preserved');
@@ -237,8 +237,8 @@ test('PATCH /api/monitoring/:id merges a partial schedule edit over existing val
 });
 
 test('PATCH /api/monitoring/:id rejects an out-of-range schedule (400) and 404s across users', async () => {
-  const otherUser = db.getOrCreateUser(`account-edit-other-${Date.now()}@test.io`);
-  const otherTarget = db.addMonitoredTarget(otherUser.id, SAFE_TARGET, 7);
+  const otherUser = (await db.getOrCreateUser(`account-edit-other-${Date.now()}@test.io`));
+  const otherTarget = (await db.addMonitoredTarget(otherUser.id, SAFE_TARGET, 7));
   await withAccountApp(async (base, userId) => {
     const id = await addTarget(base);
     const bad = await fetch(`${base}/api/monitoring/${id}`, {
@@ -253,26 +253,26 @@ test('PATCH /api/monitoring/:id rejects an out-of-range schedule (400) and 404s 
     });
     assert.equal(cross.status, 404, "can't edit another user's monitor");
   });
-  assert.equal(db.getMonitoredTarget(otherUser.id, otherTarget.id)!.frequencyDays, 7, 'other user\'s schedule untouched');
+  assert.equal((await db.getMonitoredTarget(otherUser.id, otherTarget.id))!.frequencyDays, 7, 'other user\'s schedule untouched');
 });
 
 test('POST /api/monitoring/:id/scan-now launches a scan, deducts a credit, and reschedules', async () => {
   const launched: Array<{ scanId: string; allowActiveProbes: boolean }> = [];
   await withAccountApp(async (base, userId) => {
     const id = await addTarget(base);
-    const creditsBefore = db.getUser(userId)!.credits;
+    const creditsBefore = (await db.getUser(userId))!.credits;
 
     const res = await fetch(`${base}/api/monitoring/${id}/scan-now`, { method: 'POST' });
     assert.equal(res.status, 200);
     const data = await res.json();
     assert.ok(data.scan?.id, 'returns the created scan');
 
-    assert.equal(db.getUser(userId)!.credits, creditsBefore - 1, 'one credit spent');
-    assert.equal(db.listScans(userId).length, 1, 'a scan row was created');
+    assert.equal((await db.getUser(userId))!.credits, creditsBefore - 1, 'one credit spent');
+    assert.equal((await db.listScans(userId)).length, 1, 'a scan row was created');
     assert.equal(launched.length, 1, 'the scan job was dispatched');
     assert.equal(launched[0].scanId, data.scan.id);
     // lastScannedAt set; nextScanAt rescheduled into the future.
-    const t = db.getMonitoredTarget(userId, id)!;
+    const t = (await db.getMonitoredTarget(userId, id))!;
     assert.ok(t.lastScannedAt, 'lastScannedAt set after scan-now');
     assert.ok(new Date(t.nextScanAt!).getTime() > Date.now(), 'next automated run rescheduled forward');
   }, { processScanJob: (scanId, allowActiveProbes) => { launched.push({ scanId, allowActiveProbes }); } });
@@ -282,24 +282,24 @@ test('POST /api/monitoring/:id/scan-now returns 402 with no credits and never di
   let dispatched = 0;
   await withAccountApp(async (base, userId) => {
     const id = await addTarget(base);
-    db.deductCredits(userId, db.getUser(userId)!.credits); // spend to zero
+    (await db.deductCredits(userId, (await db.getUser(userId))!.credits)); // spend to zero
 
     const res = await fetch(`${base}/api/monitoring/${id}/scan-now`, { method: 'POST' });
     assert.equal(res.status, 402);
-    assert.equal(db.listScans(userId).length, 0, 'no scan created when out of credits');
+    assert.equal((await db.listScans(userId)).length, 0, 'no scan created when out of credits');
     assert.equal(dispatched, 0);
   }, { processScanJob: () => { dispatched++; } });
 });
 
 test('POST /api/monitoring/:id/scan-now 404s for another user\'s target without spending its owner\'s credit', async () => {
-  const otherUser = db.getOrCreateUser(`account-sn-other-${Date.now()}@test.io`);
-  const otherTarget = db.addMonitoredTarget(otherUser.id, SAFE_TARGET, 7);
-  const otherCreditsBefore = db.getUser(otherUser.id)!.credits;
+  const otherUser = (await db.getOrCreateUser(`account-sn-other-${Date.now()}@test.io`));
+  const otherTarget = (await db.addMonitoredTarget(otherUser.id, SAFE_TARGET, 7));
+  const otherCreditsBefore = (await db.getUser(otherUser.id))!.credits;
   await withAccountApp(async (base) => {
     const res = await fetch(`${base}/api/monitoring/${otherTarget.id}/scan-now`, { method: 'POST' });
     assert.equal(res.status, 404);
   });
-  assert.equal(db.getUser(otherUser.id)!.credits, otherCreditsBefore, 'other user\'s credits untouched');
+  assert.equal((await db.getUser(otherUser.id))!.credits, otherCreditsBefore, 'other user\'s credits untouched');
 });
 
 test('GET /api/monitoring enriches each target with its latest scan', async () => {
@@ -311,8 +311,8 @@ test('GET /api/monitoring enriches each target with its latest scan', async () =
     assert.equal(target.lastScan, null, 'no lastScan before any scan runs');
 
     // Create + complete a scan for this target's URL.
-    const scan = db.createScan(userId, SAFE_TARGET);
-    db.updateScan(scan.id, { status: 'complete', score: 72, severity: 'medium', completedAt: new Date().toISOString() });
+    const scan = (await db.createScan(userId, SAFE_TARGET));
+    (await db.updateScan(scan.id, { status: 'complete', score: 72, severity: 'medium', completedAt: new Date().toISOString() }));
 
     res = await fetch(`${base}/api/monitoring`);
     target = (await res.json()).monitoredTargets.find((t: any) => t.id === id);
@@ -330,7 +330,7 @@ test('PUT /api/user/email-digest toggles the opt-in and validates the body', asy
     });
     assert.equal(on.status, 200);
     assert.equal((await on.json()).emailDigest, true);
-    assert.equal(db.getUser(userId)!.emailDigest, true);
+    assert.equal((await db.getUser(userId))!.emailDigest, true);
 
     const off = await fetch(`${base}/api/user/email-digest`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: false }),

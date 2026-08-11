@@ -19,24 +19,24 @@ test('processNmapScanJob no-ops immediately for an unknown scan id', async () =>
 });
 
 test('processNmapScanJob no-ops for a scan already canceled before it starts', async () => {
-  const u = db.getOrCreateUser('nmap-worker-precanceled@test.io');
-  const scan = db.createNmapScan(u.id, 'http://127.0.0.1');
-  db.updateNmapScan(scan.id, { status: 'canceled', error: 'Canceled by user.' });
+  const u = (await db.getOrCreateUser('nmap-worker-precanceled@test.io'));
+  const scan = (await db.createNmapScan(u.id, 'http://127.0.0.1'));
+  (await db.updateNmapScan(scan.id, { status: 'canceled', error: 'Canceled by user.' }));
 
   await processNmapScanJob(scan.id);
 
-  const after = db.getNmapScan(scan.id)!;
+  const after = (await db.getNmapScan(scan.id))!;
   assert.equal(after.status, 'canceled', 'a pre-canceled scan must never be overwritten');
   assert.equal(after.error, 'Canceled by user.');
 });
 
 test('processNmapScanJob transitions scanning -> failed when target resolution is refused, and emits a live event', async () => {
-  const u = db.getOrCreateUser('nmap-worker-blocked@test.io');
-  const scan = db.createNmapScan(u.id, 'http://127.0.0.1'); // blocked: loopback
+  const u = (await db.getOrCreateUser('nmap-worker-blocked@test.io'));
+  const scan = (await db.createNmapScan(u.id, 'http://127.0.0.1')); // blocked: loopback
 
   await processNmapScanJob(scan.id);
 
-  const after = db.getNmapScan(scan.id)!;
+  const after = (await db.getNmapScan(scan.id))!;
   assert.equal(after.status, 'failed');
   assert.match(after.error || '', /internal or reserved/);
   assert.ok(after.startedAt, 'the scan must have entered the scanning phase before failing');
@@ -50,15 +50,15 @@ test('processNmapScanJob transitions scanning -> failed when target resolution i
 });
 
 test('processNmapScanJob does not overwrite a scan canceled mid-flight (after it reached scanning)', async () => {
-  const u = db.getOrCreateUser('nmap-worker-midflight-cancel@test.io');
-  const scan = db.createNmapScan(u.id, 'http://this-domain-should-not-exist-seclayer-test.invalid');
+  const u = (await db.getOrCreateUser('nmap-worker-midflight-cancel@test.io'));
+  const scan = (await db.createNmapScan(u.id, 'http://this-domain-should-not-exist-seclayer-test.invalid'));
 
   const jobPromise = processNmapScanJob(scan.id);
   // Race the worker: flip to canceled while it's mid-resolution (DNS lookup
   // for a nonexistent domain takes a little real time, giving this a window).
-  db.updateNmapScan(scan.id, { status: 'canceled', error: 'Canceled by user.' });
+  (await db.updateNmapScan(scan.id, { status: 'canceled', error: 'Canceled by user.' }));
   await jobPromise;
 
-  const after = db.getNmapScan(scan.id)!;
+  const after = (await db.getNmapScan(scan.id))!;
   assert.equal(after.status, 'canceled', 'the worker must never overwrite a cancellation with a failure');
 });

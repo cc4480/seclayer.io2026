@@ -62,7 +62,7 @@ const OOB_TOKEN = 'a'.repeat(48);
 function fakeOob(event: OobEvent | null): OobCollaborator {
   return {
     baseUrl: 'http://oob.test',
-    issue: () => ({ token: OOB_TOKEN, url: `http://oob.test/api/oob/${OOB_TOKEN}` }),
+    issue: async () => ({ token: OOB_TOKEN, url: `http://oob.test/api/oob/${OOB_TOKEN}` }),
     poll: async () => event,
   };
 }

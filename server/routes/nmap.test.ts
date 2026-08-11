@@ -15,10 +15,10 @@ async function withNmapApp(
   fn: (base: string, userId: string) => Promise<void>,
   opts: { nmapAvailable?: boolean; verifyDomain?: boolean; processNmapScanJob?: (scanId: string) => void } = {},
 ) {
-  const user = db.getOrCreateUser(`nmap-route-${Date.now()}-${Math.random()}@test.io`);
+  const user = (await db.getOrCreateUser(`nmap-route-${Date.now()}-${Math.random()}@test.io`));
   if (opts.verifyDomain !== false) {
-    db.startDomainVerification(user.id, '93.184.216.34', 'sl-verify-test');
-    db.markDomainVerified(user.id, '93.184.216.34');
+    (await db.startDomainVerification(user.id, '93.184.216.34', 'sl-verify-test'));
+    (await db.markDomainVerified(user.id, '93.184.216.34'));
   }
 
   const app = express();
@@ -67,45 +67,45 @@ test('POST /api/nmap/scans returns 400 and never creates a scan for an SSRF-unsa
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: 'http://127.0.0.1' }),
     });
     assert.equal(res.status, 400);
-    assert.equal(db.listNmapScans(userId).length, 0);
+    assert.equal((await db.listNmapScans(userId)).length, 0);
   });
 });
 
 test('POST /api/nmap/scans returns 403 and spends no credit when the domain is not verified', async () => {
   await withNmapApp(async (base, userId) => {
-    const before = db.getUser(userId)!.credits;
+    const before = (await db.getUser(userId))!.credits;
     const res = await fetch(`${base}/api/nmap/scans`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: SAFE_TARGET }),
     });
     assert.equal(res.status, 403);
-    assert.equal(db.getUser(userId)!.credits, before);
-    assert.equal(db.listNmapScans(userId).length, 0);
+    assert.equal((await db.getUser(userId))!.credits, before);
+    assert.equal((await db.listNmapScans(userId)).length, 0);
   }, { verifyDomain: false });
 });
 
 test('POST /api/nmap/scans returns 402 and creates no scan when the user has no credits', async () => {
   await withNmapApp(async (base, userId) => {
-    db.deductCredits(userId, db.getUser(userId)!.credits);
+    (await db.deductCredits(userId, (await db.getUser(userId))!.credits));
     const res = await fetch(`${base}/api/nmap/scans`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: SAFE_TARGET }),
     });
     assert.equal(res.status, 402);
-    assert.equal(db.listNmapScans(userId).length, 0);
+    assert.equal((await db.listNmapScans(userId)).length, 0);
   });
 });
 
 test('POST /api/nmap/scans launches on the happy path: deducts one credit, creates one queued scan, dispatches the worker', async () => {
   let dispatchedId: string | null = null;
   await withNmapApp(async (base, userId) => {
-    const before = db.getUser(userId)!.credits;
+    const before = (await db.getUser(userId))!.credits;
     const res = await fetch(`${base}/api/nmap/scans`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: SAFE_TARGET }),
     });
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.equal(body.scan.status, 'queued');
-    assert.equal(db.getUser(userId)!.credits, before - 1);
-    assert.equal(db.listNmapScans(userId).length, 1);
+    assert.equal((await db.getUser(userId))!.credits, before - 1);
+    assert.equal((await db.listNmapScans(userId)).length, 1);
     assert.equal(dispatchedId, body.scan.id);
   }, { processNmapScanJob: (scanId) => { dispatchedId = scanId; } });
 });
@@ -116,14 +116,14 @@ test('POST /api/nmap/scans returns 409 and spends no extra credit when a scan is
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: SAFE_TARGET }),
     });
     assert.equal(first.status, 200);
-    const afterFirst = db.getUser(userId)!.credits;
+    const afterFirst = (await db.getUser(userId))!.credits;
 
     const second = await fetch(`${base}/api/nmap/scans`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: SAFE_TARGET }),
     });
     assert.equal(second.status, 409);
-    assert.equal(db.getUser(userId)!.credits, afterFirst, 'the second (rejected) attempt must not spend a credit');
-    assert.equal(db.listNmapScans(userId).length, 1);
+    assert.equal((await db.getUser(userId))!.credits, afterFirst, 'the second (rejected) attempt must not spend a credit');
+    assert.equal((await db.listNmapScans(userId)).length, 1);
   });
 });
 
@@ -132,8 +132,8 @@ test('GET /api/nmap/scans lists only the caller\'s own scans', async () => {
     await fetch(`${base}/api/nmap/scans`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: SAFE_TARGET }),
     });
-    const other = db.getOrCreateUser(`nmap-other-${Date.now()}@test.io`);
-    db.createNmapScan(other.id, 'https://not-mine.test');
+    const other = (await db.getOrCreateUser(`nmap-other-${Date.now()}@test.io`));
+    (await db.createNmapScan(other.id, 'https://not-mine.test'));
 
     const res = await fetch(`${base}/api/nmap/scans`);
     const body = await res.json();
@@ -144,8 +144,8 @@ test('GET /api/nmap/scans lists only the caller\'s own scans', async () => {
 
 test('GET /api/nmap/scans/:id 404s for a scan owned by someone else', async () => {
   await withNmapApp(async (base) => {
-    const other = db.getOrCreateUser(`nmap-other-owner-${Date.now()}@test.io`);
-    const theirScan = db.createNmapScan(other.id, 'https://not-mine.test');
+    const other = (await db.getOrCreateUser(`nmap-other-owner-${Date.now()}@test.io`));
+    const theirScan = (await db.createNmapScan(other.id, 'https://not-mine.test'));
 
     const res = await fetch(`${base}/api/nmap/scans/${theirScan.id}`);
     assert.equal(res.status, 404);
@@ -158,22 +158,22 @@ test('POST /api/nmap/scans/:id/cancel refunds the credit and 409s a second attem
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: SAFE_TARGET }),
     });
     const { scan } = await launch.json();
-    const afterLaunch = db.getUser(userId)!.credits;
+    const afterLaunch = (await db.getUser(userId))!.credits;
 
     const cancel = await fetch(`${base}/api/nmap/scans/${scan.id}/cancel`, { method: 'POST' });
     assert.equal(cancel.status, 200);
-    assert.equal(db.getUser(userId)!.credits, afterLaunch + 1);
+    assert.equal((await db.getUser(userId))!.credits, afterLaunch + 1);
 
     const again = await fetch(`${base}/api/nmap/scans/${scan.id}/cancel`, { method: 'POST' });
     assert.equal(again.status, 409);
-    assert.equal(db.getUser(userId)!.credits, afterLaunch + 1, 'no double-refund');
+    assert.equal((await db.getUser(userId))!.credits, afterLaunch + 1, 'no double-refund');
   });
 });
 
 test('GET /api/nmap/scans/:id/events 404s for a scan owned by someone else', async () => {
   await withNmapApp(async (base) => {
-    const other = db.getOrCreateUser(`nmap-events-owner-${Date.now()}@test.io`);
-    const theirScan = db.createNmapScan(other.id, 'https://not-mine.test');
+    const other = (await db.getOrCreateUser(`nmap-events-owner-${Date.now()}@test.io`));
+    const theirScan = (await db.createNmapScan(other.id, 'https://not-mine.test'));
 
     const res = await fetch(`${base}/api/nmap/scans/${theirScan.id}/events`);
     assert.equal(res.status, 404);

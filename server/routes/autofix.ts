@@ -115,13 +115,13 @@ export function registerAutofixRoutes(app: express.Express) {
   // /api/mcp/scan there is no async pipeline after the charge that can fail, so
   // there's no refund path here: creating the session row cannot meaningfully
   // fail once the key/credit check has passed.
-  app.post("/api/mcp/autofix/start", startLimiter, (req, res) => {
+  app.post("/api/mcp/autofix/start", startLimiter, async (req, res) => {
     const { apiKey, url, findingTitle, findingCategory } = req.body;
     if (!apiKey || !url || !findingTitle || !findingCategory) {
       return res.status(400).json({ error: "Missing parameters. required: apiKey, url, findingTitle, findingCategory" });
     }
 
-    const user = config.freeMode ? db.validateApiKey(apiKey) : db.validateApiKeyAndDeduct(apiKey, 1);
+    const user = config.freeMode ? (await db.validateApiKey(apiKey)) : (await db.validateApiKeyAndDeduct(apiKey, 1));
     if (!user) {
       return res.status(401).json({
         error: config.freeMode
@@ -130,7 +130,7 @@ export function registerAutofixRoutes(app: express.Express) {
       });
     }
 
-    const session = db.createAutofixSession(user.id, url, findingTitle, findingCategory);
+    const session = (await db.createAutofixSession(user.id, url, findingTitle, findingCategory));
     res.json({ success: true, sessionId: session.id, creditsRemaining: user.credits });
   });
 
@@ -145,10 +145,10 @@ export function registerAutofixRoutes(app: express.Express) {
       return res.status(400).json({ error: "Missing parameters. required: apiKey, sessionId, messages" });
     }
 
-    const user = db.validateApiKey(apiKey);
+    const user = (await db.validateApiKey(apiKey));
     if (!user) return res.status(401).json({ error: "Invalid or missing API key." });
 
-    const session = db.getAutofixSession(sessionId);
+    const session = (await db.getAutofixSession(sessionId));
     if (!session || session.userId !== user.id) {
       return res.status(404).json({ error: "Autofix session not found." });
     }
@@ -156,7 +156,7 @@ export function registerAutofixRoutes(app: express.Express) {
       return res.status(409).json({ error: `Autofix session is not active (status: ${session.status}).`, status: session.status });
     }
     if (session.turns >= MAX_TURNS) {
-      db.completeAutofixSession(sessionId, "expired");
+      (await db.completeAutofixSession(sessionId, "expired"));
       return res.status(409).json({ error: `Autofix session reached its ${MAX_TURNS}-turn limit without finishing.`, status: "expired" });
     }
 
@@ -165,12 +165,12 @@ export function registerAutofixRoutes(app: express.Express) {
         maxTokens: MAX_TOKENS,
         timeoutMs: TURN_TIMEOUT_MS,
       });
-      const updated = db.incrementAutofixTurn(sessionId);
+      const updated = (await db.incrementAutofixTurn(sessionId));
 
       const calledDone = result.toolCalls.some((c) => c.function.name === "done");
       const turnCapped = updated.turns >= MAX_TURNS;
       if (calledDone || turnCapped) {
-        db.completeAutofixSession(sessionId, calledDone ? "done" : "expired");
+        (await db.completeAutofixSession(sessionId, calledDone ? "done" : "expired"));
       }
 
       res.json({

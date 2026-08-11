@@ -18,7 +18,7 @@ export async function runDueMonitoredScans(processScanJob: ProcessScanJob): Prom
   if (monitorTickRunning) return;
   monitorTickRunning = true;
   try {
-    const due = db.listDueMonitoredTargets(new Date().toISOString());
+    const due = (await db.listDueMonitoredTargets(new Date().toISOString()));
     for (const target of due) {
       // Reschedule on the target's real cadence (weekday + time-of-day), not a
       // fixed now+N days, so the next run lands when the user actually chose.
@@ -29,9 +29,9 @@ export async function runDueMonitoredScans(processScanJob: ProcessScanJob): Prom
         weekday: target.scanWeekday,
       }).toISOString();
       try {
-        const user = db.getUser(target.userId);
+        const user = (await db.getUser(target.userId));
         if (!user) {
-          db.markMonitoredError(target.id, "Skipped: the owning account no longer exists.");
+          (await db.markMonitoredError(target.id, "Skipped: the owning account no longer exists."));
           continue;
         }
         // In free mode scans cost nothing; the credit gate is skipped entirely.
@@ -39,25 +39,25 @@ export async function runDueMonitoredScans(processScanJob: ProcessScanJob): Prom
           // Retry next tick once credits exist — scheduling is untouched,
           // but the reason is recorded so the dashboard doesn't just show
           // a silent "ACTIVE" monitor that never actually scans anything.
-          db.markMonitoredError(target.id, "Skipped: insufficient credits. Will retry automatically once the balance is topped up.");
+          (await db.markMonitoredError(target.id, "Skipped: insufficient credits. Will retry automatically once the balance is topped up."));
           continue;
         }
         await assertScanTargetSafe(target.url);
         // Re-checks the balance at the moment of deduction — the credits
         // check above ran before the await, so it could be stale if a
         // manual scan spent the last credit in the meantime. Skipped in free mode.
-        if (!config.freeMode && !db.deductCredits(target.userId, 1)) {
-          db.markMonitoredError(target.id, "Skipped: insufficient credits. Will retry automatically once the balance is topped up.");
+        if (!config.freeMode && !(await db.deductCredits(target.userId, 1))) {
+          (await db.markMonitoredError(target.id, "Skipped: insufficient credits. Will retry automatically once the balance is topped up."));
           continue;
         }
-        const scan = db.createScan(target.userId, target.url);
-        db.markMonitoredScanned(target.id, new Date().toISOString(), next);
-        const allowActiveProbes = activeProbesUnlocked(target.userId, target.url);
+        const scan = (await db.createScan(target.userId, target.url));
+        (await db.markMonitoredScanned(target.id, new Date().toISOString(), next));
+        const allowActiveProbes = await activeProbesUnlocked(target.userId, target.url);
         processScanJob(scan.id, allowActiveProbes);
       } catch (err: any) {
         // Invalid/unsafe target: defer instead of retrying every tick.
         const message = err?.message || "This target could not be scanned (invalid or unsafe URL).";
-        db.markMonitoredSkipped(target.id, next, message);
+        (await db.markMonitoredSkipped(target.id, next, message));
         console.warn(`[monitor] Skipped ${target.url}: ${message}`);
       }
     }

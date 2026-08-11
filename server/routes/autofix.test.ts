@@ -33,9 +33,9 @@ async function withAutofixApp(fn: (base: string) => Promise<void>) {
 // declared LAST so it doesn't starve anything declared after it.
 
 test('POST /api/mcp/autofix/start creates an active session and deducts exactly one credit', async () => {
-  const user = db.getOrCreateUser(`autofix-start-${Date.now()}@test.io`);
-  const { rawKey } = db.generateApiKey(user.id);
-  const creditsBefore = db.getUser(user.id)!.credits;
+  const user = (await db.getOrCreateUser(`autofix-start-${Date.now()}@test.io`));
+  const { rawKey } = (await db.generateApiKey(user.id));
+  const creditsBefore = (await db.getUser(user.id))!.credits;
 
   await withAutofixApp(async (base) => {
     const res = await fetch(`${base}/api/mcp/autofix/start`, {
@@ -49,14 +49,14 @@ test('POST /api/mcp/autofix/start creates an active session and deducts exactly 
     assert.ok(body.sessionId);
     assert.equal(body.creditsRemaining, creditsBefore - 1);
 
-    const session = db.getAutofixSession(body.sessionId);
+    const session = (await db.getAutofixSession(body.sessionId));
     assert.ok(session);
     assert.equal(session!.userId, user.id);
     assert.equal(session!.status, 'active');
     assert.equal(session!.turns, 0);
   });
 
-  assert.equal(db.getUser(user.id)!.credits, creditsBefore - 1);
+  assert.equal((await db.getUser(user.id))!.credits, creditsBefore - 1);
 });
 
 test('POST /api/mcp/autofix/start 401s with an invalid key and spends nothing', async () => {
@@ -71,10 +71,10 @@ test('POST /api/mcp/autofix/start 401s with an invalid key and spends nothing', 
 });
 
 test('POST /api/mcp/autofix/turn 404s a session that belongs to a different key', async () => {
-  const owner = db.getOrCreateUser(`autofix-turn-owner-${Date.now()}@test.io`);
-  const other = db.getOrCreateUser(`autofix-turn-other-${Date.now()}@test.io`);
-  const { rawKey: otherKey } = db.generateApiKey(other.id);
-  const session = db.createAutofixSession(owner.id, 'https://93.184.216.34', 'Missing CSP header', 'IAST');
+  const owner = (await db.getOrCreateUser(`autofix-turn-owner-${Date.now()}@test.io`));
+  const other = (await db.getOrCreateUser(`autofix-turn-other-${Date.now()}@test.io`));
+  const { rawKey: otherKey } = (await db.generateApiKey(other.id));
+  const session = (await db.createAutofixSession(owner.id, 'https://93.184.216.34', 'Missing CSP header', 'IAST'));
 
   await withAutofixApp(async (base) => {
     const res = await fetch(`${base}/api/mcp/autofix/turn`, {
@@ -87,10 +87,10 @@ test('POST /api/mcp/autofix/turn 404s a session that belongs to a different key'
 });
 
 test('POST /api/mcp/autofix/turn 409s once the session is no longer active', async () => {
-  const user = db.getOrCreateUser(`autofix-turn-done-${Date.now()}@test.io`);
-  const { rawKey } = db.generateApiKey(user.id);
-  const session = db.createAutofixSession(user.id, 'https://93.184.216.34', 'Missing CSP header', 'IAST');
-  db.completeAutofixSession(session.id, 'done');
+  const user = (await db.getOrCreateUser(`autofix-turn-done-${Date.now()}@test.io`));
+  const { rawKey } = (await db.generateApiKey(user.id));
+  const session = (await db.createAutofixSession(user.id, 'https://93.184.216.34', 'Missing CSP header', 'IAST'));
+  (await db.completeAutofixSession(session.id, 'done'));
 
   await withAutofixApp(async (base) => {
     const res = await fetch(`${base}/api/mcp/autofix/turn`, {
@@ -104,10 +104,10 @@ test('POST /api/mcp/autofix/turn 409s once the session is no longer active', asy
 });
 
 test('POST /api/mcp/autofix/turn 409s and expires the session once the turn cap is reached', async () => {
-  const user = db.getOrCreateUser(`autofix-turn-cap-${Date.now()}@test.io`);
-  const { rawKey } = db.generateApiKey(user.id);
-  const session = db.createAutofixSession(user.id, 'https://93.184.216.34', 'Missing CSP header', 'IAST');
-  for (let i = 0; i < 25; i++) db.incrementAutofixTurn(session.id);
+  const user = (await db.getOrCreateUser(`autofix-turn-cap-${Date.now()}@test.io`));
+  const { rawKey } = (await db.generateApiKey(user.id));
+  const session = (await db.createAutofixSession(user.id, 'https://93.184.216.34', 'Missing CSP header', 'IAST'));
+  for (let i = 0; i < 25; i++) (await db.incrementAutofixTurn(session.id));
 
   await withAutofixApp(async (base) => {
     const res = await fetch(`${base}/api/mcp/autofix/turn`, {
@@ -119,16 +119,16 @@ test('POST /api/mcp/autofix/turn 409s and expires the session once the turn cap 
     assert.equal((await res.json()).status, 'expired');
   });
 
-  assert.equal(db.getAutofixSession(session.id)!.status, 'expired');
+  assert.equal((await db.getAutofixSession(session.id))!.status, 'expired');
 });
 
 test('POST /api/mcp/autofix/turn fails cleanly without DEEPSEEK_API_KEY and consumes no turn', async () => {
   // Regression guard: a DeepSeek-side failure must not silently advance the
   // turn counter or flip the session's status — the caller should be able to
   // retry the exact same turn.
-  const user = db.getOrCreateUser(`autofix-turn-nokey-${Date.now()}@test.io`);
-  const { rawKey } = db.generateApiKey(user.id);
-  const session = db.createAutofixSession(user.id, 'https://93.184.216.34', 'Missing CSP header', 'IAST');
+  const user = (await db.getOrCreateUser(`autofix-turn-nokey-${Date.now()}@test.io`));
+  const { rawKey } = (await db.generateApiKey(user.id));
+  const session = (await db.createAutofixSession(user.id, 'https://93.184.216.34', 'Missing CSP header', 'IAST'));
 
   await withAutofixApp(async (base) => {
     const res = await fetch(`${base}/api/mcp/autofix/turn`, {
@@ -139,7 +139,7 @@ test('POST /api/mcp/autofix/turn fails cleanly without DEEPSEEK_API_KEY and cons
     assert.equal(res.status, 500);
   });
 
-  const after = db.getAutofixSession(session.id)!;
+  const after = (await db.getAutofixSession(session.id))!;
   assert.equal(after.turns, 0, 'a failed turn must not be counted');
   assert.equal(after.status, 'active', 'a failed turn must not change session status');
 });

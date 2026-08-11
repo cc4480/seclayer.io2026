@@ -66,9 +66,9 @@ test('POST /api/mcp/scan refunds the credit and records a failed scan when the p
     process.env.NODE_ENV = 'development';
     process.env.SCAN_DEV_ALLOW_HOSTS = `127.0.0.1:${closedPort}`;
 
-    const user = db.getOrCreateUser(`mcp-fail-${Date.now()}@test.io`);
-    const { rawKey } = db.generateApiKey(user.id);
-    const creditsBefore = db.getUser(user.id)!.credits;
+    const user = (await db.getOrCreateUser(`mcp-fail-${Date.now()}@test.io`));
+    const { rawKey } = (await db.generateApiKey(user.id));
+    const creditsBefore = (await db.getUser(user.id))!.credits;
 
     await withMcpApp(async (base) => {
       const res = await fetch(`${base}/api/mcp/scan`, {
@@ -81,8 +81,8 @@ test('POST /api/mcp/scan refunds the credit and records a failed scan when the p
       assert.equal(body.creditsRemaining, creditsBefore, 'the credit spent for this attempt must be refunded');
     });
 
-    assert.equal(db.getUser(user.id)!.credits, creditsBefore, 'balance is back to where it started');
-    const scans = db.listScans(user.id);
+    assert.equal((await db.getUser(user.id))!.credits, creditsBefore, 'balance is back to where it started');
+    const scans = (await db.listScans(user.id));
     assert.equal(scans.length, 1, 'the failed attempt must still be visible in scan history, not silently discarded');
     assert.equal(scans[0].status, 'failed');
   } finally {
@@ -105,9 +105,9 @@ test('POST /api/mcp/scan creates exactly one complete scan record on success, de
     process.env.NODE_ENV = 'development';
     process.env.SCAN_DEV_ALLOW_HOSTS = `127.0.0.1:${targetPort}`;
 
-    const user = db.getOrCreateUser(`mcp-success-${Date.now()}@test.io`);
-    const { rawKey } = db.generateApiKey(user.id);
-    const creditsBefore = db.getUser(user.id)!.credits;
+    const user = (await db.getOrCreateUser(`mcp-success-${Date.now()}@test.io`));
+    const { rawKey } = (await db.generateApiKey(user.id));
+    const creditsBefore = (await db.getUser(user.id))!.credits;
 
     await withMcpApp(async (base) => {
       const res = await fetch(`${base}/api/mcp/scan`, {
@@ -120,8 +120,8 @@ test('POST /api/mcp/scan creates exactly one complete scan record on success, de
       assert.equal(body.creditsRemaining, creditsBefore - 1);
     });
 
-    assert.equal(db.getUser(user.id)!.credits, creditsBefore - 1);
-    const scans = db.listScans(user.id);
+    assert.equal((await db.getUser(user.id))!.credits, creditsBefore - 1);
+    const scans = (await db.listScans(user.id));
     assert.equal(scans.length, 1, 'exactly one scan record — created upfront, not duplicated on success');
     assert.equal(scans[0].status, 'complete');
   } finally {
@@ -132,12 +132,12 @@ test('POST /api/mcp/scan creates exactly one complete scan record on success, de
 });
 
 test('GET /api/mcp/scans lists only the key owner\'s scans and 401s without a valid key', async () => {
-  const owner = db.getOrCreateUser(`mcp-list-owner-${Date.now()}@test.io`);
-  const { rawKey } = db.generateApiKey(owner.id);
-  const other = db.getOrCreateUser(`mcp-list-other-${Date.now()}@test.io`);
-  const ownScan = db.createScan(owner.id, 'https://93.184.216.34');
-  db.updateScan(ownScan.id, { status: 'complete', score: 70, severity: 'medium', completedAt: new Date().toISOString() });
-  db.createScan(other.id, 'https://1.1.1.1'); // must never appear for the owner's key
+  const owner = (await db.getOrCreateUser(`mcp-list-owner-${Date.now()}@test.io`));
+  const { rawKey } = (await db.generateApiKey(owner.id));
+  const other = (await db.getOrCreateUser(`mcp-list-other-${Date.now()}@test.io`));
+  const ownScan = (await db.createScan(owner.id, 'https://93.184.216.34'));
+  (await db.updateScan(ownScan.id, { status: 'complete', score: 70, severity: 'medium', completedAt: new Date().toISOString() }));
+  (await db.createScan(other.id, 'https://1.1.1.1')); // must never appear for the owner's key
 
   await withMcpApp(async (base) => {
     // No key → 401.
@@ -156,23 +156,23 @@ test('GET /api/mcp/scans lists only the key owner\'s scans and 401s without a va
 });
 
 test('GET /api/mcp/scans/:id returns a completed report, 404s across users, and 409s when incomplete', async () => {
-  const owner = db.getOrCreateUser(`mcp-report-owner-${Date.now()}@test.io`);
-  const { rawKey } = db.generateApiKey(owner.id);
-  const other = db.getOrCreateUser(`mcp-report-other-${Date.now()}@test.io`);
+  const owner = (await db.getOrCreateUser(`mcp-report-owner-${Date.now()}@test.io`));
+  const { rawKey } = (await db.generateApiKey(owner.id));
+  const other = (await db.getOrCreateUser(`mcp-report-other-${Date.now()}@test.io`));
 
-  const done = db.createScan(owner.id, 'https://93.184.216.34');
+  const done = (await db.createScan(owner.id, 'https://93.184.216.34'));
   // One confirmed high-severity finding: the read-model recomputes the display
   // score from findings via the shared scoring. A confirmed high ceilings the
   // grade at F (45), so postureScore is deterministic and reflects the shared
   // scoring, not whatever raw value was stored.
-  db.updateScan(done.id, {
+  (await db.updateScan(done.id, {
     status: 'complete', score: 61, severity: 'high', aiSummary: 'sum',
     findings: [{ id: 'f1', title: 'Test High Finding', description: 'd', severity: 'high', confidence: 'high', fix: 'f', category: 'DAST' }],
     completedAt: new Date().toISOString(),
-  });
-  const pending = db.createScan(owner.id, 'https://93.184.216.34'); // status: queued
-  const foreign = db.createScan(other.id, 'https://1.1.1.1');
-  db.updateScan(foreign.id, { status: 'complete', completedAt: new Date().toISOString() });
+  }));
+  const pending = (await db.createScan(owner.id, 'https://93.184.216.34')); // status: queued
+  const foreign = (await db.createScan(other.id, 'https://1.1.1.1'));
+  (await db.updateScan(foreign.id, { status: 'complete', completedAt: new Date().toISOString() }));
 
   await withMcpApp(async (base) => {
     // Completed → full report shape (same as POST /scan), no credit cost.

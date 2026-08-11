@@ -24,7 +24,7 @@ const SAFE_TARGET = 'https://93.184.216.34';
 const HOSTNAME_TARGET = 'https://example.com';
 
 async function withScanApp(fn: (base: string, userId: string) => Promise<void>) {
-  const user = db.getOrCreateUser(`race-${Date.now()}-${Math.random()}@test.io`);
+  const user = (await db.getOrCreateUser(`race-${Date.now()}-${Math.random()}@test.io`));
 
   const app = express();
   app.use(express.json());
@@ -52,28 +52,28 @@ async function withScanApp(fn: (base: string, userId: string) => Promise<void>) 
 
 test('POST /api/scans deducts exactly one credit and creates exactly one scan on a normal launch', async () => {
   await withScanApp(async (base, userId) => {
-    const before = db.getUser(userId)!.credits;
+    const before = (await db.getUser(userId))!.credits;
     const res = await fetch(`${base}/api/scans`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url: SAFE_TARGET }),
     });
     assert.equal(res.status, 200);
-    assert.equal(db.getUser(userId)!.credits, before - 1);
-    assert.equal(db.listScans(userId).length, 1);
+    assert.equal((await db.getUser(userId))!.credits, before - 1);
+    assert.equal((await db.listScans(userId)).length, 1);
   });
 });
 
 test('POST /api/scans rejects the launch (402) and creates no scan when the user has no credits', async () => {
   await withScanApp(async (base, userId) => {
-    db.deductCredits(userId, db.getUser(userId)!.credits); // spend down to 0
+    (await db.deductCredits(userId, (await db.getUser(userId))!.credits)); // spend down to 0
     const res = await fetch(`${base}/api/scans`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url: SAFE_TARGET }),
     });
     assert.equal(res.status, 402);
-    assert.equal(db.listScans(userId).length, 0);
+    assert.equal((await db.listScans(userId)).length, 0);
   });
 });
 
@@ -84,8 +84,8 @@ test('concurrent launches sharing a single credit produce exactly one scan, not 
   // stale check and all get a free scan. deductCredits' result must now gate
   // scan creation, and the check must hold under real concurrency.
   await withScanApp(async (base, userId) => {
-    db.deductCredits(userId, db.getUser(userId)!.credits - 1); // leave exactly 1 credit
-    assert.equal(db.getUser(userId)!.credits, 1);
+    (await db.deductCredits(userId, (await db.getUser(userId))!.credits - 1)); // leave exactly 1 credit
+    assert.equal((await db.getUser(userId))!.credits, 1);
 
     const CONCURRENCY = 6;
     const responses = await Promise.all(
@@ -103,8 +103,8 @@ test('concurrent launches sharing a single credit produce exactly one scan, not 
 
     assert.equal(successes.length, 1, `exactly one launch should succeed with 1 credit; got statuses ${statuses}`);
     assert.equal(declined.length, CONCURRENCY - 1, 'every other concurrent launch must be declined, not silently granted');
-    assert.equal(db.getUser(userId)!.credits, 0, 'the balance must land at exactly 0, never negative');
-    assert.equal(db.listScans(userId).length, 1, 'only one scan row may exist — a free scan must never be created');
+    assert.equal((await db.getUser(userId))!.credits, 0, 'the balance must land at exactly 0, never negative');
+    assert.equal((await db.listScans(userId)).length, 1, 'only one scan row may exist — a free scan must never be created');
   });
 });
 
@@ -116,48 +116,48 @@ test('POST /api/scans/:id/cancel refunds the credit and marks the scan canceled'
       body: JSON.stringify({ url: SAFE_TARGET }),
     });
     const { scan } = await launch.json();
-    const creditsAfterLaunch = db.getUser(userId)!.credits;
+    const creditsAfterLaunch = (await db.getUser(userId))!.credits;
 
     const cancel = await fetch(`${base}/api/scans/${scan.id}/cancel`, { method: 'POST' });
     assert.equal(cancel.status, 200);
     const { scan: canceled } = await cancel.json();
     assert.equal(canceled.status, 'canceled');
-    assert.equal(db.getUser(userId)!.credits, creditsAfterLaunch + 1, 'the credit is refunded');
+    assert.equal((await db.getUser(userId))!.credits, creditsAfterLaunch + 1, 'the credit is refunded');
 
     // Can't cancel it again, and no double-refund.
     const secondCancel = await fetch(`${base}/api/scans/${scan.id}/cancel`, { method: 'POST' });
     assert.equal(secondCancel.status, 409);
-    assert.equal(db.getUser(userId)!.credits, creditsAfterLaunch + 1);
+    assert.equal((await db.getUser(userId))!.credits, creditsAfterLaunch + 1);
   });
 });
 
 test('POST /api/scans/:id/cancel 409s for a scan owned by someone else, without leaking existence', async () => {
   await withScanApp(async (base) => {
-    const otherUser = db.getOrCreateUser(`cancel-other-${Date.now()}@test.io`);
-    const otherScan = db.createScan(otherUser.id, SAFE_TARGET);
+    const otherUser = (await db.getOrCreateUser(`cancel-other-${Date.now()}@test.io`));
+    const otherScan = (await db.createScan(otherUser.id, SAFE_TARGET));
 
     const res = await fetch(`${base}/api/scans/${otherScan.id}/cancel`, { method: 'POST' });
     assert.equal(res.status, 409);
-    assert.equal(db.getScan(otherScan.id)!.status, 'queued', 'the other user\'s scan must be untouched');
+    assert.equal((await db.getScan(otherScan.id))!.status, 'queued', 'the other user\'s scan must be untouched');
   });
 });
 
 // --- Public shareable report links ---
 
 // Create a completed scan for the harness user and return its id.
-function completedScan(userId: string, url = SAFE_TARGET): string {
-  const s = db.createScan(userId, url);
-  db.updateScan(s.id, {
+async function completedScan(userId: string, url = SAFE_TARGET): Promise<string> {
+  const s = (await db.createScan(userId, url));
+  (await db.updateScan(s.id, {
     status: 'complete', score: 80, severity: 'medium', aiSummary: 'summary',
     findings: [{ id: 'f1', title: 'Missing CSP', description: 'd', severity: 'medium', confidence: 'medium', fix: 'add csp', category: 'IAST' }],
     completedAt: new Date().toISOString(),
-  });
+  }));
   return s.id;
 }
 
 test('POST /api/scans/:id/share mints a link; the public report is viewable without auth and sanitized', async () => {
   await withScanApp(async (base, userId) => {
-    const scanId = completedScan(userId);
+    const scanId = await completedScan(userId);
     const shareRes = await fetch(`${base}/api/scans/${scanId}/share`, { method: 'POST' });
     assert.equal(shareRes.status, 200);
     const { shareToken, shareUrl } = await shareRes.json();
@@ -179,7 +179,7 @@ test('POST /api/scans/:id/share mints a link; the public report is viewable with
 
 test('POST /api/scans/:id/share is idempotent (same token on repeat calls)', async () => {
   await withScanApp(async (base, userId) => {
-    const scanId = completedScan(userId);
+    const scanId = await completedScan(userId);
     const a = await (await fetch(`${base}/api/scans/${scanId}/share`, { method: 'POST' })).json();
     const b = await (await fetch(`${base}/api/scans/${scanId}/share`, { method: 'POST' })).json();
     assert.equal(a.shareToken, b.shareToken, 'repeat share returns the same token, not a new one');
@@ -188,7 +188,7 @@ test('POST /api/scans/:id/share is idempotent (same token on repeat calls)', asy
 
 test('DELETE /api/scans/:id/share revokes the link so the public URL 404s', async () => {
   await withScanApp(async (base, userId) => {
-    const scanId = completedScan(userId);
+    const scanId = await completedScan(userId);
     const { shareToken } = await (await fetch(`${base}/api/scans/${scanId}/share`, { method: 'POST' })).json();
     assert.equal((await fetch(`${base}/api/public/report/${shareToken}`)).status, 200);
 
@@ -206,28 +206,28 @@ test('GET /api/public/report/:token 404s for an unknown token', async () => {
 });
 
 test('POST /api/scans/:id/share 404s for an incomplete scan and for another user\'s scan', async () => {
-  const other = db.getOrCreateUser(`share-other-${Date.now()}@test.io`);
-  const otherScanId = completedScan(other.id); // completed, but owned by someone else
+  const other = (await db.getOrCreateUser(`share-other-${Date.now()}@test.io`));
+  const otherScanId = await completedScan(other.id); // completed, but owned by someone else
   await withScanApp(async (base, userId) => {
     // Incomplete scan of our own → nothing worth sharing.
-    const pending = db.createScan(userId, SAFE_TARGET); // status: queued
+    const pending = (await db.createScan(userId, SAFE_TARGET)); // status: queued
     const inc = await fetch(`${base}/api/scans/${pending.id}/share`, { method: 'POST' });
     assert.equal(inc.status, 404);
 
     // Another user's scan → 404 (never mints a token).
     const cross = await fetch(`${base}/api/scans/${otherScanId}/share`, { method: 'POST' });
     assert.equal(cross.status, 404);
-    assert.equal(db.getScan(otherScanId)!.shareToken, undefined, "other user's scan stays unshared");
+    assert.equal((await db.getScan(otherScanId))!.shareToken, undefined, "other user's scan stays unshared");
   });
 });
 
 // --- Fix verification (retest) ---
 
 test('POST retest 403s when the domain is not verified, and 404s for unknown finding/scan', async () => {
-  const other = db.getOrCreateUser(`retest-other-${Date.now()}@test.io`);
-  const otherScanId = completedScan(other.id);
+  const other = (await db.getOrCreateUser(`retest-other-${Date.now()}@test.io`));
+  const otherScanId = await completedScan(other.id);
   await withScanApp(async (base, userId) => {
-    const scanId = completedScan(userId); // finding id 'f1', domain NOT verified
+    const scanId = await completedScan(userId); // finding id 'f1', domain NOT verified
 
     // Domain unverified → 403 (a retest re-issues active exploit traffic).
     const gated = await fetch(`${base}/api/scans/${scanId}/findings/f1/retest`, { method: 'POST' });

@@ -1,4 +1,13 @@
-# SQLite → Postgres migration (in progress, branch: `postgres-migration`)
+# SQLite → Postgres migration
+
+**Status: COMPLETE and merged.** The data layer is now async and runs on either
+backend behind one `Db` contract. Prod stays on SQLite until `DATABASE_URL` is
+set (see "Production cutover" below) — the switch is a single env var, opt-in.
+
+Validation: `tsc` clean; the full suite is green on SQLite (531 pass / 2 gated
+skips); the Postgres adapter passed a full-breadth + concurrency integration
+test against a live Supabase (`pgDb.integration.test.ts`, run with
+`DATABASE_URL` set).
 
 Postgres is the gate to horizontal scaling (see `/SCALING.md`): SQLite is a
 single-writer local file that can't be shared across instances, and
@@ -34,45 +43,45 @@ for Node), which ripples through every `db.*` call site.
   camelCase mapping, transaction sequencing, rollback). The remaining SqliteDb
   methods follow the identical pattern.
 
-## Remaining — needs a live Postgres to build + validate responsibly
-A `DATABASE_URL` connection string (a free Neon/Supabase instance is enough) is
-required for these, so the adapter and the async conversion can be validated
-against a real database rather than shipped as unverified code.
+## What shipped
+- **`pg` + `@types/pg`** added as dependencies.
+- **`SqliteDb` is now async** — every method returns a `Promise`; `better-sqlite3`
+  stays synchronous under the hood (bodies run inline, then resolve). Transaction
+  bodies never `await`, preserving atomicity (see below).
+- **`Db` contract** = the public surface of `SqliteDb` (`export type Db =
+  Pick<SqliteDb, keyof SqliteDb>`); `PostgresDb implements Db`, so `tsc` verifies
+  the two backends match exactly — no hand-maintained interface to drift.
+- **`PostgresDb`** reuses each `SqliteDb` SQL string verbatim via `toPositional`
+  (`?`→`$n`) + `normalizeRow` (pg lower-case → camelCase), over a pooled client.
+- **~535 `db.*` call sites converted to `await`** (app + tests) via an AST codemod
+  (`db.foo()` → `(await db.foo())`, enclosing fn marked `async`), then the
+  residue fixed by hand: helper fns that became async (`isCanceled`,
+  `activeProbesUnlocked`, `runBackup`, `keyOwner`, `completedScan`) + their
+  callers; `OobStore`/`issue()` made async; three `.map(async …)` sites that
+  silently produced `Promise[]` wrapped in `await Promise.all(...)`.
+- **Backend selector** (`server/db.ts` `createDb()`): `DATABASE_URL` set → Postgres
+  (TLS on, pooled), else SQLite. Chosen once at import.
+- **Atomicity preserved across the async boundary** (money + cancellation paths):
+  - `deductCredits` / `validateApiKeyAndDeduct`: SQLite runs the check-and-debit
+    in one **synchronous** transaction (no `await` yields between read and write);
+    Postgres uses `SELECT … FOR UPDATE` row-locking. Both proven by a concurrent
+    "one credit, N racers, exactly one wins" test (SQLite in `scans.test.ts`,
+    Postgres in `pgDb.integration.test.ts`).
+  - `updateScan` / `updateNmapScan` guard terminal writes with `AND status !=
+    'canceled'`, so a late worker write can never clobber a user's cancellation
+    (the async `isCanceled()` check-then-write gap can't cover this alone).
 
-1. **Add `pg`** (+ `@types/pg`) as a dependency.
-
-2. **Define the async `Database` interface** — the ~115 method signatures from
-   `db.ts`, each returning a `Promise`. Both backends implement it.
-
-3. **Write `server/pgDb.ts` (`PostgresDb`)** implementing that interface. Reuse
-   each SQL string from `SqliteDb` piped through `toPositional`, executed via a
-   pooled client. Map `.get()`→`rows[0]`, `.all()`→`rows`, `.run()`→`await`.
-   Transactions (`getOrCreateUser`, `addCredits`, …) become a pooled client with
-   `BEGIN`/`COMMIT`/`ROLLBACK`.
-
-4. **Make `SqliteDb` async too** (so both satisfy the interface and every call
-   site is identical regardless of backend). `better-sqlite3` stays synchronous
-   under the hood; the methods just become `async` (return `Promise`). This is
-   what lets the **existing 506-test suite validate the entire async conversion
-   on in-memory SQLite**, before Postgres is even wired.
-
-5. **Convert the ~560 `db.*` call sites to `await`** (147 app + 417 test). Drive
-   it with `tsc` — once the interface is async, every un-awaited use that reads a
-   property errors, giving the complete worklist. **The one class tsc will NOT
-   catch: a missed `await` in a truthiness context** (`if (db.getUser(id))` — a
-   Promise is always truthy). These are security-relevant (auth/credit checks),
-   so audit them explicitly:
-   `grep -rnE '(if \(|!|\?\?|\|\||&&|return |assert[^(]*\() *db\.' server` and
-   confirm each has an `await`.
-
-6. **Select the backend at boot**: `export const db = process.env.DATABASE_URL ?
-   new PostgresDb(...) : new SqliteDb(...)`. Run `schema.sql` on `PostgresDb`
-   init (like `runMigrations` today), then `migrateLegacyPlaintextApiKeys`.
-
-7. **Validate**: run the full suite against Postgres in CI (a `postgres` service
-   container) as well as SQLite. Add a pooler (PgBouncer/RDS Proxy) for the fleet.
-
-## Data migration (existing prod data)
-A one-shot exporter reads every table from the SQLite file and bulk-inserts into
-Postgres (shapes are identical, so it's a straight copy), then runs
-`migrateLegacyPlaintextApiKeys` on the imported `api_keys`.
+## Remaining — production cutover (a deliberate, explicit step)
+The code is merged and prod runs on SQLite. To move prod to Postgres:
+1. **Migrate existing prod data** (if any is worth keeping): a one-shot exporter
+   reads every table from the live SQLite file and bulk-inserts into Postgres
+   (shapes are identical → straight copy), then runs
+   `migrateLegacyPlaintextApiKeys` on the imported `api_keys`. The prod SQLite
+   file lives on the Railway volume, so this runs on Railway (or against a pulled
+   copy). **Skip only if starting fresh is acceptable.**
+2. **Apply `server/pg/schema.sql`** to the target database (already done on the
+   current Supabase instance: 13 tables).
+3. **Set `DATABASE_URL`** as a Railway variable → next deploy switches the backend.
+4. **Fleet later**: add a pooler (Supabase transaction pooler needs care — it
+   breaks explicit `BEGIN`/`COMMIT`; use the session pooler or a real pool) and
+   set `SECLAYER_ROLE`/`MAX_CONCURRENT_SCANS` per the scale-out plan.

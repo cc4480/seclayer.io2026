@@ -10,7 +10,7 @@ import type { ProbeContext, RedTeamFinding } from "./types.js";
 export async function probeBlindSsrf(ctx: ProbeContext): Promise<RedTeamFinding | null> {
   if (!ctx.oob) return null;
 
-  const probe = ctx.oob.issue(ctx.scanId);
+  const probe = await ctx.oob.issue(ctx.scanId);
   const attackUrl = `${ctx.url}/?url=${encodeURIComponent(probe.url)}`;
 
   // Fire the trigger: ask the target to fetch our collaborator URL. The target

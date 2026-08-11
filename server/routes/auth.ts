@@ -15,8 +15,8 @@ export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
   // reporting a hardcoded "Online", so an orchestrator (or the Docker
   // HEALTHCHECK) can detect a process that is up but has lost its database and
   // pull it out of rotation. Returns 503 when the DB is unreachable.
-  app.get("/api/system/health", (req, res) => {
-    const dbOk = db.healthy();
+  app.get("/api/system/health", async (req, res) => {
+    const dbOk = (await db.healthy());
     res.status(dbOk ? 200 : 503).json({
       status: dbOk ? "Online" : "Degraded",
       version: config.appVersion,
@@ -33,16 +33,16 @@ export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
   // recently, so this can't be used as an open write-anything store; the token
   // is 48 hex chars of CSPRNG output, so callbacks can't be forged or enumerated.
   // Always returns a flat 200 so it reveals nothing about which tokens are valid.
-  app.all("/api/oob/:token", (req, res) => {
+  app.all("/api/oob/:token", async (req, res) => {
     const token = req.params.token || "";
     if (/^[a-f0-9]{16,96}$/i.test(token)) {
       try {
-        db.recordOobEvent(token, {
+        (await db.recordOobEvent(token, {
           method: req.method,
           sourceIp: req.ip || req.socket?.remoteAddress || "unknown",
           path: req.originalUrl,
           userAgent: req.get("user-agent") || undefined,
-        });
+        }));
       } catch { /* never let a callback error affect anything */ }
     }
     res.status(200).type("text/plain").send("ok");
@@ -61,7 +61,7 @@ export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
       return res.status(400).json({ status: "error", message: "A valid email address is required." });
     }
     const normEmail = email.toLowerCase().trim();
-    const token = db.createLoginToken(normEmail);
+    const token = (await db.createLoginToken(normEmail));
     // Build the link from a TRUSTED base only. In production APP_URL is required
     // (enforced at boot), so the attacker-controllable Host header is never used
     // for auth links. The request-host fallback is dev-only.
@@ -85,27 +85,27 @@ export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
     res.json({ status: "ok", message: "If that email is valid, a sign-in link is on its way.", devLink });
   });
 
-  app.get("/api/auth/verify", (req, res) => {
+  app.get("/api/auth/verify", async (req, res) => {
     const token = req.query.token as string | undefined;
-    const email = token ? db.consumeLoginToken(token) : null;
+    const email = token ? (await db.consumeLoginToken(token)) : null;
     if (!email) {
       return res.status(400).send("<h1>Sign-in link invalid or expired</h1><p>Please request a new link from the Seclayer app.</p>");
     }
-    const user = db.getOrCreateUser(email);
-    const session = db.createSession(user.id);
+    const user = (await db.getOrCreateUser(email));
+    const session = (await db.createSession(user.id));
     res.cookie(sessionCookie, session, cookieOptions);
     res.redirect("/");
   });
 
-  app.post("/api/auth/logout", (req, res) => {
+  app.post("/api/auth/logout", async (req, res) => {
     const token = req.cookies?.[sessionCookie];
-    if (token) db.deleteSession(token);
+    if (token) (await db.deleteSession(token));
     res.clearCookie(sessionCookie, { ...cookieOptions, maxAge: undefined });
     res.json({ status: "ok", message: "Logged out successfully" });
   });
 
-  app.get("/api/auth/me", requireAuth, (req, res) => {
-    const user = db.getUser(getUserId(req));
+  app.get("/api/auth/me", requireAuth, async (req, res) => {
+    const user = (await db.getUser(getUserId(req)));
     if (!user) {
       return res.status(404).json({ status: "error", message: "User profile not found" });
     }
@@ -127,7 +127,7 @@ export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
       // Docker image — this tells the client whether to render the feature at
       // all, so it stays cleanly absent (not erroring) everywhere else.
       nmapAvailable,
-      ...deepseekKeyStatus(db.getUserDeepseekKey(user.id)),
+      ...deepseekKeyStatus((await db.getUserDeepseekKey(user.id))),
     });
   });
 }

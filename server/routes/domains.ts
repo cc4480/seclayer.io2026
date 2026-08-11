@@ -15,8 +15,8 @@ import type { RouteContext } from "./context.js";
 export function registerDomainRoutes(app: express.Express, ctx: RouteContext) {
   const { requireAuth, getUserId } = ctx;
 
-  app.get("/api/domains", requireAuth, (req, res) => {
-    res.json({ domains: db.listDomainVerifications(getUserId(req)) });
+  app.get("/api/domains", requireAuth, async (req, res) => {
+    res.json({ domains: (await db.listDomainVerifications(getUserId(req))) });
   });
 
   app.post("/api/domains/verify/start", requireAuth, async (req, res) => {
@@ -31,11 +31,11 @@ export function registerDomainRoutes(app: express.Express, ctx: RouteContext) {
     }
     const domain = extractDomain(url);
     const userId = getUserId(req);
-    const existing = db.getDomainVerification(userId, domain);
+    const existing = (await db.getDomainVerification(userId, domain));
     if (existing?.verified) {
       return res.json({ status: "ok", domain, verified: true });
     }
-    const record = db.startDomainVerification(userId, domain, existing?.token || generateVerificationToken());
+    const record = (await db.startDomainVerification(userId, domain, existing?.token || generateVerificationToken()));
     res.json({
       status: "ok",
       domain,
@@ -57,7 +57,7 @@ export function registerDomainRoutes(app: express.Express, ctx: RouteContext) {
     }
     const domain = extractDomain(url);
     const userId = getUserId(req);
-    const record = db.getDomainVerification(userId, domain);
+    const record = (await db.getDomainVerification(userId, domain));
     if (!record) {
       return res.status(400).json({ status: "error", message: "Start verification for this domain first." });
     }
@@ -69,7 +69,7 @@ export function registerDomainRoutes(app: express.Express, ctx: RouteContext) {
       checkWellKnownFile(domain, record.token),
     ]);
     if (txtOk || fileOk) {
-      db.markDomainVerified(userId, domain, txtOk ? "dns" : "file");
+      (await db.markDomainVerified(userId, domain, txtOk ? "dns" : "file"));
       return res.json({ status: "ok", domain, verified: true });
     }
     res.json({ status: "ok", domain, verified: false, message: "Verification not found yet — DNS/file changes can take a few minutes to propagate." });

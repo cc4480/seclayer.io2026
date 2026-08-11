@@ -41,11 +41,11 @@ async function startServer() {
   // single-node deployment (role 'all', the default) this runs exactly as before.
   const runsWorkers = config.role !== 'web';
   if (runsWorkers) {
-    const recovered = db.recoverStuckScans();
+    const recovered = (await db.recoverStuckScans());
     if (recovered > 0) {
       console.log(`[server] Recovered ${recovered} scan(s) left mid-flight by a prior process — marked failed and refunded.`);
     }
-    const recoveredNmap = db.recoverStuckNmapScans();
+    const recoveredNmap = (await db.recoverStuckNmapScans());
     if (recoveredNmap > 0) {
       console.log(`[server] Recovered ${recoveredNmap} network reconnaissance scan(s) left mid-flight by a prior process — marked failed and refunded.`);
     }
@@ -86,7 +86,7 @@ async function startServer() {
   // Stripe webhook MUST receive the raw body for signature verification, so it
   // is registered before the JSON body parser. Credits are granted only here,
   // on a verified, paid checkout.session.completed event.
-  app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), (req, res) => {
+  app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), async (req, res) => {
     let completion;
     try {
       completion = parseWebhookEvent(req.body as Buffer, req.headers['stripe-signature'] as string | undefined);
@@ -94,10 +94,10 @@ async function startServer() {
       console.warn('[stripe] Webhook verification failed:', err?.message || err);
       return res.status(400).json({ error: `Webhook Error: ${err?.message || 'invalid signature'}` });
     }
-    if (completion && !db.hasTransactionForSession(completion.sessionId)) {
-      const user = db.getUser(completion.userId);
+    if (completion && !(await db.hasTransactionForSession(completion.sessionId))) {
+      const user = (await db.getUser(completion.userId));
       if (user) {
-        db.addCredits(user.id, completion.credits, 'purchase', completion.sessionId);
+        (await db.addCredits(user.id, completion.credits, 'purchase', completion.sessionId));
         console.log(`[stripe] Granted ${completion.credits} credits to ${user.id} (session ${completion.sessionId}).`);
       }
     }
@@ -121,17 +121,17 @@ async function startServer() {
 
   // Resolve the session cookie to a userId for every request. Identity is
   // derived server-side from the signed session — never from client input.
-  app.use((req, res, next) => {
+  app.use(async (req, res, next) => {
     const token = req.cookies?.[SESSION_COOKIE];
     if (token) {
-      const userId = db.getSessionUserId(token);
+      const userId = (await db.getSessionUserId(token));
       if (userId) (req as any).userId = userId;
     }
     // Dev convenience (config.devSkipAuth, never true in production): skip the
     // magic-link flow entirely by treating every unauthenticated request as a
     // fixed local dev account, so the app is usable immediately while building.
     if (!(req as any).userId && config.devSkipAuth) {
-      (req as any).userId = db.getOrCreateUser('dev@localhost').id;
+      (req as any).userId = (await db.getOrCreateUser('dev@localhost')).id;
     }
     next();
   });
@@ -221,10 +221,10 @@ async function startServer() {
     if (shuttingDown) return; // ignore a second signal while already draining
     shuttingDown = true;
     console.log(`[server] ${signal} received — shutting down gracefully.`);
-    server.close(() => {
+    server.close(async () => {
       // Checkpoint the WAL and release the SQLite file lock so a container
       // redeploy leaves a clean database behind, then exit.
-      db.close();
+      (await db.close());
       process.exit(0);
     });
     setTimeout(() => process.exit(1), 10000).unref();

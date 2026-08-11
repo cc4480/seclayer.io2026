@@ -40,9 +40,9 @@ async function withScanApp(userId: string, fn: (base: string) => Promise<void>) 
 }
 
 test('free mode: a scan launches with zero credits and deducts nothing', async () => {
-  const u = db.getOrCreateUser(`free-scan-${Date.now()}@test.io`);
-  db.deductCredits(u.id, db.getUser(u.id)!.credits); // spend down to 0
-  assert.equal(db.getUser(u.id)!.credits, 0);
+  const u = (await db.getOrCreateUser(`free-scan-${Date.now()}@test.io`));
+  (await db.deductCredits(u.id, (await db.getUser(u.id))!.credits)); // spend down to 0
+  assert.equal((await db.getUser(u.id))!.credits, 0);
 
   await withScanApp(u.id, async (base) => {
     const res = await fetch(`${base}/api/scans`, {
@@ -53,37 +53,37 @@ test('free mode: a scan launches with zero credits and deducts nothing', async (
     assert.ok(data.scan?.id, 'a scan was created');
   });
 
-  assert.equal(db.getUser(u.id)!.credits, 0, 'no credit was deducted in free mode');
-  assert.equal(db.listScans(u.id).length, 1);
+  assert.equal((await db.getUser(u.id))!.credits, 0, 'no credit was deducted in free mode');
+  assert.equal((await db.listScans(u.id)).length, 1);
 });
 
 test('free mode: the monitoring worker scans a due target with zero credits, no error recorded', async () => {
-  const u = db.getOrCreateUser(`free-monitor-${Date.now()}@test.io`);
-  db.deductCredits(u.id, db.getUser(u.id)!.credits); // 0 credits
-  const target = db.addMonitoredTarget(u.id, SAFE_TARGET, 7);
-  db.markMonitoredScanned(target.id, new Date(Date.now() - 1000).toISOString(), new Date(Date.now() - 1000).toISOString());
+  const u = (await db.getOrCreateUser(`free-monitor-${Date.now()}@test.io`));
+  (await db.deductCredits(u.id, (await db.getUser(u.id))!.credits)); // 0 credits
+  const target = (await db.addMonitoredTarget(u.id, SAFE_TARGET, 7));
+  (await db.markMonitoredScanned(target.id, new Date(Date.now() - 1000).toISOString(), new Date(Date.now() - 1000).toISOString()));
 
   let launched = false;
   await runDueMonitoredScans(() => { launched = true; });
 
   assert.equal(launched, true, 'a due target scans even at 0 credits in free mode');
-  assert.equal(db.getUser(u.id)!.credits, 0, 'no credit spent');
-  assert.equal(db.listScans(u.id).length, 1);
-  const updated = db.listMonitoredTargets(u.id).find((t) => t.id === target.id)!;
+  assert.equal((await db.getUser(u.id))!.credits, 0, 'no credit spent');
+  assert.equal((await db.listScans(u.id)).length, 1);
+  const updated = (await db.listMonitoredTargets(u.id)).find((t) => t.id === target.id)!;
   assert.ok(!updated.lastError, 'no insufficient-credits error in free mode');
 });
 
 test('validateApiKey resolves an active key without touching credits, and rejects an inactive one', async () => {
-  const u = db.getOrCreateUser(`free-key-${Date.now()}@test.io`);
-  const { rawKey, apiKey } = db.generateApiKey(u.id);
-  const before = db.getUser(u.id)!.credits;
+  const u = (await db.getOrCreateUser(`free-key-${Date.now()}@test.io`));
+  const { rawKey, apiKey } = (await db.generateApiKey(u.id));
+  const before = (await db.getUser(u.id))!.credits;
 
-  const resolved = db.validateApiKey(rawKey);
+  const resolved = (await db.validateApiKey(rawKey));
   assert.ok(resolved, 'active key resolves to its owner');
   assert.equal(resolved!.id, u.id);
-  assert.equal(db.getUser(u.id)!.credits, before, 'validateApiKey never deducts');
+  assert.equal((await db.getUser(u.id))!.credits, before, 'validateApiKey never deducts');
 
-  assert.equal(db.validateApiKey('sl_live_not_a_real_key'), null, 'unknown key rejected');
-  db.revokeApiKey(u.id, apiKey.id);
-  assert.equal(db.validateApiKey(rawKey), null, 'revoked key rejected');
+  assert.equal((await db.validateApiKey('sl_live_not_a_real_key')), null, 'unknown key rejected');
+  (await db.revokeApiKey(u.id, apiKey.id));
+  assert.equal((await db.validateApiKey(rawKey)), null, 'revoked key rejected');
 });

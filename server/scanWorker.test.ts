@@ -36,8 +36,8 @@ async function withSlowServer(fn: (port: number) => Promise<void>) {
 
 test('a scan canceled mid-flight keeps its canceled status — the worker discards its late result', async () => {
   await withSlowServer(async (port) => {
-    const u = db.getOrCreateUser(`worker-cancel-${Date.now()}@test.io`);
-    const scan = db.createScan(u.id, `http://127.0.0.1:${port}`);
+    const u = (await db.getOrCreateUser(`worker-cancel-${Date.now()}@test.io`));
+    const scan = (await db.createScan(u.id, `http://127.0.0.1:${port}`));
     const processScanJob = makeProcessScanJob();
 
     const jobPromise = processScanJob(scan.id, false);
@@ -46,14 +46,14 @@ test('a scan canceled mid-flight keeps its canceled status — the worker discar
     // probing the (deliberately slow) target, then cancel while it's still
     // mid-flight — diagnostics haven't resolved yet.
     await new Promise((r) => setTimeout(r, 15));
-    assert.equal(db.getScan(scan.id)!.status, 'scanning', 'sanity check: the worker must still be running when we cancel');
-    const canceled = db.cancelScan(u.id, scan.id);
+    assert.equal((await db.getScan(scan.id))!.status, 'scanning', 'sanity check: the worker must still be running when we cancel');
+    const canceled = (await db.cancelScan(u.id, scan.id));
     assert.ok(canceled, 'the scan must still be cancellable while the worker is in flight');
     assert.equal(canceled!.status, 'canceled');
 
     await jobPromise; // let the worker run to its natural completion
 
-    const final = db.getScan(scan.id)!;
+    const final = (await db.getScan(scan.id))!;
     assert.equal(final.status, 'canceled', 'the worker must not overwrite the cancellation with a late complete/failed result');
     assert.equal(final.findings, undefined, 'no findings should have been persisted for a canceled scan');
     assert.equal(final.score, undefined);
@@ -61,13 +61,13 @@ test('a scan canceled mid-flight keeps its canceled status — the worker discar
 });
 
 test('a scan that completes before any cancellation request is unaffected', async () => {
-  const u = db.getOrCreateUser(`worker-normal-${Date.now()}@test.io`);
+  const u = (await db.getOrCreateUser(`worker-normal-${Date.now()}@test.io`));
   // A safe, DNS-free literal-IP target keeps this fast and network-independent.
-  const scan = db.createScan(u.id, 'https://93.184.216.34');
+  const scan = (await db.createScan(u.id, 'https://93.184.216.34'));
   const processScanJob = makeProcessScanJob();
 
   await processScanJob(scan.id, false);
 
-  const final = db.getScan(scan.id)!;
+  const final = (await db.getScan(scan.id))!;
   assert.ok(final.status === 'complete' || final.status === 'failed', `expected a terminal status, got ${final.status}`);
 });
