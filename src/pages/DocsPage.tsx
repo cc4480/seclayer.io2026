@@ -234,7 +234,7 @@ export default function DocsPage({ onNavigate }: DocsPageProps) {
               <p>
                 Self-hosted only. Nmap is a real system binary, not something a serverless platform can run, so
                 this capability is only present when Seclayer is deployed via the included Docker image — it's
-                cleanly absent everywhere else, including the hosted seclayer.io, with no error and no broken UI.
+                cleanly absent everywhere else, including the hosted seclayerio.ai, with no error and no broken UI.
               </p>
             </Section>
 

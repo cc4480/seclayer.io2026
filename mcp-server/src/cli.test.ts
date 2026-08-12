@@ -50,10 +50,10 @@ test("resolveConfig fails fast with a clear error when no key is available anywh
   assert.match((result as any).error, /No API key provided/);
 });
 
-test("resolveConfig defaults the base URL to https://seclayer.io and trims trailing slashes", () => {
+test("resolveConfig defaults the base URL to https://seclayerio.ai and trims trailing slashes", () => {
   const result = resolveConfig({ key: "k" }, {} as any);
   assert.equal(result.ok, true);
-  assert.equal((result as any).config.baseUrl, "https://seclayer.io");
+  assert.equal((result as any).config.baseUrl, "https://seclayerio.ai");
 
   const withSlash = resolveConfig({ key: "k", url: "http://localhost:3000/" }, {} as any);
   assert.equal((withSlash as any).config.baseUrl, "http://localhost:3000");

@@ -13,7 +13,7 @@ Usage:
 
 Options:
   -k, --key <key>    Seclayer API key (required). Also read from SECLAYER_API_KEY.
-  -u, --url <url>    Backend base URL (default: https://seclayer.io). Also read from SECLAYER_API_URL.
+  -u, --url <url>    Backend base URL (default: https://seclayerio.ai). Also read from SECLAYER_API_URL.
   -h, --help         Show this help and exit.
   -v, --version      Show the version and exit.
 

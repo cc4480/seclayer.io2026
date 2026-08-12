@@ -27,7 +27,7 @@ export async function runDueDigests(now: Date = new Date()): Promise<void> {
         return { url: t.url, latest, previous };
       }));
 
-      const digest = buildDigest(inputs, config.appUrl || "https://seclayer.io");
+      const digest = buildDigest(inputs, config.appUrl || "https://seclayerio.ai");
       if (!digest) { (await db.markDigestSent(user.id, now.toISOString())); continue; }
 
       await sendEmail({ to: user.email, subject: digest.subject, text: digest.text, html: digest.html });

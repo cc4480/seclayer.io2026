@@ -104,7 +104,7 @@ export async function scan(
     return {
       ok: false,
       kind: "unauthorized",
-      message: `Authentication or credit failure: the Seclayer API key is invalid/inactive, or the account is out of credits (the backend does not distinguish these two cases). Details: ${detail}. Verify the key and check your credit balance at https://seclayer.io.`,
+      message: `Authentication or credit failure: the Seclayer API key is invalid/inactive, or the account is out of credits (the backend does not distinguish these two cases). Details: ${detail}. Verify the key and check your credit balance at https://seclayerio.ai.`,
     };
   }
   if (response.status === 429) {
@@ -293,7 +293,7 @@ export async function startAutofixSession(
     return { ok: false, kind: "bad_request", message: `Autofix session rejected: ${detail}.` };
   }
   if (response.status === 401) {
-    return { ok: false, kind: "unauthorized", message: `Authentication or credit failure starting autofix: ${detail}. Verify the key and check your credit balance at https://seclayer.io.` };
+    return { ok: false, kind: "unauthorized", message: `Authentication or credit failure starting autofix: ${detail}. Verify the key and check your credit balance at https://seclayerio.ai.` };
   }
   if (response.status === 429) {
     const retryAfterHeader = response.headers.get("retry-after");

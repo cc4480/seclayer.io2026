@@ -120,7 +120,7 @@ export function makeProcessScanJob(oobCollaborator?: OobCollaborator) {
       // auth headers the diagnostics used.
       const evidence = compileScanEvidence(diagnostics);
       const shot = await captureScreenshot(scan.url, {
-        "User-Agent": "Seclayer-Security-Scanner/2.0 (+https://seclayer.io)",
+        "User-Agent": "Seclayer-Security-Scanner/2.0 (+https://seclayerio.ai)",
         ...parseAuthHeader(scan.authHeader),
       });
       if (shot) evidence.screenshot = shot;

@@ -101,7 +101,7 @@ export async function scanPerimeter(host: string, hostname: string, result: Diag
       const probeId = setTimeout(() => probeController.abort(), 2500);
       const probeRes = await safeFetch(`${host}${probe.path}`, {
         method: "GET",
-        headers: { "User-Agent": "Seclayer-Security-Scanner/2.0 (seclayer.io)" },
+        headers: { "User-Agent": "Seclayer-Security-Scanner/2.0 (seclayerio.ai)" },
         signal: probeController.signal,
       });
       const body = await probeRes.text().catch(() => "");

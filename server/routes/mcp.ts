@@ -43,7 +43,7 @@ export function registerMcpRoutes(app: express.Express, ctx: RouteContext) {
       return res.status(401).json({
         error: config.freeMode
           ? "Invalid API Key — an active key is required."
-          : "Invalid API Key, active key required, or insufficient credits. Get credits at seclayer.io.",
+          : "Invalid API Key, active key required, or insufficient credits. Get credits at seclayerio.ai.",
       });
     }
 

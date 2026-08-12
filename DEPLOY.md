@@ -21,7 +21,7 @@ if a production-critical value is missing (see `server/config.ts`).
 | Variable | Purpose |
 |---|---|
 | `NODE_ENV=production` | Enables Secure cookies, HSTS, `trust proxy`, and serving the prebuilt `dist/` instead of the Vite dev server. |
-| `APP_URL` | Public base URL (e.g. `https://seclayer.io`). Magic-link sign-in and Stripe redirect URLs are built from this trusted host, never the request `Host` header. |
+| `APP_URL` | Public base URL (e.g. `https://seclayerio.ai`). Magic-link sign-in and Stripe redirect URLs are built from this trusted host, never the request `Host` header. |
 | `RESEND_API_KEY` | Resend key for magic-link sign-in emails. Without it, production refuses to boot (users could never receive a login link). |
 
 ### Recommended / feature-gating (optional)

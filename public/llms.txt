@@ -42,5 +42,5 @@ SAST (exposed secrets in served code), SCA (known-vulnerable dependencies), IAST
 
 ## Links
 
-- Documentation: https://seclayer.io/docs
-- Sitemap: https://seclayer.io/sitemap.xml
+- Documentation: https://seclayerio.ai/docs
+- Sitemap: https://seclayerio.ai/sitemap.xml

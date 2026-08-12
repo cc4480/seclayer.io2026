@@ -17,7 +17,7 @@ export const MCP_SERVER_NAME = 'seclayer';
 // Mirrors the mcp-server CLI default (mcp-server/src/cli.ts). A base URL equal to
 // this is left out of the config entirely — the published package already
 // defaults to it, so emitting SECLAYER_API_URL would be noise.
-const DEFAULT_BASE_URL = 'https://seclayer.io';
+const DEFAULT_BASE_URL = 'https://seclayerio.ai';
 
 // Shown when no real key is available yet (the raw key is only in hand right
 // after generation). Deeplinks built with this are copy-paste templates, not

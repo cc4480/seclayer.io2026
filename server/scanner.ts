@@ -84,7 +84,7 @@ export async function runDiagnostics(
 
   const headers: Record<string, string> = {
     "User-Agent":
-      "Seclayer-Security-Scanner/2.0 (seclayer.io; scanner@seclayer.io)",
+      "Seclayer-Security-Scanner/2.0 (seclayerio.ai; scanner@seclayerio.ai)",
     Accept:
       "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
   };
