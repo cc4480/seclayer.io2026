@@ -13,7 +13,7 @@ const PILLARS = [
   },
   {
     key: 'DAST', name: 'Dynamic Audit', icon: Globe, mode: 'Passive recon + active fuzz (gated)',
-    what: 'Crawls the site to map real links, forms, and JS-discovered endpoints; probes for commonly-exposed sensitive paths (config files, dotfiles, backup archives); and, once ownership is verified, fuzzes discovered parameters with a range of injection classes.',
+    what: 'Crawls the site to map real links, forms, and JS-discovered endpoints; probes for commonly-exposed sensitive paths (config files, dotfiles, backup archives); and, once ownership is verified, fuzzes discovered parameters with a range of injection classes. When the target exposes an OpenAPI/Swagger schema (auto-discovered or supplied), it also fuzzes every declared API operation — reads under active probing, state-changing operations only under the aggressive opt-in.',
     why: 'Most exploitable bugs live in endpoints and parameters nobody documented. Mapping the real, crawled surface — not a guessed one — is what makes the active probes that follow actually relevant to this specific app.',
   },
   {

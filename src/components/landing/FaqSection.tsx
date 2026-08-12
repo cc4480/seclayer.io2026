@@ -9,8 +9,16 @@ const FAQS: { q: string; a: string }[] = [
     a: 'Point it at a public URL and it runs a real black-box penetration test — HTTP probes, DNS and attack-surface recon, and (once you prove you own the target) live exploit attempts across seven AppSec categories. You get back a plain-English report with a posture score, an impact statement per finding, a stack-tailored fix, and a ready-to-paste prompt for your AI coding agent.',
   },
   {
+    q: 'What kinds of vulnerabilities does it actually find?',
+    a: 'Across seven AppSec pillars: exposed secrets and misconfiguration, injection (SQL — including time-based blind — XSS, SSTI, command injection, path traversal/LFI, CRLF), SSRF, broken access control (a BOLA/IDOR check that compares what two distinct identities can read), JWT authentication weaknesses, business-logic flaws like price and webhook-signature tampering, prototype pollution, vulnerable dependencies, and backend-as-a-service misconfiguration — open Supabase/Firebase rules and secrets shipped in your client bundle. Each finding is confirmed by a real signature match or a live exploit receipt, not a checklist guess.',
+  },
+  {
+    q: 'Does it test my API, not just my web pages?',
+    a: 'Yes. On a verified target it discovers your OpenAPI/Swagger schema — or you can point it at one — and fuzzes every declared operation: each path, method, query parameter and JSON/form body field, run through the exact same injection engine and proof-gating as the rest of the scan. It also probes GraphQL introspection exposure. Read operations are exercised under active probing; state-changing operations only under the aggressive opt-in, so nothing that could mutate data fires unless you explicitly ask for it.',
+  },
+  {
     q: 'Is it safe or legal to scan a site I don’t own?',
-    a: 'Passive checks (headers, DNS, tech fingerprinting, exposed-secret scanning) run against any public URL. Active exploitation — SQL injection, XSS, command injection, SSRF, BOLA probes, and the rest of the red-team suite — only unlocks once you prove ownership of the target’s domain via a DNS TXT record or a well-known file. That gate is what stops the platform being used as an anonymous attack proxy against a site you don’t control.',
+    a: 'Passive checks (headers, DNS, tech fingerprinting, exposed-secret scanning) run against any public URL. Active exploitation — SQL injection, XSS, command injection, SSRF, BOLA probes, API-schema fuzzing, and the rest of the red-team suite — only unlocks once you prove ownership of the target’s domain via a DNS TXT record or a well-known file. That gate is what stops the platform being used as an anonymous attack proxy against a site you don’t control.',
   },
   {
     q: 'What’s the difference between a PROVEN and a DETECTED finding?',
@@ -35,6 +43,18 @@ const FAQS: { q: string; a: string }[] = [
   {
     q: 'Can I run Seclayer from my AI coding agent?',
     a: 'Yes. Seclayer ships as a standard stdio MCP server — works the same in Cursor, Claude Code, Windsurf, or any MCP-compatible client — alongside the web dashboard and a plain HTTP API. Generate an API key from the console and your agent can trigger a scan and read the report in natural language before you deploy.',
+  },
+  {
+    q: 'Can Seclayer fix the issues, not just find them?',
+    a: 'Every finding already ships a copy-paste fix prompt for your AI agent. Beyond that, the @seclayer/mcp CLI (and a matching GitHub Action) can open a pull request that fixes a proven finding for you: the agent runs entirely inside your own CI job — it reads and edits your files and runs your tests there, and the backend only ever exchanges the message transcript, never your source code. It always opens a PR for review and never merges, one branch per finding.',
+  },
+  {
+    q: 'Can I keep a target monitored, not just scan it once?',
+    a: 'Yes. Put a target on a re-scan cadence — daily, weekly, or monthly — and Seclayer re-runs the full scan on schedule, re-validating that the target is still safe to scan each time. A Slack-compatible webhook pings you only when a result is actually actionable — a live high or critical finding — so you hear about regressions, not routine “all clear” runs.',
+  },
+  {
+    q: 'Can it scan my network and open ports too?',
+    a: 'On self-hosted deployments, Network Reconnaissance runs a real, full-depth nmap sweep of a verified target — every port, service and version, plus nmap’s vulnerability NSE scripts — as an independent scan type separate from the seven web-app pillars. It’s self-hosted only, since nmap is a real system binary a serverless platform can’t run; where it isn’t available the feature cleanly hides itself rather than erroring.',
   },
   {
     q: 'How is this different from a generic vulnerability scanner?',
