@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="Seclayer — black-box penetration testing, pay per scan">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b0b0e"/>
+      <stop offset="1" stop-color="#09090b"/>
+    </linearGradient>
+    <linearGradient id="rule" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#22c55e" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#22c55e" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#22c55e" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <!-- faint grid -->
+  <g stroke="#18181b" stroke-width="1">
+    <path d="M0 158 H1200 M0 316 H1200 M0 474 H1200 M200 0 V630 M400 0 V630 M600 0 V630 M800 0 V630 M1000 0 V630"/>
+  </g>
+  <rect x="16" y="16" width="1168" height="598" rx="20" fill="none" stroke="#1f1f23" stroke-width="1.5"/>
+
+  <!-- shield mark (matches favicon) -->
+  <g transform="translate(96,150)">
+    <rect x="-16" y="-16" width="132" height="132" rx="26" fill="#0e0e12" stroke="#1f1f23" stroke-width="1.5"/>
+    <path d="M50 6 L92 22 v32 c0 27-18 45-42 54 -24-9-42-27-42-54 V22 L50 6 z" fill="none" stroke="#22c55e" stroke-width="4.5" stroke-linejoin="round" stroke-linecap="round"/>
+    <path d="M30 52 l14 14 l26-28" fill="none" stroke="#22c55e" stroke-width="4.5" stroke-linejoin="round" stroke-linecap="round"/>
+  </g>
+
+  <!-- eyebrow -->
+  <text x="260" y="150" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="24" letter-spacing="6" fill="#22c55e">BLACK-BOX PENTEST · MCP · CI</text>
+
+  <!-- wordmark -->
+  <text x="256" y="248" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="132" font-weight="800" letter-spacing="-4" fill="#fafafa">Seclayer</text>
+
+  <!-- tagline -->
+  <text x="96" y="378" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="46" font-weight="600" fill="#e4e4e7">Point it at a URL. Get a real, proven security report.</text>
+  <text x="96" y="438" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="46" font-weight="600" fill="#a1a1aa">Signature-confirmed findings, plain-English fixes. Pay per scan.</text>
+
+  <line x1="96" y1="506" x2="1104" y2="506" stroke="url(#rule)" stroke-width="2"/>
+
+  <!-- footer chips -->
+  <text x="96" y="560" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="26" fill="#71717a">PROVEN receipts&#160;&#160;·&#160;&#160;7 AppSec pillars&#160;&#160;·&#160;&#160;API-first fuzzing&#160;&#160;·&#160;&#160;auto-fix PRs</text>
+  <text x="1104" y="560" text-anchor="end" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="26" fill="#22c55e">seclayer.io</text>
+</svg>

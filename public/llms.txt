@@ -1,0 +1,46 @@
+# Seclayer
+
+> Seclayer is a pay-per-scan, black-box penetration-testing SaaS and MCP server. Point it at a public URL and it runs a real security scan — signature-confirmed findings across seven AppSec categories, each with a plain-English impact statement, a stack-tailored fix, and a ready-to-paste remediation prompt for an AI coding agent. Built for developers and small teams shipping fast, especially AI-assisted apps on stacks like React/Next.js + a backend-as-a-service (Supabase/Firebase) + Stripe.
+
+## What it is
+
+- **Model:** submit a URL, get a real black-box penetration test. Passive recon runs on any public URL; active exploitation unlocks only after you prove you own the target's domain (DNS TXT record or a well-known file), so it can't be used as an anonymous attack proxy.
+- **Pricing:** pay-per-scan — one credit per scan, no subscription, and credits never expire. A free public beta is currently active (scans cost nothing during the beta).
+- **Interfaces:** web dashboard, a plain HTTP API, and a standard stdio MCP server that works in Cursor, Claude Code, Windsurf, or any MCP-compatible client. Also a GitHub Action that gates CI on scan results.
+- **Non-destructive by design:** every active probe proves itself via an oracle, an out-of-band callback, or a differential — never by writing, deleting, or degrading the target.
+
+## Accuracy model (low false positives)
+
+- **PROVEN** — the exploit was demonstrated end-to-end with a replayable receipt: the exact request and response, with the proof quoted verbatim from what came back.
+- **DETECTED** — a real signal was observed and is worth reporting, but wasn't demonstrated end-to-end.
+- Findings are confirmed by a real signature match or a live exploit receipt, not a checklist guess. You can mark any finding a false positive; it's excluded from the score immediately and never resurfaces for that target.
+
+## What it detects
+
+- **Injection:** SQL injection (including time-based blind), reflected and stored XSS, server-side template injection, OS command injection, path traversal / LFI, CRLF / header injection.
+- **Access control & auth:** BOLA/IDOR (comparing what two distinct identities can read from the same resource pattern), JWT authentication weaknesses.
+- **Business logic:** price tampering and webhook-signature bypass, proven with safe oracles.
+- **Modern / BaaS:** prototype pollution, backend-as-a-service misconfiguration (open Supabase/Firebase rules, anon-key abuse), and secrets shipped in the client bundle.
+- **SSRF:** including blind, out-of-band SSRF proven via a unique callback URL.
+- **API-first testing:** discovers your OpenAPI/Swagger schema (or one you supply) and fuzzes every declared operation's query and JSON/form-body parameters; also probes GraphQL introspection exposure.
+- **Surface & hygiene:** exposed-secret signatures, vulnerable dependency versions mapped to CVEs, security-header and cookie-flag gaps, DNS/attack-surface recon, and a data-driven template pack for exposed panels, actuators, config/backup files, and takeover fingerprints.
+- **Network reconnaissance (self-hosted):** a full-depth nmap sweep — every port, service, version, and nmap's vulnerability NSE scripts — as an independent scan type.
+
+## Remediation
+
+- Every finding ships a copy-paste fix prompt for your AI coding agent.
+- **Auto-fix pull requests:** the `@seclayer/mcp` CLI (and a matching GitHub Action) can open a PR that fixes a proven finding. The agent runs entirely inside your own CI job — it reads and edits your files and runs your tests there; the backend only exchanges the message transcript, never your source code. It always opens a PR for review and never merges.
+
+## Operations
+
+- **Continuous monitoring:** put a target on a re-scan cadence (daily, weekly, monthly); a Slack-compatible webhook fires only when a result is actionable (a live high or critical finding), not on routine runs.
+- **Privacy:** scan reports are private to your account by default. You can mint a single read-only public share link per report and revoke it at any time.
+
+## The seven AppSec pillars
+
+SAST (exposed secrets in served code), SCA (known-vulnerable dependencies), IAST (security headers + cookie flags), EASM (DNS + attack-surface recon), DAST (crawl + sensitive-path probing + parameter and API-schema fuzzing), RED_TEAM (active exploitation), API_SEC (GraphQL introspection + BOLA/IDOR).
+
+## Links
+
+- Documentation: https://seclayer.io/docs
+- Sitemap: https://seclayer.io/sitemap.xml

@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import Navbar from './components/Navbar.js';
 import Landing from './pages/Landing.js';
 import Dashboard from './pages/Dashboard.js';
@@ -33,6 +34,28 @@ function AuthedApp() {
     loadUserContext, handleNavigate, handleStartTrial, onInitiateScan, cancelScan,
     onGenerateKey, onRevokeKey, onPurchaseCredits, handleLogout,
   } = useSeclayer();
+
+  // Per-route <title>, description and canonical for the two indexable views
+  // (/, /docs). Client-side is enough for SEO here: Google renders JS, and the
+  // served index.html already carries strong home-page defaults for the rest.
+  useEffect(() => {
+    const meta = currentView === 'docs'
+      ? {
+          path: '/docs',
+          title: 'Documentation — how each Seclayer scan works | Seclayer',
+          desc: 'How Seclayer scans: the seven AppSec pillars, active red-team probes, API-first (OpenAPI/Swagger) testing, network reconnaissance, and the PROVEN vs DETECTED evidence model.',
+        }
+      : {
+          path: '/',
+          title: 'Seclayer — Black-Box Penetration Testing SaaS & MCP Server',
+          desc: 'Point Seclayer at a public URL and get a real black-box penetration test: signature-confirmed findings across seven AppSec categories, a plain-English AI report, and a ready-to-paste fix prompt for your coding agent. Pay per scan, zero setup, zero subscription.',
+        };
+    document.title = meta.title;
+    document.querySelector('meta[name="description"]')?.setAttribute('content', meta.desc);
+    const canonical = 'https://seclayer.io' + meta.path;
+    document.querySelector('link[rel="canonical"]')?.setAttribute('href', canonical);
+    document.querySelector('meta[property="og:url"]')?.setAttribute('content', canonical);
+  }, [currentView]);
 
   return (
     <div className="bg-zinc-950 min-h-screen flex flex-col font-sans">
