@@ -77,6 +77,57 @@
       ]
     }
     </script>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "@seclayer/mcp",
+      "applicationCategory": "DeveloperApplication",
+      "operatingSystem": "Windows, macOS, Linux",
+      "url": "https://www.npmjs.com/package/@seclayer/mcp",
+      "downloadUrl": "https://www.npmjs.com/package/@seclayer/mcp",
+      "softwareVersion": "0.1.0",
+      "description": "Official Model Context Protocol (MCP) server for Seclayer. Run a live black-box security scan from Claude Code, Cursor, Windsurf, or any MCP-compatible AI coding agent — scan a URL, review findings, and fetch reports via the seclayer_scan, seclayer_list_scans, and seclayer_get_report tools. Registry name: ai.seclayerio/mcp.",
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "provider": { "@type": "Organization", "name": "Seclayer", "url": "https://seclayerio.ai/" }
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "HowTo",
+      "name": "How to run a black-box penetration test on your website with Seclayer",
+      "description": "Point Seclayer at a public URL and get a signature-confirmed penetration test report with plain-English findings, stack-tailored fixes, and an agent-ready remediation prompt.",
+      "totalTime": "PT5M",
+      "tool": [{ "@type": "HowToTool", "name": "Seclayer (web dashboard or @seclayer/mcp MCP server)" }],
+      "step": [
+        {
+          "@type": "HowToStep",
+          "position": 1,
+          "name": "Enter your URL",
+          "text": "Sign in and submit the public URL of the site or API you want tested. Passive recon — security headers, TLS, exposed secrets, vulnerable dependencies, and attack-surface mapping — runs on any public URL with no setup."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 2,
+          "name": "Prove domain ownership to unlock active exploit probes",
+          "text": "Add a DNS TXT record or a well-known file to prove you own the target. The next scan then runs live exploit probes — SQL injection, XSS, SSRF, BOLA/IDOR, and API-schema fuzzing — instead of passive recon only."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 3,
+          "name": "Read the report and hand the fix to your AI agent",
+          "text": "Review a scored report where every finding carries an impact statement, a stack-tailored fix, and a ready-to-paste prompt for your AI coding agent. Proven findings include a replayable request/response receipt."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 4,
+          "name": "Automate it from your agent or CI",
+          "text": "Install the MCP server with 'npx -y @seclayer/mcp' to scan from Claude Code, Cursor, or Windsurf, or add the GitHub Action to scan every pull request and open auto-fix PRs."
+        }
+      ]
+    }
+    </script>
   </head>
   <body>
     <div id="root"></div>

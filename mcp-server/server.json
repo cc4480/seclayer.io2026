@@ -1,0 +1,31 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "ai.seclayerio/mcp",
+  "title": "Seclayer",
+  "description": "Run a live black-box security pen-test from your AI coding agent: scan a public URL, review findings, and fetch reports through the seclayer_scan, seclayer_list_scans, and seclayer_get_report tools. Signature-confirmed findings across seven AppSec categories with low false positives.",
+  "version": "0.1.0",
+  "repository": {
+    "url": "https://github.com/cc4480/seclayer.io2026",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "@seclayer/mcp",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "SECLAYER_API_KEY",
+          "description": "Your Seclayer API key. Generate one in the dashboard's Developer API Keys panel (the raw key is shown once). Alternatively pass it as a --key argument.",
+          "isRequired": true,
+          "isSecret": true,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}

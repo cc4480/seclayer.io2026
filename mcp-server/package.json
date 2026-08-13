@@ -1,14 +1,26 @@
 {
   "name": "@seclayer/mcp",
   "version": "0.1.0",
-  "description": "Model Context Protocol stdio server for Seclayer — run live security pen-tests from Claude Code, Cursor, and Windsurf via the seclayer_scan tool.",
+  "description": "Model Context Protocol stdio server for Seclayer — run live black-box security pen-tests from Claude Code, Cursor, Windsurf, or any MCP client via the seclayer_scan tool.",
+  "mcpName": "ai.seclayerio/mcp",
   "type": "module",
+  "homepage": "https://seclayerio.ai",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cc4480/seclayer.io2026.git",
+    "directory": "mcp-server"
+  },
+  "bugs": {
+    "url": "https://github.com/cc4480/seclayer.io2026/issues"
+  },
+  "author": "Seclayer",
   "bin": {
     "seclayer-mcp": "dist/index.js"
   },
   "main": "dist/index.js",
   "files": [
     "dist",
+    "server.json",
     "README.md"
   ],
   "engines": {
@@ -32,11 +44,27 @@
   "keywords": [
     "mcp",
     "model-context-protocol",
+    "mcp-server",
     "security",
     "pentest",
+    "penetration-testing",
+    "security-scanner",
+    "vulnerability-scanner",
+    "appsec",
+    "devsecops",
+    "dast",
+    "sast",
+    "owasp",
+    "sql-injection",
+    "xss",
+    "ssrf",
+    "api-security",
     "seclayer",
     "claude",
-    "cursor"
+    "claude-code",
+    "cursor",
+    "windsurf",
+    "ai-agent"
   ],
   "license": "MIT",
   "publishConfig": {
