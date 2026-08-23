@@ -3,6 +3,7 @@
 // exits and buffers everything, which would mean no progress ticker.
 import { spawn, type ChildProcess } from "node:child_process";
 import { buildNmapArgs } from "./args.js";
+import { isNmapPrivileged } from "./detect.js";
 import type { EmitFn } from "../scanEvents.js";
 
 // Hard backstop above --host-timeout (see args.ts), in case nmap itself hangs
@@ -43,7 +44,9 @@ export function runNmap(
   emit: EmitFn,
   timeoutMs = DEFAULT_TIMEOUT_MS,
 ): Promise<NmapRunResult> {
-  const args = buildNmapArgs(targetIp);
+  // Pick SYN+OS vs. TCP-connect based on the boot-time raw-socket probe, so the
+  // scan adapts to platforms (e.g. Railway) that can't open raw sockets.
+  const args = buildNmapArgs(targetIp, undefined, isNmapPrivileged());
   const start = Date.now();
 
   return new Promise((resolve, reject) => {

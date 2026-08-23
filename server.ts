@@ -59,7 +59,7 @@ async function startServer() {
   const nmapDetection = await detectNmap();
   console.log(
     nmapDetection.available
-      ? `[config] nmap ${nmapDetection.version} detected — Network Reconnaissance is available.`
+      ? `[config] nmap ${nmapDetection.version} detected — Network Reconnaissance is available (${nmapDetection.privileged ? 'privileged: SYN + OS detection' : 'unprivileged: TCP connect scan, no OS detection — this container has no raw-socket capability'}).`
       : `[config] nmap not available (${nmapDetection.error}) — Network Reconnaissance is disabled on this deployment.`
   );
 

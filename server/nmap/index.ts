@@ -1,4 +1,4 @@
-export { detectNmap, isNmapAvailable, nmapVersionString } from "./detect.js";
+export { detectNmap, isNmapAvailable, isNmapPrivileged, nmapVersionString } from "./detect.js";
 export { resolveNmapTarget, type ResolvedNmapTarget } from "./resolve.js";
 export { buildNmapArgs } from "./args.js";
 export { runNmap, killNmapProcess, type NmapRunResult } from "./run.js";

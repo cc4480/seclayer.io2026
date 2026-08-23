@@ -48,8 +48,8 @@ if a production-critical value is missing (see `server/config.ts`).
 ### Docker (recommended)
 
 **Via docker compose** (simplest — reads secrets from a `.env` file you
-control, persists the DB on a named volume, and already passes the
-`--cap-add` flags Network Reconnaissance needs — see §7):
+control, persists the DB on a named volume, and passes the `NET_RAW`
+capability that upgrades Network Reconnaissance to full SYN + OS scans — see §7):
 
 ```bash
 cp .env.example .env   # fill in at least APP_URL + RESEND_API_KEY
@@ -71,9 +71,11 @@ docker run -d --name seclayer \
   -e NODE_ENV=production \
   -e APP_URL=https://your-host \
   -e RESEND_API_KEY=re_... \
-  --cap-add=NET_ADMIN --cap-add=NET_RAW \
+  --cap-add=NET_RAW \
   # optional: DEEPSEEK_API_KEY, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET
-  # omit the two --cap-add flags if you don't need Network Reconnaissance
+  # --cap-add=NET_RAW upgrades Network Reconnaissance to SYN + OS scans; it is
+  # already in Docker's default set, so you can omit it and nmap still runs a
+  # TCP connect scan (no OS detection). NET_ADMIN is not needed.
   seclayer
 ```
 
@@ -108,9 +110,11 @@ silently mangled into a Windows path by MSYS's path conversion, which then
 fails with "Mount path must start with a `/`" — prefix the `volume add`
 command with `MSYS_NO_PATHCONV=1` if you hit that.
 
-Network Reconnaissance (nmap) needs `--cap-add=NET_ADMIN`/`NET_RAW`, which
-Railway's runtime doesn't expose — the feature auto-disables cleanly there
-(§7), same as on any host without those capabilities.
+Network Reconnaissance (nmap) works on Railway in unprivileged mode: Railway's
+runtime strips `CAP_NET_RAW`, so the app detects that at boot and runs a TCP
+connect scan (service/version + NSE `vuln` scripts, no SYN stealth or OS
+detection) instead of disabling the feature (§7). Hosts that expose `NET_RAW`
+(compose/`docker run` above, a VPS) get the full SYN + OS-detection scan.
 
 ### Without Docker
 
@@ -158,38 +162,43 @@ claude mcp add seclayer -- npx -y @seclayer/mcp --key YOUR_API_KEY
 
 Override the backend with `--url` / `SECLAYER_API_URL` for self-hosted installs.
 
-## 7. Network Reconnaissance (nmap) — optional, self-hosted only
+## 7. Network Reconnaissance (nmap) — optional, self-hosted + Railway
 
-Nmap ships baked into the Docker image (installed + `setcap` in the
-Dockerfile — see its comments). The app probes for the binary once at boot
-and cleanly hides the whole feature (no error, no partial UI) whenever it
-isn't present or runnable — which is always the case on Railway, a
-Vercel-hosted deployment, or any local `npm run dev` checkout without nmap
-installed manually. Needs the `--cap-add` flags in §3 to actually work, which
-means a VPS running the Docker/compose flow directly, or another platform that
-exposes custom container capabilities.
+Nmap ships baked into the Docker image (installed in the Dockerfile — see its
+comments). The image sets **no** file capabilities on the binary and runs as
+root, so nmap always execs; the app probes once at boot both for the binary and
+for whether raw sockets actually work in this container, then picks the scan
+technique accordingly. It cleanly hides the whole feature (no error, no partial
+UI) only when the binary is genuinely absent — e.g. a Vercel-hosted deployment
+or a bare local `npm run dev` checkout without nmap installed.
 
-- **Requires `--cap-add=NET_ADMIN --cap-add=NET_RAW` on every `docker run`
-  (or the equivalent in compose/Kubernetes)** — confirmed by booting the
-  built image with and without these flags. `setcap` in the Dockerfile
-  scopes the capability to the nmap binary itself (least privilege — the
-  Node process doesn't get it), but a binary's file capabilities can never
-  exceed the container's own capability bounding set, and Docker's default
-  set includes `NET_RAW` but **not** `NET_ADMIN`. Without both flags, nmap
-  fails to even exec (`spawn EPERM`) and the feature silently stays
-  detected-absent — this is not limited to hardened `--cap-drop=ALL` setups,
-  it's the default-Docker behavior. `docker-compose.yml` already sets both;
-  the plain `docker run` example in §3 does too.
-- **Without those capabilities at all**, the whole binary fails to exec
-  rather than degrading — the two flags above are required, not optional,
-  whenever this feature should be live.
+- **Two modes, chosen automatically at boot:**
+  - **Privileged (full)** — when the container's capability bounding set
+    includes `CAP_NET_RAW` (a normal `docker run`/compose, a VPS): root nmap
+    opens raw sockets natively and runs the default SYN scan plus OS detection
+    (`-sV -O`). No `setcap` and no `--cap-add` are strictly required (NET_RAW is
+    in Docker's default set), but `docker-compose.yml` / the §3 `docker run`
+    example pin `--cap-add=NET_RAW` to make it explicit and survive hardened
+    `--cap-drop` bases.
+  - **Unprivileged (connect scan)** — when the platform strips `CAP_NET_RAW`
+    (e.g. **Railway**, which doesn't let you add caps back): the boot probe
+    detects raw sockets are unavailable and the scan runs `-sT --unprivileged`
+    (TCP connect + service/version + NSE `vuln` scripts, **no** OS detection).
+    Still useful port/service/vuln recon — the feature is live, just without SYN
+    stealth and OS fingerprinting.
+- **`CAP_NET_ADMIN` is NOT used.** The earlier build put `net_admin` in the
+  binary's effective file-cap set via `setcap`; because a file cap that exceeds
+  the container's bounding set makes the kernel refuse to even exec the binary
+  (`spawn EPERM`), that silently killed the feature on Railway (and any
+  `docker run` without `--cap-add=NET_ADMIN`). Removing the file caps fixed it.
 - Same domain-ownership verification gate as every other active probe (DNS
   TXT record or well-known file) — no separate authorization step to
   configure.
 - Verify it's live: the console UI's "Network Reconnaissance" card only
   renders when the backend reports the feature available (`nmapAvailable` on
-  `GET /api/auth/me`); if it's silently absent, check the boot log for
-  `[config] nmap ... — Network Reconnaissance is disabled on this deployment.`
+  `GET /api/auth/me`). The boot log states which mode is active:
+  `[config] nmap <ver> detected — Network Reconnaissance is available
+  (privileged: … | unprivileged: …).`
 
 ## 8. Pre-production checklist
 
@@ -205,9 +214,10 @@ exposes custom container capabilities.
       derives Secure cookies / client IP from `X-Forwarded-*` in production).
 - [ ] Stripe webhook configured (if payments are enabled).
 - [ ] `@seclayer/mcp` published (if you advertise the MCP integration).
-- [ ] If advertising Network Reconnaissance, confirm `--cap-add=NET_ADMIN
-      --cap-add=NET_RAW` is set (see §7), the boot log shows nmap detected,
-      and that a real scan against a target you own completes.
+- [ ] If advertising Network Reconnaissance, confirm the boot log shows nmap
+      detected (§7) and a real scan against a target you own completes. For the
+      full SYN + OS-detection scan, ensure `CAP_NET_RAW` is available
+      (`--cap-add=NET_RAW`); without it the scan still runs in connect-scan mode.
 - [ ] `npm audit` reviewed — clean at time of writing (0 advisories).
 - [ ] One real Docker image build + smoke test in the target environment
       (CI builds the app and both test suites, but does not build the image).

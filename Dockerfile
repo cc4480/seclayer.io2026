@@ -13,23 +13,26 @@ ENV NODE_ENV=production \
     PORT=3000 \
     DB_PATH=/data/seclayer.sqlite
 
-# Network Reconnaissance: install nmap and grant its binary the raw-socket
-# capability SYN scan (-sS) and OS detection (-O) need, via a file capability
-# on the binary itself rather than running the whole container as root —
-# least privilege at the process level. This alone is NOT sufficient at
-# `docker run` time, though: Docker's default capability set includes
-# NET_RAW but not NET_ADMIN, and a binary's file capabilities can never
-# exceed the container's own bounding set — without --cap-add=NET_ADMIN
-# (NET_RAW is already default, but pass both for clarity) nmap fails to even
-# exec ("spawn EPERM"), on every docker run, not just hardened
-# --cap-drop=ALL setups. See docker-compose.yml / DEPLOY.md §7 for the
-# required flags. If the binary is ever missing/unrunnable, the app
-# feature-detects that at boot (server/nmap/detect.ts) and cleanly hides the
-# whole feature instead of erroring — this is what makes it PRESENT on this
-# self-hosted image while staying absent on the Vercel-hosted deployment.
+# Network Reconnaissance: install nmap. Deliberately NO file capabilities on the
+# binary and NO USER directive, so nmap runs as root.
+#
+# Why no setcap: a binary's file capabilities can never exceed the container's
+# capability bounding set, and a cap in the file's EFFECTIVE set that isn't in
+# the bounding set makes the kernel refuse to even exec the binary ("spawn
+# EPERM"). Managed platforms like Railway strip CAP_NET_RAW (and CAP_NET_ADMIN)
+# from the bounding set entirely and don't let you add them back — so ANY
+# effective file cap made nmap fail to exec there, disabling the whole feature
+# (this was the original bug). With no file caps nmap execs cleanly everywhere.
+#
+# Where the platform's bounding set DOES include CAP_NET_RAW (a normal
+# `docker run`, compose, a VPS), root nmap gets raw sockets natively — no setcap
+# needed — and the app runs full SYN + OS-detection scans. Where it doesn't
+# (Railway), the boot probe in server/nmap/detect.ts detects that and the scan
+# runs in unprivileged TCP-connect mode (-sT, no -O). Either way the feature is
+# PRESENT and functional; it stays absent only when the binary is missing (e.g.
+# the Vercel-hosted deployment), which the app feature-detects and hides cleanly.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends nmap libcap2-bin && \
-    setcap cap_net_raw,cap_net_admin+eip "$(command -v nmap)" && \
+    apt-get install -y --no-install-recommends nmap && \
     rm -rf /var/lib/apt/lists/*
 
 # The base image ships a global `npm` CLI (with its own vendored

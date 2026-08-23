@@ -13,16 +13,43 @@ const execFileAsync = promisify(execFile);
 export interface NmapDetection {
   available: boolean;
   version?: string;
+  // Whether raw sockets are actually usable in THIS container. SYN scan (-sS,
+  // the default when privileged) and OS detection (-O) need them; a TCP connect
+  // scan (-sT) does not. Managed platforms (e.g. Railway) run the container
+  // without CAP_NET_RAW in the bounding set, so even as root nmap must fall back
+  // to connect scans — buildNmapArgs() adapts on this flag.
+  privileged?: boolean;
   error?: string;
 }
 
 let cached: NmapDetection | null = null;
 
+// Probe whether nmap can open a raw socket here. An explicit `-sS` (which HARD-
+// requires raw sockets — nmap never silently downgrades an explicitly requested
+// SYN scan) against loopback exits 0 only when the raw socket actually worked;
+// a missing-privilege / socket-permission error (or a non-zero exit for any
+// reason) resolves to false. Defaults to UNPRIVILEGED on any doubt, since a
+// connect scan works everywhere — this never turns a runnable feature off, it
+// only picks the scan technique.
+async function probeNmapPrivileged(): Promise<boolean> {
+  try {
+    await execFileAsync(
+      "nmap",
+      ["-sS", "-p", "80", "-Pn", "-n", "--host-timeout", "5s", "127.0.0.1"],
+      { timeout: 8000 },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function detectNmap(): Promise<NmapDetection> {
   try {
     const { stdout } = await execFileAsync("nmap", ["--version"], { timeout: 5000 });
     const match = /Nmap version (\S+)/.exec(stdout);
-    cached = { available: true, version: match?.[1] };
+    const privileged = await probeNmapPrivileged();
+    cached = { available: true, version: match?.[1], privileged };
   } catch (err: any) {
     cached = { available: false, error: err?.message || "nmap binary not found or not runnable" };
   }
@@ -31,6 +58,13 @@ export async function detectNmap(): Promise<NmapDetection> {
 
 export function isNmapAvailable(): boolean {
   return cached?.available ?? false;
+}
+
+// Raw-socket (SYN/-O) capability, memoized from the boot probe. False whenever
+// nmap is absent or the container can't open raw sockets — the scan then runs
+// unprivileged (connect scan). See buildNmapArgs().
+export function isNmapPrivileged(): boolean {
+  return cached?.privileged ?? false;
 }
 
 export function nmapVersionString(): string | undefined {
