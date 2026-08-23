@@ -10,5 +10,11 @@ db.json
 data.sqlite
 data.sqlite-shm
 data.sqlite-wal
+# Isolated local test-session DB (created for manual/smoke testing)
+data.testsession.sqlite
+data.testsession.sqlite-shm
+data.testsession.sqlite-wal
+# Runtime DB snapshots from the backup worker
+backups/
 # Local Claude Code settings/state (e.g. settings.local.json); machine-specific, not shared
 .claude/
