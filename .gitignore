@@ -18,3 +18,6 @@ data.testsession.sqlite-wal
 backups/
 # Local Claude Code settings/state (e.g. settings.local.json); machine-specific, not shared
 .claude/
+# MCP Registry domain signing key + login command (secret; never commit)
+mcp-server/key.pem
+mcp-server/.registry-login.local
