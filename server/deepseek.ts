@@ -79,13 +79,19 @@ export async function generateAiReport(
     const { content: bodyTextRaw, reasoningContent } = await callDeepSeek(MODEL_PRO, prompt, {
       thinking: 'enabled',
       reasoningEffort: 'high',
-      // Reasoning + a findings-heavy JSON report share this budget — see
-      // deepseekClient.ts's DeepSeekCallOptions doc for why it must be generous.
-      maxTokens: 20000,
+      // Reasoning + a findings-heavy JSON report SHARE this budget (see
+      // deepseekClient.ts's DeepSeekCallOptions doc). In high-effort thinking
+      // mode the chain-of-thought alone routinely consumes ~13-15k tokens, so a
+      // 20k cap left too little for the final answer: the JSON report got
+      // truncated mid-string and JSON.parse threw, silently degrading every
+      // report to the local summary. Sized generously so reasoning AND a full
+      // findings report both fit with headroom.
+      maxTokens: 32000,
       // High-effort thinking mode over a large token budget legitimately takes
       // a while; generous but still bounded so a stalled call can't hang a
-      // scan in "analyzing" forever (see deepseekClient.ts).
-      timeoutMs: 90000,
+      // scan in "analyzing" forever (see deepseekClient.ts). Raised alongside
+      // maxTokens — a fuller response needs more wall-clock to stream.
+      timeoutMs: 120000,
     }, effectiveKey);
     if (!bodyTextRaw) {
       return { ...staticCompiled, aiSummary: compileLocalSummary(url, staticCompiled), executiveBreakdown: compileLocalBreakdown(url, staticCompiled) };
