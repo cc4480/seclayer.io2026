@@ -32,7 +32,16 @@ export interface DiagnosticResult {
   headers: Record<string, string>;
   missingHeaders: string[];
   techLeaked: string[];
-  probedPaths: Array<{ path: string; status: number; exposed: boolean; body?: string }>;
+  probedPaths: Array<{
+    path: string;
+    status: number;
+    exposed: boolean;
+    body?: string;
+    // Per-file finding metadata for probes that carry accurate severity/wording
+    // (e.g. supply-chain lockfiles are a LOW dependency-tree disclosure, not the
+    // generic critical/high the .env/.git default assigns). Absent → default map.
+    meta?: { title: string; severity: Severity; description: string; fix: string };
+  }>;
   cookieIssues: string[];
 
   // High-fidelity AppSec dimensions

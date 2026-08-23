@@ -17,6 +17,7 @@ import { runApiSecProbes, exposedUserListInCapture, exposedCredentialListInCaptu
 import { probeJwtAuth, extractJwtSecretCandidates } from "./jwtProbe.js";
 import { probeI18nAuthBypass } from "./i18nProbe.js";
 import { extractUrlKeyPairs, probeCredentialUrlPairs } from "./credentialChainProbe.js";
+import { extractFirebaseDbUrls, probeFirebaseOpenDb } from "./firebaseProbe.js";
 import { probeEdgeFunctionAuth } from "./edgeFunctionProbe.js";
 import { probePrototypePollution } from "./prototypePollutionProbe.js";
 import { probePriceManipulation } from "./priceManipulationProbe.js";
@@ -241,6 +242,24 @@ export async function runDiagnostics(
             if (chainFinding) result.apiSecFindings = [...(result.apiSecFindings || []), chainFinding];
           } catch (e) {
             console.warn("Credential-chain probe encountered an error", e);
+          }
+        }
+      }
+
+      // Firebase Realtime Database open-rules: extract any RTDB URL the scanned
+      // app's own bundle references (Firebase web config is public by design) and
+      // prove the database's security RULES permit an unauthenticated read — a
+      // 200 at `<db>/.json` where a locked-down DB returns 401. Read-only, and
+      // the DB origin is one the app named, not a guess. Same cross-origin BaaS
+      // discipline + ownership gate as the credential-chain probe above.
+      if (allowActiveProbes) {
+        const fbDbUrls = [...new Set(allScannedText.flatMap((t) => extractFirebaseDbUrls(t)))];
+        if (fbDbUrls.length) {
+          try {
+            const fbFinding = await probeFirebaseOpenDb(fbDbUrls, headers);
+            if (fbFinding) result.apiSecFindings = [...(result.apiSecFindings || []), fbFinding];
+          } catch (e) {
+            console.warn("Firebase open-DB probe encountered an error", e);
           }
         }
       }

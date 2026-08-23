@@ -253,19 +253,35 @@ function buildScaFindings(diag: DiagnosticResult): Finding[] {
   }));
 }
 
-// 5. Exposed critical resource files discovered by dynamic path probing.
+// 5. Exposed critical resource files discovered by dynamic path probing. A probe
+// may carry its own `meta` (accurate title/severity/fix — e.g. supply-chain
+// lockfiles are a LOW dependency-tree disclosure); otherwise the generic
+// secret/VCS-file mapping (critical for .env/.git, else high) applies.
 function buildExposedPathFindings(diag: DiagnosticResult): Finding[] {
   return diag.probedPaths
     .filter((p) => p.exposed)
-    .map((exp) => ({
-      id: fid(),
-      title: `Exposed Critical Resource File (${exp.path})`,
-      description: `Active Dynamic scanning discovered a public exposed configuration target at ${diag.url}${exp.path}. This file can be queried freely over the web, yielding secret metadata configurations.`,
-      severity: (exp.path.includes(".env") || exp.path.includes(".git") ? "critical" : "high") as Severity,
-      confidence: "high",
-      fix: `Immediately strip dynamic routes to ${exp.path} inside server rewrite engines or configure .htaccess rules to return 403 blocks.`,
-      category: "DAST",
-    }));
+    .map((exp) => {
+      if (exp.meta) {
+        return {
+          id: fid(),
+          title: exp.meta.title,
+          description: exp.meta.description,
+          severity: exp.meta.severity,
+          confidence: "high" as const,
+          fix: exp.meta.fix,
+          category: "DAST" as const,
+        };
+      }
+      return {
+        id: fid(),
+        title: `Exposed Critical Resource File (${exp.path})`,
+        description: `Active Dynamic scanning discovered a public exposed configuration target at ${diag.url}${exp.path}. This file can be queried freely over the web, yielding secret metadata configurations.`,
+        severity: (exp.path.includes(".env") || exp.path.includes(".git") ? "critical" : "high") as Severity,
+        confidence: "high" as const,
+        fix: `Immediately strip dynamic routes to ${exp.path} inside server rewrite engines or configure .htaccess rules to return 403 blocks.`,
+        category: "DAST" as const,
+      };
+    });
 }
 
 // 6. Red-team active-fuzzing findings (each carries a PROVEN exploit receipt).
