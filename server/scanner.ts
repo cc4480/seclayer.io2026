@@ -18,6 +18,8 @@ import { probeJwtAuth, extractJwtSecretCandidates } from "./jwtProbe.js";
 import { probeI18nAuthBypass } from "./i18nProbe.js";
 import { extractUrlKeyPairs, probeCredentialUrlPairs } from "./credentialChainProbe.js";
 import { extractFirebaseDbUrls, probeFirebaseOpenDb } from "./firebaseProbe.js";
+import { probeExposedSourceMaps } from "./sourceMapProbe.js";
+import { probeLlmPromptInjection } from "./llmProbe.js";
 import { probeEdgeFunctionAuth } from "./edgeFunctionProbe.js";
 import { probePrototypePollution } from "./prototypePollutionProbe.js";
 import { probePriceManipulation } from "./priceManipulationProbe.js";
@@ -226,6 +228,19 @@ export async function runDiagnostics(
         ...crawl.captures.map((c) => c.text),
         ...result.probedPaths.map((p) => p.body).filter((b): b is string => !!b),
       ];
+
+      // Exposed JavaScript source maps (passive, same-origin): a shipped .js.map
+      // reconstructs the original un-minified source. Runs unconditionally like
+      // the sensitive-path probing above — it only GETs the target's OWN .map
+      // assets, confirmed by the Source-Map-v3 JSON signature (never a 200 alone).
+      // Reported LOW via the probedPaths `meta` mechanism.
+      try {
+        const smCaptures = [{ url, text: rootHtml }, ...crawl.captures.map((c) => ({ url: c.url, text: c.text }))];
+        const exposedMaps = await probeExposedSourceMaps(smCaptures, url, headers);
+        if (exposedMaps.length) result.probedPaths.push(...exposedMaps);
+      } catch (e) {
+        console.warn("Source-map exposure probe encountered an error", e);
+      }
 
       // Cross-origin credential chaining: a client-side key paired with the
       // URL it's for (both disclosed in the SAME served content) is tested
@@ -493,6 +508,25 @@ export async function runDiagnostics(
         const formTargets = allTargets.filter((t) => t.method === "POST" && t.params.length > 0);
         const stored = await probeStoredXss(formTargets, { ...headers, "Cache-Control": "no-cache" });
         result.redTeamFindings = [...(result.redTeamFindings || []), ...stored];
+      }
+
+      // LLM prompt-injection (aggressive tier): POSTs a prompt to any LLM-backed
+      // endpoint the crawl found (or a small curated guess-list) and proves the
+      // model obeys an injected instruction-override via a DOUBLE computed-canary
+      // oracle (two independent products it must compute — reflection/templating
+      // can't). Aggressive+owned because it POSTs prompts that cost the owner LLM
+      // tokens. See server/llmProbe.ts.
+      if (allowAggressiveProbes) {
+        try {
+          const llmFinding = await probeLlmPromptInjection(
+            allTargets.map((t) => ({ url: t.url, method: t.method, params: t.params })),
+            host,
+            { ...headers, "Cache-Control": "no-cache" },
+          );
+          if (llmFinding) result.redTeamFindings = [...(result.redTeamFindings || []), llmFinding];
+        } catch (e) {
+          console.warn("LLM prompt-injection probe encountered an error", e);
+        }
       }
 
       result.crawl = {
