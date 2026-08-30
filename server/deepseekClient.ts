@@ -3,7 +3,27 @@
 // (server/narrate.ts). DeepSeek exposes an OpenAI-compatible API, so this
 // talks to it directly over fetch rather than pulling in a heavyweight SDK.
 
+import { Agent } from 'undici';
+
 export const DEEPSEEK_BASE_URL = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com';
+
+// Dedicated dispatcher for DeepSeek calls.
+//
+// Non-streaming completions send response HEADERS almost immediately (~1s) and
+// then hold the socket open for the whole generation before the BODY arrives —
+// a high-effort thinking call over a findings-heavy prompt can spend minutes
+// there. undici's default bodyTimeout (300s) therefore kills the socket
+// mid-generation and surfaces as an opaque `terminated`, which silently
+// degraded every long report to the local summary in production.
+//
+// Both timeouts are disabled here because the AbortController in callDeepSeek
+// is the real bound — it now spans headers AND body (it previously only covered
+// the fetch, which resolved at the headers and left the body read unbounded),
+// so a stalled call still fails fast with a clear message instead of hanging.
+const deepseekDispatcher = new Agent({
+  headersTimeout: 0,
+  bodyTimeout: 0,
+});
 
 export function getApiKey(): string | null {
   const apiKey = process.env.DEEPSEEK_API_KEY;
@@ -66,11 +86,15 @@ export async function callDeepSeek(model: string, prompt: string, opts: DeepSeek
   if (opts.thinking) body.thinking = { type: opts.thinking };
   if (opts.reasoningEffort) body.reasoning_effort = opts.reasoningEffort;
 
+  // The timer must stay armed until the BODY has been read, not just until the
+  // fetch resolves: a non-streaming completion returns its headers in ~1s and
+  // then streams nothing until generation finishes, so clearing the timer at
+  // the fetch left the long part of the call completely unbounded.
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), opts.timeoutMs);
-  let response: Response;
+  let data: any;
   try {
-    response = await fetch(`${DEEPSEEK_BASE_URL}/chat/completions`, {
+    const response = await fetch(`${DEEPSEEK_BASE_URL}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -78,22 +102,23 @@ export async function callDeepSeek(model: string, prompt: string, opts: DeepSeek
       },
       body: JSON.stringify(body),
       signal: ctl.signal,
-    });
+      dispatcher: deepseekDispatcher,
+    } as RequestInit);
+
+    if (!response.ok) {
+      const errBody = await response.text().catch(() => '');
+      throw new Error(`DeepSeek API error ${response.status}: ${errBody}`);
+    }
+
+    data = await response.json();
   } catch (err: any) {
-    if (err?.name === 'AbortError') {
+    if (err?.name === 'AbortError' || err?.name === 'TimeoutError') {
       throw new Error(`DeepSeek API call timed out after ${opts.timeoutMs}ms`);
     }
     throw err;
   } finally {
     clearTimeout(timer);
   }
-
-  if (!response.ok) {
-    const errBody = await response.text().catch(() => '');
-    throw new Error(`DeepSeek API error ${response.status}: ${errBody}`);
-  }
-
-  const data = await response.json();
   const message = data?.choices?.[0]?.message;
   const content = typeof message?.content === 'string' ? message.content : null;
   const reasoningContent = typeof message?.reasoning_content === 'string' ? message.reasoning_content : undefined;

@@ -91,7 +91,14 @@ export async function generateAiReport(
       // a while; generous but still bounded so a stalled call can't hang a
       // scan in "analyzing" forever (see deepseekClient.ts). Raised alongside
       // maxTokens — a fuller response needs more wall-clock to stream.
-      timeoutMs: 120000,
+      //
+      // Sized from measurement, not guesswork: generation streams at roughly
+      // 70 tokens/s, and a findings-heavy report spends ~13-15k tokens on
+      // reasoning alone before the answer, so the old 120s cap could not fit a
+      // real report — it only ever passed in testing because the cap wasn't
+      // actually enforced over the body read (fixed in deepseekClient.ts), and
+      // production instead died on undici's 300s socket timeout as `terminated`.
+      timeoutMs: 300000,
     }, effectiveKey);
     if (!bodyTextRaw) {
       return { ...staticCompiled, aiSummary: compileLocalSummary(url, staticCompiled), executiveBreakdown: compileLocalBreakdown(url, staticCompiled) };
