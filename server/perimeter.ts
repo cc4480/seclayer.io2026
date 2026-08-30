@@ -6,7 +6,7 @@
 // Mutates the passed DiagnosticResult in place (easmPerimeter + probedPaths).
 import type { DiagnosticResult } from "./scanner.js";
 import type { Severity } from "../src/types.js";
-import { safeFetch } from "./ssrf.js";
+import { safeFetch, resolveIpv4 } from "./ssrf.js";
 import { looksLikeHtml } from "./evidence.js";
 import crypto from "crypto";
 import * as dns from "dns/promises";
@@ -111,8 +111,8 @@ const COMMON_SUBDOMAINS = [
 export async function scanPerimeter(host: string, hostname: string, result: DiagnosticResult): Promise<void> {
   // EASM: DNS + subdomain enumeration.
   try {
-    const ipRecords = await dns.resolve4(hostname).catch(() => []);
-    if (ipRecords && ipRecords.length > 0) {
+    const ipRecords = await resolveIpv4(hostname);
+    if (ipRecords.length > 0) {
       result.easmPerimeter.ip = ipRecords[0];
     }
 
@@ -124,39 +124,37 @@ export async function scanPerimeter(host: string, hostname: string, result: Diag
 
     // Check for Wildcard DNS to prevent false positive subdomain bloating
     let wildcardIp: string | null = null;
-    try {
-      const randomSub = crypto.randomBytes(6).toString("hex");
-      const wildcardRecords = await dns.resolve4(`${randomSub}.${hostname}`);
-      if (wildcardRecords && wildcardRecords.length > 0) {
-        wildcardIp = wildcardRecords[0];
-      }
-    } catch (e) {
-      // No wildcard DNS detected
+    const randomSub = crypto.randomBytes(6).toString("hex");
+    const wildcardRecords = await resolveIpv4(`${randomSub}.${hostname}`);
+    if (wildcardRecords.length > 0) {
+      wildcardIp = wildcardRecords[0];
     }
 
     const subdomainChecks = COMMON_SUBDOMAINS.map(async (sub) => {
       const subUrl = `${sub}.${hostname}`;
-      try {
-        const records = await dns.resolve4(subUrl);
+      const records = await resolveIpv4(subUrl);
 
-        // Filter out false positives caused by Wildcard DNS records
-        if (wildcardIp && records.includes(wildcardIp)) {
-          return { domain: subUrl, status: "inactive" as const, port: "0" };
-        }
-
-        return {
-          domain: subUrl,
-          status: "live" as const,
-          port: sub.includes("vpn")
-            ? "1194"
-            : sub.includes("mail") || sub.includes("smtp")
-              ? "25"
-              : "443",
-          ip: records[0],
-        };
-      } catch (err) {
+      // A subdomain that doesn't resolve (or a resolver that can't answer) is
+      // simply not live — no A record, nothing to report.
+      if (records.length === 0) {
         return { domain: subUrl, status: "inactive" as const, port: "0" };
       }
+
+      // Filter out false positives caused by Wildcard DNS records
+      if (wildcardIp && records.includes(wildcardIp)) {
+        return { domain: subUrl, status: "inactive" as const, port: "0" };
+      }
+
+      return {
+        domain: subUrl,
+        status: "live" as const,
+        port: sub.includes("vpn")
+          ? "1194"
+          : sub.includes("mail") || sub.includes("smtp")
+            ? "25"
+            : "443",
+        ip: records[0],
+      };
     });
 
     const subResults = await Promise.all(subdomainChecks);

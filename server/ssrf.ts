@@ -8,7 +8,62 @@
 // bound to the validating dispatcher below.
 import net from "net";
 import * as dns from "dns/promises";
+import { lookup as cbLookup } from "dns";
+import { promisify } from "util";
 import { Agent } from "undici";
+
+const osLookup = promisify(cbLookup);
+
+// Resolve every address a host maps to, using the OS stub resolver
+// (getaddrinfo / dns.lookup) FIRST — the same resolver fetch(), curl and the
+// browser use. Direct c-ares queries (dns.resolve4/6) are refused on hosts whose
+// only nameserver is a local stub (Windows DNS Client, VPNs, corporate/DoH-only
+// setups: dns.getServers() === ["127.0.0.1"] and a raw :53 query gets
+// ECONNREFUSED), which made EVERY scan fail to resolve a target that was in fact
+// reachable. c-ares stays as a fallback for the reverse case (getaddrinfo
+// restricted but outbound :53 allowed). SSRF safety is unchanged: callers still
+// validate every returned address with isBlockedIp, and the dispatcher still
+// pins the socket to those vetted IPs.
+export async function resolveHostAddresses(hostname: string): Promise<string[]> {
+  try {
+    const all = await osLookup(hostname, { all: true, verbatim: true });
+    if (all.length) return orderV4First(all.map((a) => a.address));
+  } catch {
+    // getaddrinfo failed — fall through to c-ares.
+  }
+  const [v4, v6] = await Promise.all([
+    dns.resolve4(hostname).catch(() => [] as string[]),
+    dns.resolve6(hostname).catch(() => [] as string[]),
+  ]);
+  return [...v4, ...v6];
+}
+
+// A-record (IPv4) resolution for EASM/recon callers that specifically want the
+// host's IPv4 set (subdomain liveness, wildcard-DNS detection). Uses the OS
+// resolver first — like resolveHostAddresses — so it keeps working where c-ares
+// (dns.resolve4) is refused; c-ares is the fallback. Resolves to [] rather than
+// throwing so callers can treat "no A record" and "resolver unavailable" alike.
+export async function resolveIpv4(hostname: string): Promise<string[]> {
+  try {
+    const all = await osLookup(hostname, { family: 4, all: true });
+    if (all.length) return all.map((a) => a.address);
+  } catch {
+    // getaddrinfo failed / host has no A record — fall through to c-ares.
+  }
+  return dns.resolve4(hostname).catch(() => [] as string[]);
+}
+
+// Try IPv4 before IPv6. The connection is pinned to these addresses in order, so
+// on a host with advertised-but-unroutable IPv6 (common on IPv4-only networks and
+// many CI runners), leading with IPv4 avoids a multi-second stall on a dead IPv6
+// connect before the scanner can reach an otherwise-healthy target. IPv6-only
+// hosts still work — their IPv4 list is simply empty.
+function orderV4First(addresses: string[]): string[] {
+  return [
+    ...addresses.filter((a) => !net.isIPv6(a)),
+    ...addresses.filter((a) => net.isIPv6(a)),
+  ];
+}
 
 export function isBlockedIp(ip: string): boolean {
   if (net.isIPv4(ip)) {
@@ -87,6 +142,13 @@ export function firstBlockedAddress(hostname: string, addresses: string[]): stri
 // answer can never reach connect().
 export const safeDispatcher = new Agent({
   connect: {
+    // Happy Eyeballs (RFC 8305): race IPv4/IPv6 and use whichever connects
+    // first, abandoning a stalled attempt after 500ms. Without this, a host that
+    // advertises IPv6 the network can't actually route (common on IPv4-only
+    // machines and CI) makes the socket sit on a dead IPv6 connect for seconds
+    // before trying IPv4 — even though our lookup lists IPv4 first.
+    autoSelectFamily: true,
+    autoSelectFamilyAttemptTimeout: 500,
     lookup(
       hostname: string,
       options: any,
@@ -115,15 +177,12 @@ export const safeDispatcher = new Agent({
       if (net.isIP(hostname)) {
         return finish([{ address: hostname, family: net.isIPv6(hostname) ? 6 : 4 }]);
       }
-      Promise.all([
-        dns.resolve4(hostname).catch(() => [] as string[]),
-        dns.resolve6(hostname).catch(() => [] as string[]),
-      ])
-        .then(([v4, v6]) => {
-          const addrs = [
-            ...v4.map((address) => ({ address, family: 4 })),
-            ...v6.map((address) => ({ address, family: 6 })),
-          ];
+      resolveHostAddresses(hostname)
+        .then((ips) => {
+          const addrs = ips.map((address) => ({
+            address,
+            family: net.isIPv6(address) ? 6 : 4,
+          }));
           if (addrs.length === 0) return cb(new Error(`DNS resolution failed for ${hostname}`));
           finish(addrs);
         })
@@ -173,11 +232,8 @@ export async function assertTargetIsScannable(parsedUrl: URL): Promise<void> {
   }
 
   // Otherwise resolve and validate every address the host maps to.
-  const [v4, v6] = await Promise.all([
-    dns.resolve4(hostname).catch(() => [] as string[]),
-    dns.resolve6(hostname).catch(() => [] as string[]),
-  ]);
-  for (const ip of [...v4, ...v6]) {
+  const addresses = await resolveHostAddresses(hostname);
+  for (const ip of addresses) {
     if (isBlockedIp(ip)) {
       throw new Error(
         `Target "${hostname}" resolves to a blocked internal address (${ip}); scan refused.`,
