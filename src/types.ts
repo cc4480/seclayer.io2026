@@ -356,6 +356,7 @@ export interface NmapScan {
   url: string;
   resolvedIp?: string;
   status: NmapScanStatus;
+  deep?: boolean; // true = exhaustive all-ports (-p-) scan; false/absent = fast top-1000 default
   nmapVersion?: string;
   result?: NmapResult;
   rawXml?: string; // full transparency, mirrors the rest of the product's raw-evidence ethos

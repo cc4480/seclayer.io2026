@@ -1,14 +1,27 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildNmapArgs, DEFAULT_HOST_TIMEOUT_MINUTES } from './args.js';
+import { buildNmapArgs, DEFAULT_HOST_TIMEOUT_MINUTES, DEEP_HOST_TIMEOUT_MINUTES, FAST_HOST_TIMEOUT_MINUTES } from './args.js';
 
-test('buildNmapArgs produces the exact full-depth scan invocation', () => {
+test('buildNmapArgs defaults to the fast top-1000-port, script-capped scan', () => {
   const args = buildNmapArgs('203.0.113.10');
   assert.deepEqual(args, [
-    '-p-', '-sV', '-O', '--script', 'vuln', '-T4',
-    '--host-timeout', `${DEFAULT_HOST_TIMEOUT_MINUTES}m`,
+    '--top-ports', '1000', '-sV', '-O', '--script', 'vuln',
+    '--script-timeout', '60s', '-T4',
+    '--host-timeout', `${FAST_HOST_TIMEOUT_MINUTES}m`,
     '--stats-every', '10s', '-oX', '-', '203.0.113.10',
   ]);
+});
+
+test('buildNmapArgs deep=true runs the exhaustive all-ports, uncapped-script sweep', () => {
+  const args = buildNmapArgs('203.0.113.10', undefined, true, true);
+  assert.deepEqual(args, [
+    '-p-', '-sV', '-O', '--script', 'vuln', '-T4',
+    '--host-timeout', `${DEEP_HOST_TIMEOUT_MINUTES}m`,
+    '--stats-every', '10s', '-oX', '-', '203.0.113.10',
+  ]);
+  // The fast default must NOT scan all ports; deep must NOT cap scripts.
+  assert.ok(!buildNmapArgs('203.0.113.10').includes('-p-'));
+  assert.ok(!args.includes('--script-timeout'));
 });
 
 test('buildNmapArgs defaults to the privileged (SYN + OS) technique', () => {
@@ -20,7 +33,8 @@ test('buildNmapArgs defaults to the privileged (SYN + OS) technique', () => {
 test('buildNmapArgs runs an unprivileged connect scan when raw sockets are unavailable', () => {
   const args = buildNmapArgs('203.0.113.10', DEFAULT_HOST_TIMEOUT_MINUTES, false);
   assert.deepEqual(args, [
-    '-p-', '-sT', '-sV', '--unprivileged', '-Pn', '--script', 'vuln', '-T4',
+    '--top-ports', '1000', '-sT', '-sV', '--unprivileged', '-Pn', '--script', 'vuln',
+    '--script-timeout', '60s', '-T4',
     '--host-timeout', `${DEFAULT_HOST_TIMEOUT_MINUTES}m`,
     '--stats-every', '10s', '-oX', '-', '203.0.113.10',
   ]);

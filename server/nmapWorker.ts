@@ -34,9 +34,14 @@ export async function processNmapScanJob(scanId: string): Promise<void> {
     const { hostname, ip } = await resolveNmapTarget(scan.url);
     if (await isCanceled(scanId)) return;
     (await db.updateNmapScan(scanId, { resolvedIp: ip }));
-    emit("system", `Resolved ${hostname} → ${ip}. Launching full-depth nmap scan (all ports, -sV, -O, --script vuln)…`);
+    emit(
+      "system",
+      scan.deep
+        ? `Resolved ${hostname} → ${ip}. Launching deep nmap scan (all 65535 ports, -sV, -O, --script vuln)…`
+        : `Resolved ${hostname} → ${ip}. Launching nmap scan (top 1000 ports, -sV, -O, --script vuln)…`,
+    );
 
-    const { xml, durationMs, args } = await runNmap(scanId, ip, emit);
+    const { xml, durationMs, args } = await runNmap(scanId, ip, emit, undefined, scan.deep);
     if (await isCanceled(scanId)) return; // discard a result that arrived after cancellation
 
     emit("system", "Scan complete — parsing results…");

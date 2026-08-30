@@ -43,10 +43,12 @@ export function runNmap(
   targetIp: string,
   emit: EmitFn,
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  deep = false,
 ): Promise<NmapRunResult> {
   // Pick SYN+OS vs. TCP-connect based on the boot-time raw-socket probe, so the
-  // scan adapts to platforms (e.g. Railway) that can't open raw sockets.
-  const args = buildNmapArgs(targetIp, undefined, isNmapPrivileged());
+  // scan adapts to platforms (e.g. Railway) that can't open raw sockets. `deep`
+  // selects all-ports (-p-) over the fast top-1000 default (see buildNmapArgs).
+  const args = buildNmapArgs(targetIp, undefined, isNmapPrivileged(), deep);
   const start = Date.now();
 
   return new Promise((resolve, reject) => {

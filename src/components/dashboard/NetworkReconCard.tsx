@@ -1,4 +1,4 @@
-import type { FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { Radar, Globe, ShieldCheck, AlertTriangle, ArrowRight } from 'lucide-react';
 import { useNmap } from '../../hooks/useNmap.js';
 import { useDomainVerification } from '../../hooks/useDomainVerification.js';
@@ -23,6 +23,10 @@ interface Props {
 // launches and shows progress while one is running.
 export default function NetworkReconCard({ nm, userId, freeMode, devSkipDomainVerification }: Props) {
   const dv = useDomainVerification(nm.targetUrl, userId);
+  // Fast (top-1000-port) scan by default — finishes in ~1-2 min even behind a
+  // CDN. Deep opts into the exhaustive all-65535-port sweep (minutes, up to the
+  // full host-timeout against a filtering CDN).
+  const [deep, setDeep] = useState(false);
   const inFlight = nm.nmapScans.find((s) => s.status === 'queued' || s.status === 'scanning');
   const events = useNmapEvents(inFlight?.id || '');
   const logs = liveEventsToLogs(events);
@@ -33,7 +37,7 @@ export default function NetworkReconCard({ nm, userId, freeMode, devSkipDomainVe
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!canLaunch) return;
-    void nm.launchScan(nm.targetUrl);
+    void nm.launchScan(nm.targetUrl, deep);
   };
 
   return (
@@ -45,7 +49,7 @@ export default function NetworkReconCard({ nm, userId, freeMode, devSkipDomainVe
         <h2 className="text-sm font-bold font-mono text-white">Network Reconnaissance</h2>
       </div>
       <p className="text-[#a1a1aa] text-xs font-mono mb-6">
-        Full-depth nmap sweep of a verified target — every port, service &amp; version fingerprint, OS guess, and NSE vulnerability-script hit. Self-hosted only, and a fully independent scan from the AppSec report above: it never affects your posture score.
+        An nmap sweep of a verified target — service &amp; version fingerprints, OS guess, and NSE vulnerability-script hits. Scans the top 1,000 ports by default (fast); tick <em className="text-[#a1a1aa] not-italic">Deep scan</em> for all 65,535. Self-hosted only, and a fully independent scan from the AppSec report above: it never affects your posture score.
       </p>
 
       <form onSubmit={handleSubmit} className="space-y-4">
@@ -133,9 +137,22 @@ export default function NetworkReconCard({ nm, userId, freeMode, devSkipDomainVe
           </div>
         ) : (
           <div className="flex items-center justify-between pt-2">
-            <span className="text-[10px] font-mono text-[#52525b]">
-              Cost: <strong className="text-[#22c55e]">{freeMode ? 'Free during beta' : '1 credit'}</strong> · full port range, service/OS/vuln-script depth
-            </span>
+            <label className="flex items-start gap-2 text-[10px] font-mono text-[#a1a1aa] cursor-pointer select-none" htmlFor="nmap-deep-toggle">
+              <input
+                id="nmap-deep-toggle"
+                type="checkbox"
+                checked={deep}
+                onChange={(e) => setDeep(e.target.checked)}
+                disabled={nm.isLaunching}
+                className="mt-0.5 accent-[#22c55e] cursor-pointer"
+              />
+              <span>
+                <span className="text-white">Deep scan</span> — all 65,535 ports (slower, minutes)
+                <span className="block text-[#52525b]">
+                  Default scans the top 1,000 ports · {freeMode ? 'Free during beta' : '1 credit'} · service/OS/vuln-script depth
+                </span>
+              </span>
+            </label>
             <button
               type="submit"
               disabled={nm.isLaunching || !nm.targetUrl.trim() || !canLaunch}

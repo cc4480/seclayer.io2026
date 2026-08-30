@@ -280,10 +280,10 @@ export class PostgresDb implements Db {
   }
 
   // --- Network Reconnaissance (nmap) ----------------------------------------
-  async createNmapScan(userId: string, url: string): Promise<NmapScan> {
+  async createNmapScan(userId: string, url: string, deep = false): Promise<NmapScan> {
     const id = "nmap_" + crypto.randomBytes(8).toString("hex");
     const now = new Date().toISOString();
-    await this.run("INSERT INTO nmap_scans (id, userId, url, status, createdAt) VALUES (?, ?, ?, ?, ?)", [id, userId, url, "queued", now]);
+    await this.run("INSERT INTO nmap_scans (id, userId, url, status, deep, createdAt) VALUES (?, ?, ?, ?, ?, ?)", [id, userId, url, "queued", deep ? 1 : 0, now]);
     return (await this.getNmapScan(id))!;
   }
   async getNmapScan(id: string): Promise<NmapScan | undefined> {

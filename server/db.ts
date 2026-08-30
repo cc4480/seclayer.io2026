@@ -403,11 +403,11 @@ class SqliteDb {
   // wired into scans/findings/scoring. Mirrors the Scans methods above almost
   // verbatim, minus the 'analyzing' phase (there is no separate AI-analysis
   // step — the whole run is one 'scanning' phase driven by a single process).
-  async createNmapScan(userId: string, url: string): Promise<NmapScan> {
+  async createNmapScan(userId: string, url: string, deep = false): Promise<NmapScan> {
     const id = 'nmap_' + crypto.randomBytes(8).toString('hex');
     const now = new Date().toISOString();
-    this.db.prepare('INSERT INTO nmap_scans (id, userId, url, status, createdAt) VALUES (?, ?, ?, ?, ?)')
-      .run(id, userId, url, 'queued', now);
+    this.db.prepare('INSERT INTO nmap_scans (id, userId, url, status, deep, createdAt) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(id, userId, url, 'queued', deep ? 1 : 0, now);
     return (await this.getNmapScan(id))!;
   }
 

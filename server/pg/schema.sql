@@ -153,6 +153,7 @@ CREATE TABLE IF NOT EXISTS nmap_scans (
   url         text NOT NULL,
   resolvedIp  text,
   status      text NOT NULL,
+  deep        integer NOT NULL DEFAULT 0,
   nmapVersion text,
   result      text,
   rawXml      text,

@@ -60,6 +60,7 @@ export function rowToNmapScan(row: any): NmapScan | undefined {
     url: row.url,
     resolvedIp: row.resolvedIp ?? undefined,
     status: row.status,
+    deep: !!row.deep,
     nmapVersion: row.nmapVersion ?? undefined,
     result: row.result ? JSON.parse(row.result) : undefined,
     rawXml: row.rawXml ?? undefined,

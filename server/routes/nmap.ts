@@ -34,6 +34,10 @@ export function registerNmapRoutes(app: express.Express, ctx: RouteContext) {
     }
 
     const { url } = req.body;
+    // Opt-in exhaustive all-ports sweep; omitted/false runs the fast top-1000
+    // default. More invasive and much slower (minutes, and up to the full
+    // host-timeout against a CDN), so it must be explicitly requested.
+    const deep = req.body.deep === true;
     const userId = getUserId(req);
     if (!url) {
       return res.status(400).json({ status: "error", message: "Target URL is required" });
@@ -80,7 +84,7 @@ export function registerNmapRoutes(app: express.Express, ctx: RouteContext) {
       return res.status(402).json({ status: "error", message: "No credits remaining. Please purchase scan credits to continue." });
     }
 
-    const scan = (await db.createNmapScan(userId, url));
+    const scan = (await db.createNmapScan(userId, url, deep));
     processNmapScanJob(scan.id); // fire-and-forget, mirrors processScanJob
     res.json({ status: "ok", scan });
   });

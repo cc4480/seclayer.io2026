@@ -179,6 +179,9 @@ export function runMigrations(db: Database.Database): void {
   addColumnIfMissing(db, "monitored_targets", "scanWeekday", "INTEGER");
   addColumnIfMissing(db, "monitored_targets", "lastError", "TEXT");
   addColumnIfMissing(db, "monitored_targets", "paused", "INTEGER NOT NULL DEFAULT 0");
+  // nmap scan depth: 0 = fast (top 1000 ports, the default), 1 = deep (all
+  // 65535). Added after launch; existing rows default to fast.
+  addColumnIfMissing(db, "nmap_scans", "deep", "INTEGER NOT NULL DEFAULT 0");
   migrateLegacyPlaintextApiKeys(db);
 
   // Self-attestation ('method' = 'attestation') used to grant the same active-probe

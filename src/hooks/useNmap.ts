@@ -39,7 +39,7 @@ export function useNmap(user: User) {
     return () => clearInterval(timer);
   }, [nmapScans]);
 
-  const launchScan = async (url: string) => {
+  const launchScan = async (url: string, deep = false) => {
     const urlStr = url.trim();
     if (!urlStr) return;
     setIsLaunching(true);
@@ -48,7 +48,7 @@ export function useNmap(user: User) {
       const res = await fetch('/api/nmap/scans', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: urlStr }),
+        body: JSON.stringify({ url: urlStr, deep }),
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
