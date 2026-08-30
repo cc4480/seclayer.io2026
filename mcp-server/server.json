@@ -3,7 +3,7 @@
   "name": "app.seclayer/mcp",
   "title": "Seclayer",
   "description": "Run a live black-box security pen-test from your AI coding agent: scan a public URL, review findings, and fetch reports through the seclayer_scan, seclayer_list_scans, and seclayer_get_report tools. Signature-confirmed findings across seven AppSec categories with low false positives.",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "repository": {
     "url": "https://github.com/cc4480/seclayer.io2026",
     "source": "github"
@@ -13,7 +13,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@seclayer/mcp",
-      "version": "0.1.0",
+      "version": "1.0.0",
       "transport": {
         "type": "stdio"
       },
