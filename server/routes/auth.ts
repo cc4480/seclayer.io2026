@@ -8,6 +8,50 @@ import { rateLimit } from "../rateLimit.js";
 import { sendEmail, buildMagicLinkEmail, isEmailConfigured } from "../email.js";
 import type { RouteContext } from "./context.js";
 
+// Minimal server-rendered pages for the magic-link confirmation step. Plain
+// HTML on purpose: this runs before any session exists, so it must not depend
+// on the SPA bundle loading or on client-side routing.
+const PAGE_STYLE =
+  "font-family:system-ui,-apple-system,sans-serif;background:#0c0c0e;color:#e4e4e7;" +
+  "display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0";
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+}
+
+function expiredLinkPage(): string {
+  return (
+    '<!doctype html><html lang="en"><head><meta charset="utf-8">' +
+    '<meta name="viewport" content="width=device-width,initial-scale=1">' +
+    '<meta name="robots" content="noindex"><title>Sign-in link invalid or expired</title></head>' +
+    `<body style="${PAGE_STYLE}"><main style="text-align:center;padding:2rem;max-width:26rem">` +
+    '<h1 style="font-size:1.25rem;margin:0 0 .5rem">Sign-in link invalid or expired</h1>' +
+    '<p style="color:#a1a1aa;font-size:.875rem;margin:0 0 1.25rem">Sign-in links can be used once and expire after 15 minutes. Please request a new one.</p>' +
+    '<a href="/" style="color:#22c55e;font-size:.875rem">Back to Seclayer</a>' +
+    "</main></body></html>"
+  );
+}
+
+// The token rides in a hidden field and is spent only when this form is
+// submitted, so a scanner's GET leaves it unused.
+function confirmSignInPage(token: string, email: string): string {
+  return (
+    '<!doctype html><html lang="en"><head><meta charset="utf-8">' +
+    '<meta name="viewport" content="width=device-width,initial-scale=1">' +
+    '<meta name="robots" content="noindex"><title>Confirm sign-in</title></head>' +
+    `<body style="${PAGE_STYLE}"><main style="text-align:center;padding:2rem;max-width:26rem">` +
+    '<h1 style="font-size:1.25rem;margin:0 0 .5rem">Confirm sign-in</h1>' +
+    `<p style="color:#a1a1aa;font-size:.875rem;margin:0 0 1.5rem">Continue as <strong style="color:#e4e4e7">${escapeHtml(email)}</strong>.</p>` +
+    '<form method="POST" action="/api/auth/verify">' +
+    `<input type="hidden" name="token" value="${escapeHtml(token)}">` +
+    '<button type="submit" style="background:#22c55e;color:#000;border:0;border-radius:.375rem;' +
+    'padding:.75rem 1.75rem;font-size:.875rem;font-weight:600;cursor:pointer">Sign in to Seclayer</button>' +
+    "</form>" +
+    '<p style="color:#52525b;font-size:.75rem;margin:1.5rem 0 0">This link can be used once and expires 15 minutes after it was sent.</p>' +
+    "</main></body></html>"
+  );
+}
+
 export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
   const { requireAuth, getUserId, cookieOptions, sessionCookie, nmapAvailable } = ctx;
 
@@ -85,11 +129,29 @@ export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
     res.json({ status: "ok", message: "If that email is valid, a sign-in link is on its way.", devLink });
   });
 
+  // Opening the emailed link only CHECKS the token — it never spends it. Mail
+  // security scanners and link prefetchers fetch every URL in a message
+  // automatically (production logs showed ~8 datacenter IPs hitting this within
+  // milliseconds of delivery), so burning the single use here meant a scanner
+  // always redeemed the token first and the human's click failed as "invalid or
+  // expired". The redemption is the POST below, which automated fetchers don't
+  // issue. Same token, same 15-minute single-use guarantee — only the step that
+  // spends it moved.
   app.get("/api/auth/verify", async (req, res) => {
     const token = req.query.token as string | undefined;
+    const email = token ? (await db.peekLoginToken(token)) : null;
+    if (!email) {
+      return res.status(400).send(expiredLinkPage());
+    }
+    res.type("html").send(confirmSignInPage(token!, email));
+  });
+
+  // Redeems the token. Only reached by submitting the confirmation form above.
+  app.post("/api/auth/verify", async (req, res) => {
+    const token = (req.body?.token ?? req.query.token) as string | undefined;
     const email = token ? (await db.consumeLoginToken(token)) : null;
     if (!email) {
-      return res.status(400).send("<h1>Sign-in link invalid or expired</h1><p>Please request a new link from the Seclayer app.</p>");
+      return res.status(400).send(expiredLinkPage());
     }
     const user = (await db.getOrCreateUser(email));
     const session = (await db.createSession(user.id));

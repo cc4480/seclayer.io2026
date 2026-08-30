@@ -85,6 +85,14 @@ export class PostgresDb implements Db {
       [hashToken(raw), email.toLowerCase().trim(), new Date(now + ttlMs).toISOString(), new Date(now).toISOString()]);
     return raw;
   }
+  // Validates a magic-link token without burning it — see db.ts's peekLoginToken
+  // for why the single use must not be spent on the GET.
+  async peekLoginToken(raw: string): Promise<string | null> {
+    const row = await this.get("SELECT * FROM login_tokens WHERE tokenHash = ?", [hashToken(raw)]);
+    if (!row || row.consumedAt) return null;
+    if (new Date(row.expiresAt).getTime() < Date.now()) return null;
+    return row.email;
+  }
   async consumeLoginToken(raw: string): Promise<string | null> {
     const hash = hashToken(raw);
     const row = await this.get("SELECT * FROM login_tokens WHERE tokenHash = ?", [hash]);

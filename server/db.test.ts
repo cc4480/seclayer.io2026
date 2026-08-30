@@ -51,6 +51,23 @@ test('an expired magic-link token is rejected', async () => {
   assert.equal((await db.consumeLoginToken(raw)), null);
 });
 
+// Regression: mail scanners and link prefetchers GET every URL in a delivered
+// message, so merely opening the link must not spend its single use — that made
+// every real sign-in fail as "invalid or expired" in production.
+test('peeking a magic-link token validates it without burning it', async () => {
+  const raw = (await db.createLoginToken('t3c@test.io'));
+  assert.equal((await db.peekLoginToken(raw)), 't3c@test.io');
+  assert.equal((await db.peekLoginToken(raw)), 't3c@test.io', 'peek must be repeatable');
+  // Still redeemable afterwards — exactly once.
+  assert.equal((await db.consumeLoginToken(raw)), 't3c@test.io');
+  assert.equal((await db.peekLoginToken(raw)), null, 'a consumed token no longer peeks');
+});
+
+test('peek rejects expired and unknown magic-link tokens', async () => {
+  assert.equal((await db.peekLoginToken((await db.createLoginToken('t3d@test.io', -1)))), null);
+  assert.equal((await db.peekLoginToken('not-a-real-token')), null);
+});
+
 test('sessions resolve to a user and can be revoked', async () => {
   const u = (await db.getOrCreateUser('t4@test.io'));
   const s = (await db.createSession(u.id));

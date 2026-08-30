@@ -52,6 +52,20 @@ class SqliteDb {
     return raw;
   }
 
+  // Validates a magic-link token WITHOUT burning it, so the sign-in link can be
+  // opened (GET) without spending the single use. Email security scanners and
+  // link prefetchers follow links in messages automatically — several hit this
+  // endpoint within milliseconds of delivery — so consuming on GET meant a
+  // scanner redeemed the token and the human's click always failed as "invalid
+  // or expired". The burn now happens on the POST from the confirmation page
+  // (see routes/auth.ts); automated fetchers don't POST.
+  async peekLoginToken(raw: string): Promise<string | null> {
+    const row: any = this.db.prepare('SELECT * FROM login_tokens WHERE tokenHash = ?').get(hashToken(raw));
+    if (!row || row.consumedAt) return null;
+    if (new Date(row.expiresAt).getTime() < Date.now()) return null;
+    return row.email;
+  }
+
   // Validates and burns a magic-link token, returning the associated email.
   async consumeLoginToken(raw: string): Promise<string | null> {
     const hash = hashToken(raw);
