@@ -7,7 +7,6 @@ import { useMonitoring } from '../hooks/useMonitoring.js';
 import { useNmap } from '../hooks/useNmap.js';
 import ScanLauncher from '../components/dashboard/ScanLauncher.js';
 import CreditPacks from '../components/dashboard/CreditPacks.js';
-import DeepSeekKeyCard from '../components/dashboard/DeepSeekKeyCard.js';
 import ApiKeysPanel from '../components/dashboard/ApiKeysPanel.js';
 import NetworkReconCard from '../components/dashboard/NetworkReconCard.js';
 import ScansTab from '../components/dashboard/ScansTab.js';
@@ -65,9 +64,6 @@ interface DashboardProps {
   freeMode: boolean;
   devSkipDomainVerification: boolean;
   nmapAvailable: boolean;
-  deepseekKeySet: boolean;
-  deepseekKeyPreview: string | null;
-  saveDeepseekKey: (key: string) => Promise<{ ok: boolean; message?: string }>;
   onInitiateScan: (url: string, authHeader?: string, bolaIdentities?: any, activeProbes?: boolean, aggressiveProbes?: boolean) => void;
   onGenerateKey: () => void;
   onRevokeKey: (keyId: string) => void;
@@ -80,7 +76,7 @@ interface DashboardProps {
 
 export default function Dashboard({
   user, scans, apiKeys, credits, transactions, justGeneratedKey, onDismissGeneratedKey, refreshData, freeMode,
-  devSkipDomainVerification, nmapAvailable, deepseekKeySet, deepseekKeyPreview, saveDeepseekKey,
+  devSkipDomainVerification, nmapAvailable,
   onInitiateScan, onGenerateKey, onRevokeKey, onPurchaseCredits, onViewReport, isPerformingAction,
   checkoutNotice, onDismissCheckoutNotice,
 }: DashboardProps) {
@@ -264,9 +260,7 @@ export default function Dashboard({
             {nmapAvailable && (
               <NetworkReconCard nm={nm} userId={user.id} freeMode={freeMode} devSkipDomainVerification={devSkipDomainVerification} />
             )}
-            {freeMode ? (
-              <DeepSeekKeyCard deepseekKeySet={deepseekKeySet} deepseekKeyPreview={deepseekKeyPreview} saveDeepseekKey={saveDeepseekKey} />
-            ) : (
+            {!freeMode && (
               <CreditPacks buyPack={buyPack} setBuyPack={setBuyPack} isBuying={isBuying} isPerformingAction={isPerformingAction} handleBuyCredits={handleBuyCredits} />
             )}
           </div>

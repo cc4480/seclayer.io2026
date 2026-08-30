@@ -240,14 +240,14 @@ export default function DocsPage({ onNavigate }: DocsPageProps) {
 
             <Section id="ai-reports" title="AI-generated reports">
               <p>
-                Every scan produces a complete executive summary out of the box, generated locally and
-                deterministically from the actual findings — no AI key required, and nothing about the report's
-                accuracy depends on one.
+                AI-written reporting is included in every scan: the executive summary and the live scan narration
+                are generated from the actual findings, with no API key to supply and no separate AI bill.
               </p>
               <p>
-                If you add your own DeepSeek API key (billed to your own DeepSeek account), Seclayer upgrades the
-                executive summary and live scan narration to a fuller AI-generated report. It's strictly an
-                upgrade to presentation, never a requirement to get a real, actionable report.
+                The AI writes the narrative, never the findings. Every finding is produced by the scanner itself
+                and backed by its own evidence receipt, so accuracy never depends on the model — and if the AI
+                service is unreachable, the report falls back to a deterministic summary generated locally from
+                those same findings rather than failing.
               </p>
             </Section>
 
@@ -273,8 +273,7 @@ export default function DocsPage({ onNavigate }: DocsPageProps) {
               </p>
               <p>
                 If you generate a developer API key, the raw secret is shown exactly once at creation and is never
-                retrievable again — only a masked preview is stored. A personal DeepSeek key, if you add one, is
-                stored to generate your reports and is never displayed back to you in full.
+                retrievable again — only a masked preview is stored.
               </p>
             </Section>
 

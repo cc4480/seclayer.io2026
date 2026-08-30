@@ -21,10 +21,6 @@ export function useSeclayer() {
   // Network Reconnaissance (nmap) — only present in the self-hosted Docker
   // image; absent (not erroring) everywhere else. Sourced from /api/auth/me.
   const [nmapAvailable, setNmapAvailable] = useState(false);
-  // Personal DeepSeek key (bring-your-own-key) status. The raw key is never sent
-  // to the client — only whether one is set and a masked preview.
-  const [deepseekKeySet, setDeepseekKeySet] = useState(false);
-  const [deepseekKeyPreview, setDeepseekKeyPreview] = useState<string | null>(null);
   // The raw secret of a just-generated API key. The server only ever returns
   // it once (in the POST /api/keys response), so it lives in memory only —
   // never persisted, never re-fetchable, cleared on dismiss or reload.
@@ -80,8 +76,6 @@ export function useSeclayer() {
       setFreeMode(!!userData.freeMode);
       setDevSkipDomainVerification(!!userData.devSkipDomainVerification);
       setNmapAvailable(!!userData.nmapAvailable);
-      setDeepseekKeySet(!!userData.deepseekKeySet);
-      setDeepseekKeyPreview(userData.deepseekKeyPreview ?? null);
 
       // 2. Fetch user's scans list
       const scansRes = await fetch('/api/scans');
@@ -283,27 +277,6 @@ export function useSeclayer() {
     }
   };
 
-  // Save or clear the user's personal DeepSeek key. Returns the outcome so the
-  // card can show inline validation errors; on success it updates the masked
-  // status from the server's response.
-  const saveDeepseekKey = async (key: string): Promise<{ ok: boolean; message?: string }> => {
-    try {
-      const res = await fetch('/api/user/deepseek-key', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) {
-        setDeepseekKeySet(!!data.deepseekKeySet);
-        setDeepseekKeyPreview(data.deepseekKeyPreview ?? null);
-        return { ok: true };
-      }
-      return { ok: false, message: data.message || 'Could not save the key.' };
-    } catch {
-      return { ok: false, message: 'Could not save the key — check your connection and try again.' };
-    }
-  };
 
   const handleLogout = async () => {
     try {
@@ -321,7 +294,6 @@ export function useSeclayer() {
 
   return {
     user, scans, apiKeys, credits, transactions, freeMode, devSkipDomainVerification, nmapAvailable, justGeneratedKey, setJustGeneratedKey,
-    deepseekKeySet, deepseekKeyPreview, saveDeepseekKey,
     currentView, setCurrentView, selectedScanId, setSelectedScanId, showLogin, setShowLogin,
     isPerformingAction, activeScan, checkoutNotice, setCheckoutNotice,
     loadUserContext, handleNavigate, handleStartTrial, onInitiateScan, cancelScan,

@@ -25,8 +25,8 @@ const FAQS: { q: string; a: string }[] = [
     a: 'PROVEN means the exploit was demonstrated end-to-end and Seclayer captured a replayable receipt — the exact request and response, with the proof quoted verbatim from what came back. DETECTED means a real signal was observed that’s worth reporting, but wasn’t demonstrated end-to-end. Both are real and both count toward your score — PROVEN just wears a badge it can back up with evidence.',
   },
   {
-    q: 'Do I need a DeepSeek API key?',
-    a: 'No. Every scan ships a complete report with a real, deterministic local summary — no AI key required. Add your own DeepSeek key, billed to your own DeepSeek account, if you want a deeper AI-generated executive narrative and live scan commentary. It’s an upgrade, never a requirement.',
+    q: 'Do I need an AI API key?',
+    a: 'No. AI-written reports are included — every scan comes back with an AI-generated executive narrative and live scan commentary, with no key to supply and no separate AI bill. If the AI service is ever unreachable, the report still ships with a deterministic summary generated locally from the same findings, so a scan never comes back empty.',
   },
   {
     q: 'What happens to my scan data — is it private?',
