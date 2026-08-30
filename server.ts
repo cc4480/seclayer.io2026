@@ -198,8 +198,41 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
+
+    // The SPA shell is served ONLY for paths the client router actually has a
+    // view for; everything else gets a real 404.
+    //
+    // This is a security-reputation fix, not just tidiness. The previous
+    // catch-all answered 200 + the full app shell for EVERY path, so
+    // /wp-login.php, /admin/login, /verify-account and /secure/signin all
+    // returned a page with a sign-in form. That is indistinguishable from a
+    // credential-harvesting kit — unlimited distinct URLs, all 200, all showing
+    // a login UI — and Google Safe Browsing flagged the whole domain as
+    // "Deceptive pages" (no sample URLs: the pattern itself was the finding),
+    // which made Chrome block every visitor.
+    //
+    // Keep this list in sync with the client router (src/hooks/useSeclayer.ts's
+    // initial view + src/App.tsx's /r/:token share route).
+    const SPA_ROUTES = [/^\/$/, /^\/docs\/?$/, /^\/r\/[A-Za-z0-9_-]+\/?$/];
     app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+      if (SPA_ROUTES.some((re) => re.test(req.path))) {
+        return res.sendFile(path.join(distPath, 'index.html'));
+      }
+      // Deliberately a minimal page with no sign-in affordance — a 404 that
+      // still rendered the app shell would keep the same phishing fingerprint.
+      res.status(404).type('html').send(
+        '<!doctype html><html lang="en"><head><meta charset="utf-8">' +
+          '<meta name="viewport" content="width=device-width,initial-scale=1">' +
+          '<meta name="robots" content="noindex">' +
+          '<title>404 — Page not found</title></head>' +
+          '<body style="font-family:system-ui,-apple-system,sans-serif;background:#0c0c0e;color:#e4e4e7;' +
+          'display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0">' +
+          '<main style="text-align:center;padding:2rem">' +
+          '<h1 style="font-size:1.25rem;margin:0 0 .5rem">404 — Page not found</h1>' +
+          '<p style="color:#a1a1aa;font-size:.875rem;margin:0 0 1.25rem">That page does not exist on Seclayer.</p>' +
+          '<a href="/" style="color:#22c55e;font-size:.875rem">Go to seclayer.app</a>' +
+          '</main></body></html>',
+      );
     });
   }
 
