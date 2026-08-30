@@ -41,7 +41,7 @@ export default function HeadersDrawer({ scan, findings, showRaw, setShowRaw }: P
               <span className="text-[#52525b] text-[9px] uppercase font-bold block mb-1">Captured scan trace</span>
               <p className="text-zinc-200">GET / HTTP/1.1</p>
               <p className="text-zinc-200">Host: {scan.url.replace(/https?:\/\//i, '').replace(/\/.*$/, '')}</p>
-              <p className="text-[#52525b]">User-Agent: Seclayer-Security-Scanner/2.0 (seclayerio.ai)</p>
+              <p className="text-[#52525b]">User-Agent: Seclayer-Security-Scanner/2.0 (seclayer.app)</p>
               <p className="text-zinc-300">→ HTTP {scan.evidence.responseStatus} over {scan.evidence.protocol}</p>
 
               <p className="text-[#22c55e] font-bold mt-3">[EASM — DNS &amp; PERIMETER]</p>

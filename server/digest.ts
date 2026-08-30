@@ -51,7 +51,7 @@ function rowFor({ url, latest, previous }: DigestInput): DigestRow {
 }
 
 // Builds the digest, or null when there are no targets to report on.
-export function buildDigest(inputs: DigestInput[], appUrl = "https://seclayerio.ai"): Digest | null {
+export function buildDigest(inputs: DigestInput[], appUrl = "https://seclayer.app"): Digest | null {
   if (!inputs.length) return null;
 
   const rows = inputs.map(rowFor);

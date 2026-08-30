@@ -7,14 +7,14 @@ submissions). The in-repo artifacts that back it are already committed:
 
 | Artifact | Purpose |
 |---|---|
-| `mcp-server/server.json` | Official MCP Registry manifest (schema `2025-12-11`). Name: **`ai.seclayerio/mcp`**. |
+| `mcp-server/server.json` | Official MCP Registry manifest (schema `2025-12-11`). Name: **`app.seclayer/mcp`**. |
 | `mcp-server/package.json` → `mcpName` | Ownership marker the registry checks against `server.json`'s `name`. |
 | `public/llms.txt` | Machine-readable pitch + the exact MCP install block, so an agent that reads it can wire Seclayer up itself. |
 | `index.html` JSON-LD | `SoftwareApplication` (site + MCP CLI) + `HowTo` + `FAQPage` — answer-engine citable. |
 | `.github/workflows/publish-mcp.yml` | Publishes `@seclayer/mcp` to npm on a `mcp-v*` tag. |
 
-The chosen registry name is the **branded reverse-DNS namespace `ai.seclayerio/mcp`**
-(reverse-DNS of `seclayerio.ai`), authenticated by a DNS TXT record on the domain
+The chosen registry name is the **branded reverse-DNS namespace `app.seclayer/mcp`**
+(reverse-DNS of `seclayer.app`), authenticated by a DNS TXT record on the domain
 — not `io.github.cc4480/...`. A branded name is what you want an agent to say back.
 
 ---
@@ -24,7 +24,7 @@ The chosen registry name is the **branded reverse-DNS namespace `ai.seclayerio/m
 The registry only stores **metadata**; the package must exist on npm first, and it
 must carry the `mcpName` field (already added) so the registry can verify ownership.
 
-1. Confirm `mcp-server/package.json` `version`, `mcpName` (`ai.seclayerio/mcp`), and
+1. Confirm `mcp-server/package.json` `version`, `mcpName` (`app.seclayer/mcp`), and
    `server.json`'s `name` + package `version` all agree.
 2. Ensure the `NPM_TOKEN` repo secret exists (automation token with publish rights
    to the `@seclayer` scope). See the header of `.github/workflows/publish-mcp.yml`.
@@ -57,22 +57,22 @@ tar xf mcp-publisher.tar.gz mcp-publisher.exe
 ```
 (macOS/Linux: `brew install mcp-publisher`.)
 
-### 1b. Authenticate the `ai.seclayerio` namespace via a DNS TXT record
+### 1b. Authenticate the `app.seclayer` namespace via a DNS TXT record
 Run from `mcp-server/` (where `server.json` lives). Ed25519 path:
 ```bash
-MY_DOMAIN="seclayerio.ai"
+MY_DOMAIN="seclayer.app"
 # Generate a signing key pair
 openssl genpkey -algorithm Ed25519 -out key.pem
 # Print the TXT record to add
 PUBLIC_KEY="$(openssl pkey -in key.pem -pubout -outform DER | tail -c 32 | base64)"
 echo "${MY_DOMAIN}. IN TXT \"v=MCPv1; k=ed25519; p=${PUBLIC_KEY}\""
 ```
-Add that TXT record at the **apex of `seclayerio.ai`** in your DNS provider
-(GoDaddy, per the domain registrar). Name `@` / host `seclayerio.ai`, value
+Add that TXT record at the **apex of `seclayer.app`** in your DNS provider
+(IONOS, per the domain registrar). Name `@` / host `seclayer.app`, value
 `v=MCPv1; k=ed25519; p=<PUBLIC_KEY>`. This is unrelated to Seclayer's own
 `_seclayer-challenge` records — no conflict. Wait for propagation (minutes), then:
 ```bash
-MY_DOMAIN="seclayerio.ai"
+MY_DOMAIN="seclayer.app"
 PRIVATE_KEY="$(openssl pkey -in key.pem -noout -text | grep -A3 "priv:" | tail -n +2 | tr -d ' :\n')"
 mcp-publisher login dns --domain "${MY_DOMAIN}" --private-key "${PRIVATE_KEY}"
 ```
@@ -87,7 +87,7 @@ add it to `.gitignore` if you generate it inside the repo.
 ### 1c. Publish and verify
 ```bash
 mcp-publisher publish     # reads ./server.json
-curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=ai.seclayerio/mcp"
+curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=app.seclayer/mcp"
 ```
 
 ### 1d. Version bumps (do all three, keep them equal)
@@ -114,7 +114,7 @@ The rest take a one-time manual submission. Check each off:
 | **npm** | Done via step 0 | npm pages are indexed by search + LLMs; keywords already enriched. |
 
 Suggested one-liner for list/PR submissions:
-> **[Seclayer](https://seclayerio.ai)** (`@seclayer/mcp`) — Run a live black-box
+> **[Seclayer](https://seclayer.app)** (`@seclayer/mcp`) — Run a live black-box
 > penetration test from your agent: scan a URL for SQLi/XSS/SSRF/BOLA and more,
 > with signature-confirmed, low-false-positive findings and agent-ready fixes.
 
@@ -138,6 +138,6 @@ scan my site or API?"
 
 ## 4. Where the names live (change all together)
 
-`ai.seclayerio/mcp` appears in: `mcp-server/server.json` (`name`),
+`app.seclayer/mcp` appears in: `mcp-server/server.json` (`name`),
 `mcp-server/package.json` (`mcpName`), `public/llms.txt`, and this file. If the
 namespace ever changes, update all four.

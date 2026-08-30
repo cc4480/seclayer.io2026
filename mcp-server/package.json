@@ -2,9 +2,9 @@
   "name": "@seclayer/mcp",
   "version": "0.1.0",
   "description": "Model Context Protocol stdio server for Seclayer — run live black-box security pen-tests from Claude Code, Cursor, Windsurf, or any MCP client via the seclayer_scan tool.",
-  "mcpName": "ai.seclayerio/mcp",
+  "mcpName": "app.seclayer/mcp",
   "type": "module",
-  "homepage": "https://seclayerio.ai",
+  "homepage": "https://seclayer.app",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/cc4480/seclayer.io2026.git",

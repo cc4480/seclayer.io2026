@@ -25,7 +25,7 @@ Usage:
 Options:
   -u, --url <url>         Target to scan, including scheme (required).
   -k, --key <key>         Seclayer API key (or env SECLAYER_API_KEY).
-      --api-url <url>     Backend base URL (default https://seclayerio.ai, or env SECLAYER_API_URL).
+      --api-url <url>     Backend base URL (default https://seclayer.app, or env SECLAYER_API_URL).
       --fail-on <sev>     Minimum severity that fails the build: info|low|medium|high|critical (default high).
       --auth-header <v>   Optional Authorization header value for authenticated targets.
   -h, --help              Show this help.
@@ -34,7 +34,7 @@ Exit codes: 0 = passed (nothing at/above threshold), 1 = gate failed, 2 = usage/
 
 export function parseCiArgs(argv: string[], env: NodeJS.ProcessEnv): CiArgs {
   const a: CiArgs = {
-    apiUrl: env.SECLAYER_API_URL || "https://seclayerio.ai",
+    apiUrl: env.SECLAYER_API_URL || "https://seclayer.app",
     failOn: "high",
     apiKey: env.SECLAYER_API_KEY,
   };

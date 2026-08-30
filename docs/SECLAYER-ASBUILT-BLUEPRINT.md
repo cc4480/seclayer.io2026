@@ -22,7 +22,7 @@ As-built map of the real product, not a spec of intent. Seclayer shares its scan
 |---|---|
 | Name | Seclayer (`[ sec ]layer`) |
 | Type | Pay-per-scan black-box pen-testing SaaS + MCP server |
-| Domain | seclayerio.ai |
+| Domain | seclayer.app |
 | Audience | Solo devs, agent-native engineers, automation/CI users, small SaaS operators |
 | License | **Closed source** (deliberate — active exploitation) |
 | Repo | github.com/cc4480/seclayer.io2026 `[VERIFIED ✓]` (memory/spec tracked separately in private `cc4480/seclayer-claude-memory`) |

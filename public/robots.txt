@@ -1,4 +1,4 @@
-# Seclayer — https://seclayerio.ai
+# Seclayer — https://seclayer.app
 # Marketing + docs are open to every crawler, including AI answer engines
 # (GPTBot, ClaudeBot, PerplexityBot, Google-Extended, …): we WANT to be cited.
 # Private, per-report share links and the API are kept out of the index.
@@ -11,4 +11,4 @@ Disallow: /api/
 # Machine-readable product summary for LLMs / answer engines (see llmstxt.org)
 # lives at /llms.txt.
 
-Sitemap: https://seclayerio.ai/sitemap.xml
+Sitemap: https://seclayer.app/sitemap.xml

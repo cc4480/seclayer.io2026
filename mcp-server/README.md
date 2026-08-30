@@ -1,6 +1,6 @@
 # @seclayer/mcp
 
-A [Model Context Protocol](https://modelcontextprotocol.io) stdio server for [Seclayer](https://seclayerio.ai) — run a live black-box security scan directly from Claude Code, Cursor, Windsurf, or any other MCP-compatible AI agent. Exposes three tools: `seclayer_scan` (run a scan), `seclayer_list_scans` (review history), and `seclayer_get_report` (fetch a past report by id).
+A [Model Context Protocol](https://modelcontextprotocol.io) stdio server for [Seclayer](https://seclayer.app) — run a live black-box security scan directly from Claude Code, Cursor, Windsurf, or any other MCP-compatible AI agent. Exposes three tools: `seclayer_scan` (run a scan), `seclayer_list_scans` (review history), and `seclayer_get_report` (fetch a past report by id).
 
 ## Setup
 
@@ -98,7 +98,7 @@ all this server needs.
 | Flag | Env var | Default | Description |
 |---|---|---|---|
 | `--key` / `-k` | `SECLAYER_API_KEY` | *(required)* | Your Seclayer API key. |
-| `--url` / `-u` | `SECLAYER_API_URL` | `https://seclayerio.ai` | Backend base URL — override for local/self-hosted testing. |
+| `--url` / `-u` | `SECLAYER_API_URL` | `https://seclayer.app` | Backend base URL — override for local/self-hosted testing. |
 
 A flag always takes precedence over its corresponding environment variable. If no key is available from either source, the server prints an error to stderr and exits immediately rather than starting.
 
@@ -138,7 +138,7 @@ SECLAYER_API_KEY=... npx -y @seclayer/mcp scan \
 ```
 
 Options: `--url` (required), `--key` (or `SECLAYER_API_KEY`), `--api-url` (or
-`SECLAYER_API_URL`, default `https://seclayerio.ai`), `--fail-on`
+`SECLAYER_API_URL`, default `https://seclayer.app`), `--fail-on`
 (`info|low|medium|high|critical`, default `high`), `--auth-header`. Exit codes:
 **0** passed, **1** gate failed (findings at/above the threshold, listed on
 stderr), **2** usage or scan error. Suppressed (false-positive) findings never

@@ -1,6 +1,6 @@
 // One-shot generator for the MCP Registry DNS-auth signing key. Produces the
 // Ed25519 keypair the `mcp-publisher login dns` flow needs and the exact TXT
-// record to add at the apex of seclayerio.ai. Replaces the openssl recipe in
+// record to add at the apex of seclayer.app. Replaces the openssl recipe in
 // DISTRIBUTION.md §1b for machines without openssl (uses Node's crypto).
 //
 //   node scripts/gen-mcp-registry-key.mjs
@@ -12,7 +12,7 @@ import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const DOMAIN = "seclayerio.ai";
+const DOMAIN = "seclayer.app";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const mcpDir = path.join(here, "..", "mcp-server");
 

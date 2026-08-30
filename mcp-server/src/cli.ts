@@ -61,7 +61,7 @@ export type ConfigResult =
   | { ok: true; config: ResolvedConfig }
   | { ok: false; error: string };
 
-const DEFAULT_BASE_URL = "https://seclayerio.ai";
+const DEFAULT_BASE_URL = "https://seclayer.app";
 
 export function resolveConfig(args: RawArgs, env: NodeJS.ProcessEnv): ConfigResult {
   const apiKey = args.key ?? env.SECLAYER_API_KEY;

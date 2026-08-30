@@ -30,9 +30,9 @@ test('a missing key falls back to a copy-paste placeholder, not empty', () => {
 
 test('the default backend URL is omitted; only a custom one is threaded through', () => {
   assert.equal(mcpServerConfig({ apiKey: KEY }).env.SECLAYER_API_URL, undefined);
-  assert.equal(mcpServerConfig({ apiKey: KEY, baseUrl: 'https://seclayerio.ai' }).env.SECLAYER_API_URL, undefined);
+  assert.equal(mcpServerConfig({ apiKey: KEY, baseUrl: 'https://seclayer.app' }).env.SECLAYER_API_URL, undefined);
   // Trailing slash is normalized away before the comparison.
-  assert.equal(mcpServerConfig({ apiKey: KEY, baseUrl: 'https://seclayerio.ai/' }).env.SECLAYER_API_URL, undefined);
+  assert.equal(mcpServerConfig({ apiKey: KEY, baseUrl: 'https://seclayer.app/' }).env.SECLAYER_API_URL, undefined);
   assert.equal(
     mcpServerConfig({ apiKey: KEY, baseUrl: 'http://localhost:3000' }).env.SECLAYER_API_URL,
     'http://localhost:3000',

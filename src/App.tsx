@@ -52,7 +52,7 @@ function AuthedApp() {
         };
     document.title = meta.title;
     document.querySelector('meta[name="description"]')?.setAttribute('content', meta.desc);
-    const canonical = 'https://seclayerio.ai' + meta.path;
+    const canonical = 'https://seclayer.app' + meta.path;
     document.querySelector('link[rel="canonical"]')?.setAttribute('href', canonical);
     document.querySelector('meta[property="og:url"]')?.setAttribute('content', canonical);
   }, [currentView]);

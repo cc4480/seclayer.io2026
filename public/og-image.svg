@@ -39,5 +39,5 @@
 
   <!-- footer chips -->
   <text x="96" y="560" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="26" fill="#71717a">PROVEN receipts&#160;&#160;·&#160;&#160;7 AppSec pillars&#160;&#160;·&#160;&#160;API-first fuzzing&#160;&#160;·&#160;&#160;auto-fix PRs</text>
-  <text x="1104" y="560" text-anchor="end" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="26" fill="#22c55e">seclayerio.ai</text>
+  <text x="1104" y="560" text-anchor="end" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="26" fill="#22c55e">seclayer.app</text>
 </svg>

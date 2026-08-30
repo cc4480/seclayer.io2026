@@ -126,7 +126,7 @@ export function registerAutofixRoutes(app: express.Express) {
       return res.status(401).json({
         error: config.freeMode
           ? "Invalid API Key — an active key is required."
-          : "Invalid API Key, active key required, or insufficient credits. Get credits at seclayerio.ai.",
+          : "Invalid API Key, active key required, or insufficient credits. Get credits at seclayer.app.",
       });
     }
 

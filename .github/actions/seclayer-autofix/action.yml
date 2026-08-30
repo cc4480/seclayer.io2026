@@ -29,7 +29,7 @@ inputs:
   api-url:
     description: 'Seclayer backend base URL.'
     required: false
-    default: 'https://seclayer.io'
+    default: 'https://seclayer.app'
   auth-header:
     description: 'Optional Authorization header value for scanning authenticated endpoints (e.g. "Bearer …").'
     required: false

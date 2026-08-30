@@ -17,7 +17,7 @@ import { config } from '../config.js';
 // static canonical/OG tags already hardcoded in index.html) so these stay valid
 // even when APP_URL isn't set, e.g. in local dev.
 function siteOrigin(): string {
-  return config.appUrl || 'https://seclayerio.ai';
+  return config.appUrl || 'https://seclayer.app';
 }
 
 function securityContact(): string {
@@ -26,7 +26,7 @@ function securityContact(): string {
   try {
     if (config.appUrl) return `mailto:security@${new URL(config.appUrl).hostname}`;
   } catch { /* fall through */ }
-  return 'mailto:security@seclayerio.ai';
+  return 'mailto:security@seclayer.app';
 }
 
 export function buildRobotsTxt(): string {

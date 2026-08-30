@@ -24,6 +24,48 @@ export interface NmapDetection {
 
 let cached: NmapDetection | null = null;
 
+// Budget for `nmap --version`. Deliberately generous: this runs during boot,
+// concurrently with DB init, worker startup and the HTTP listener, and the
+// probe only has to finish once. A tight budget here is what made detection
+// flaky (see retry note below), and an unavailable-but-present nmap is far more
+// costly than a slow boot.
+const VERSION_PROBE_TIMEOUT_MS = 15_000;
+const VERSION_PROBE_ATTEMPTS = 3;
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Run `nmap --version`, retrying transient failures.
+//
+// Why retry at all: detectNmap()'s result is memoized for the PROCESS lifetime,
+// so a single unlucky probe permanently disables Network Reconnaissance until
+// the next redeploy — the feature silently vanishes on a container that is
+// perfectly capable of running it. This was observed in practice: on one
+// container restart the probe failed with "Command failed: nmap --version"
+// while `nmap --version` run by hand in that same container succeeded
+// immediately (exit 0), i.e. the 5s budget was exceeded under boot-time CPU
+// contention, not a real absence.
+//
+// ENOENT is the one answer worth trusting the first time: the binary genuinely
+// isn't on PATH (the Vercel-hosted deployment, a bare local checkout), and no
+// amount of retrying will conjure it — so bail out immediately and keep the
+// feature cleanly absent without stalling boot.
+async function probeNmapVersion(): Promise<string> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= VERSION_PROBE_ATTEMPTS; attempt++) {
+    try {
+      const { stdout } = await execFileAsync("nmap", ["--version"], {
+        timeout: VERSION_PROBE_TIMEOUT_MS,
+      });
+      return stdout;
+    } catch (err: any) {
+      if (err?.code === "ENOENT") throw err; // binary absent — permanent answer
+      lastErr = err;
+      if (attempt < VERSION_PROBE_ATTEMPTS) await delay(250 * attempt);
+    }
+  }
+  throw lastErr;
+}
+
 // Probe whether nmap can open a raw socket here. An explicit `-sS` (which HARD-
 // requires raw sockets — nmap never silently downgrades an explicitly requested
 // SYN scan) against loopback exits 0 only when the raw socket actually worked;
@@ -46,7 +88,7 @@ async function probeNmapPrivileged(): Promise<boolean> {
 
 export async function detectNmap(): Promise<NmapDetection> {
   try {
-    const { stdout } = await execFileAsync("nmap", ["--version"], { timeout: 5000 });
+    const stdout = await probeNmapVersion();
     const match = /Nmap version (\S+)/.exec(stdout);
     const privileged = await probeNmapPrivileged();
     cached = { available: true, version: match?.[1], privileged };

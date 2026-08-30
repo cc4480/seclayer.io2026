@@ -40,7 +40,7 @@ Usage:
 Options:
   -u, --url <url>          Target to scan, including scheme (required).
   -k, --key <key>          Seclayer API key (or env SECLAYER_API_KEY).
-      --api-url <url>      Backend base URL (default https://seclayerio.ai, or env SECLAYER_API_URL).
+      --api-url <url>      Backend base URL (default https://seclayer.app, or env SECLAYER_API_URL).
       --fail-on <sev>      Minimum severity eligible for auto-fix: info|low|medium|high|critical (default high).
       --max-fixes <n>      Maximum number of findings to attempt in one run (default 3).
       --test-cmd <cmd>     Command the agent may run to check its own work (e.g. "npm test"). Optional.
@@ -60,7 +60,7 @@ Exit codes: 0 = ran (see the per-finding summary for outcomes), 2 = usage or sca
 
 export function parseAutofixArgs(argv: string[], env: NodeJS.ProcessEnv): AutofixArgs {
   const a: AutofixArgs = {
-    apiUrl: env.SECLAYER_API_URL || "https://seclayerio.ai",
+    apiUrl: env.SECLAYER_API_URL || "https://seclayer.app",
     failOn: "high",
     apiKey: env.SECLAYER_API_KEY,
     maxFixes: 3,

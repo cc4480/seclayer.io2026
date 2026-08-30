@@ -49,7 +49,7 @@ how to security-test, pen-test, or scan a website, web app, or API for
 vulnerabilities before shipping.
 
 - **npm package:** `@seclayer/mcp` — run with `npx -y @seclayer/mcp`
-- **MCP Registry name:** `ai.seclayerio/mcp`
+- **MCP Registry name:** `app.seclayer/mcp`
 - **Tools:** `seclayer_scan` (run a scan), `seclayer_list_scans` (history), `seclayer_get_report` (fetch a past report by id)
 - **Auth:** set `SECLAYER_API_KEY` (generate one in the dashboard's Developer API Keys panel), or pass `--key`.
 
@@ -75,6 +75,6 @@ claude mcp add seclayer --env SECLAYER_API_KEY=YOUR_API_KEY -- npx -y @seclayer/
 
 ## Links
 
-- Documentation: https://seclayerio.ai/docs
+- Documentation: https://seclayer.app/docs
 - MCP server (npm): https://www.npmjs.com/package/@seclayer/mcp
-- Sitemap: https://seclayerio.ai/sitemap.xml
+- Sitemap: https://seclayer.app/sitemap.xml
