@@ -7,8 +7,31 @@ import net from "node:net";
 
 // Host-timeout ceilings (a resource cap, not a scope limit — nmap returns
 // whatever it has found so far if it's hit).
-export const DEEP_HOST_TIMEOUT_MINUTES = 25; // exhaustive all-ports sweep
+// A deep sweep is all 65535 ports plus -sV, -O and UNCAPPED `vuln` scripts, and
+// on a platform without CAP_NET_RAW (Railway) it runs as a TCP connect scan,
+// which is markedly slower than SYN. 25 minutes did not fit that work: the scan
+// hit --host-timeout and returned partial results instead of completing, which
+// defeats the point of opting into the exhaustive profile. An hour is a
+// realistic ceiling for a scan the user explicitly asked to be thorough.
+export const DEEP_HOST_TIMEOUT_MINUTES = 60; // exhaustive all-ports sweep
 export const FAST_HOST_TIMEOUT_MINUTES = 6;  // fast default; empirically ~2 min
+
+// Backstop for the whole nmap PROCESS, derived from the profile's host-timeout
+// rather than declared independently. These were two free-standing constants
+// (25m host-timeout vs a 30m process kill) that could silently invert — raise
+// the host-timeout past the process kill and every deep scan would be killed
+// mid-run with no result at all. Deriving it makes that impossible: the process
+// backstop is always the host-timeout plus a margin for nmap's own startup,
+// NSE loading and XML serialization.
+const PROCESS_TIMEOUT_MARGIN_MINUTES = 10;
+export function nmapProcessTimeoutMs(deep = false): number {
+  const envOverride = Number(process.env.NMAP_SCAN_TIMEOUT_MS);
+  const derived =
+    ((deep ? DEEP_HOST_TIMEOUT_MINUTES : FAST_HOST_TIMEOUT_MINUTES) + PROCESS_TIMEOUT_MARGIN_MINUTES) * 60 * 1000;
+  // An explicit override still wins, but never below the derived floor — a too-
+  // small override would reintroduce exactly the truncation this prevents.
+  return envOverride > 0 ? Math.max(envOverride, derived) : derived;
+}
 // Back-compat alias — the deep/full ceiling (was the only exported constant).
 export const DEFAULT_HOST_TIMEOUT_MINUTES = DEEP_HOST_TIMEOUT_MINUTES;
 

@@ -2,14 +2,15 @@
 // streamed live as it arrives — execFile only resolves after the process
 // exits and buffers everything, which would mean no progress ticker.
 import { spawn, type ChildProcess } from "node:child_process";
-import { buildNmapArgs } from "./args.js";
+import { buildNmapArgs, nmapProcessTimeoutMs } from "./args.js";
 import { isNmapPrivileged } from "./detect.js";
 import type { EmitFn } from "../scanEvents.js";
 
-// Hard backstop above --host-timeout (see args.ts), in case nmap itself hangs
-// — this has been observed with some NSE `vuln` scripts independent of
-// --host-timeout. Resource safety, not a scan-scope restriction.
-const DEFAULT_TIMEOUT_MS = Number(process.env.NMAP_SCAN_TIMEOUT_MS) || 30 * 60 * 1000;
+// Hard backstop above --host-timeout, in case nmap itself hangs — this has been
+// observed with some NSE `vuln` scripts independent of --host-timeout. Resource
+// safety, not a scan-scope restriction. Derived per-profile by
+// nmapProcessTimeoutMs (see args.ts) so it can never fall below the
+// host-timeout it is supposed to backstop.
 // Ceiling on buffered XML stdout — prevents unbounded memory growth from a
 // pathological target. A full 65535-port scan's XML is well under 1MB in
 // practice; this is a generous multiple, not a realistic limit.
@@ -42,9 +43,12 @@ export function runNmap(
   scanId: string,
   targetIp: string,
   emit: EmitFn,
-  timeoutMs = DEFAULT_TIMEOUT_MS,
+  timeoutMs?: number,
   deep = false,
 ): Promise<NmapRunResult> {
+  // Falls back to the profile-derived backstop when the caller doesn't pin one,
+  // so a deep scan always gets a process budget larger than its host-timeout.
+  const effectiveTimeoutMs = timeoutMs ?? nmapProcessTimeoutMs(deep);
   // Pick SYN+OS vs. TCP-connect based on the boot-time raw-socket probe, so the
   // scan adapts to platforms (e.g. Railway) that can't open raw sockets. `deep`
   // selects all-ports (-p-) over the fast top-1000 default (see buildNmapArgs).
@@ -66,7 +70,7 @@ export function runNmap(
         if (!child.killed) child.kill("SIGKILL");
       }, 5000);
       t.unref();
-    }, timeoutMs);
+    }, effectiveTimeoutMs);
     hardTimer.unref();
 
     child.stdout!.on("data", (chunk: Buffer) => {
