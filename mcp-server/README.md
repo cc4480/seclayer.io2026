@@ -93,6 +93,50 @@ command `npx` and args `["-y", "@seclayer/mcp"]`, and supply the API key via the
 `SECLAYER_API_KEY` environment variable (or a `--key YOUR_API_KEY` arg). That's
 all this server needs.
 
+### Windows: if the server fails to connect
+
+On Windows, launching through `npx` can fail with **`CONNECTION_CLOSED`** or a
+**connection timeout**, even though the package is installed correctly. `npx` is
+a `.cmd` shim there, so the client ends up spawning `cmd` → `npx` → `node`, and
+the extra process layers can break the stdio pipe the protocol runs over. (The
+first `npx` run also has to download the package, which alone can exceed a
+client's 30-second startup timeout.)
+
+Install the package once and point `node` straight at it instead:
+
+```
+npm install -g @seclayer/mcp
+```
+
+Then use `node` plus the installed path as the command. To find the path:
+
+```
+node -e "console.log(require('path').join(require('child_process').execSync('npm root -g').toString().trim(),'@seclayer','mcp','dist','index.js'))"
+```
+
+Claude Code:
+
+```
+claude mcp add seclayer --env SECLAYER_API_KEY=YOUR_API_KEY -- node "C:\path\from\above\index.js"
+```
+
+Or in JSON config:
+
+```json
+{
+  "mcpServers": {
+    "seclayer": {
+      "command": "node",
+      "args": ["C:\\path\\from\\above\\index.js"],
+      "env": { "SECLAYER_API_KEY": "YOUR_API_KEY" }
+    }
+  }
+}
+```
+
+This runs the same published package — it just removes the shim layers. macOS
+and Linux are unaffected; `npx -y @seclayer/mcp` works there as documented.
+
 ## Configuration
 
 | Flag | Env var | Default | Description |
