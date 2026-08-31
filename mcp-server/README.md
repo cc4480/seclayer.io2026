@@ -95,47 +95,60 @@ all this server needs.
 
 ### Windows: if the server fails to connect
 
-On Windows, launching through `npx` can fail with **`CONNECTION_CLOSED`** or a
-**connection timeout**, even though the package is installed correctly. `npx` is
-a `.cmd` shim there, so the client ends up spawning `cmd` → `npx` → `node`, and
-the extra process layers can break the stdio pipe the protocol runs over. (The
-first `npx` run also has to download the package, which alone can exceed a
-client's 30-second startup timeout.)
+On Windows the documented `npx` command frequently fails, in one of three ways.
+All three are launcher problems, not package problems — the server itself
+answers `initialize` in about a second.
 
-Install the package once and point `node` straight at it instead:
+| Symptom | Cause |
+|---|---|
+| Connection **times out** on first run | `npx` has to download the package before the server starts, which alone can exceed a client's 30-second startup timeout |
+| **`CONNECTION_CLOSED`** | `npx` is a `.cmd` shim, so the client spawns `cmd` → `npx` → `node`; the extra process layers break the stdio pipe the protocol runs over |
+| Works in `claude mcp list`, **times out at session startup** | the config used the bare command `node`. The health check inherits your shell's `PATH`, but the client spawns servers with a different environment, where `node` may not resolve |
+
+The fix for all three is the same: install the package once, then give the
+client **absolute paths for both the interpreter and the script**, so nothing
+depends on `PATH` or a shim.
 
 ```
 npm install -g @seclayer/mcp
 ```
 
-Then use `node` plus the installed path as the command. To find the path:
+Print both absolute paths:
 
 ```
-node -e "console.log(require('path').join(require('child_process').execSync('npm root -g').toString().trim(),'@seclayer','mcp','dist','index.js'))"
+node -e "console.log(process.execPath); console.log(require('path').join(require('child_process').execSync('npm root -g').toString().trim(),'@seclayer','mcp','dist','index.js'))"
 ```
+
+That prints your `node.exe` path first and the installed server path second. Use
+them as `command` and the first argument respectively.
 
 Claude Code:
 
 ```
-claude mcp add seclayer --env SECLAYER_API_KEY=YOUR_API_KEY -- node "C:\path\from\above\index.js"
+claude mcp add seclayer --env SECLAYER_API_KEY=YOUR_API_KEY -- "C:\full\path\to\node.exe" "C:\full\path\to\@seclayer\mcp\dist\index.js"
 ```
 
-Or in JSON config:
+Or in JSON config (note the doubled backslashes — JSON escapes them):
 
 ```json
 {
   "mcpServers": {
     "seclayer": {
-      "command": "node",
-      "args": ["C:\\path\\from\\above\\index.js"],
+      "command": "C:\\full\\path\\to\\node.exe",
+      "args": ["C:\\full\\path\\to\\@seclayer\\mcp\\dist\\index.js"],
       "env": { "SECLAYER_API_KEY": "YOUR_API_KEY" }
     }
   }
 }
 ```
 
-This runs the same published package — it just removes the shim layers. macOS
-and Linux are unaffected; `npx -y @seclayer/mcp` works there as documented.
+This runs the same published package — it only removes the shim and `PATH`
+layers. Restart your client afterwards: MCP servers are loaded at session
+startup, so a newly added server won't appear in a session that is already
+running.
+
+macOS and Linux are unaffected; `npx -y @seclayer/mcp` works there as documented
+above.
 
 ## Configuration
 
