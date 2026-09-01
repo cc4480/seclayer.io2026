@@ -30,8 +30,14 @@ export function useSeclayer() {
   // (/docs) — indexable and directly linkable, unlike dashboard/progress/report
   // which are session-gated or lack a stable id in the path. Initialized from
   // the URL so a direct visit or hard refresh on /docs lands there, not on landing.
-  const [currentView, setCurrentView] = useState<'landing' | 'dashboard' | 'progress' | 'report' | 'docs'>(
-    () => (window.location.pathname.replace(/\/+$/, '') === '/docs' ? 'docs' : 'landing')
+  const [currentView, setCurrentView] = useState<'landing' | 'dashboard' | 'progress' | 'report' | 'docs' | 'privacy' | 'terms'>(
+    () => {
+      const p = window.location.pathname.replace(/\/+$/, '');
+      if (p === '/docs') return 'docs';
+      if (p === '/privacy') return 'privacy';
+      if (p === '/terms') return 'terms';
+      return 'landing';
+    }
   );
   const [selectedScanId, setSelectedScanId] = useState<string | null>(null);
   const [showLogin, setShowLogin] = useState(false);
@@ -138,7 +144,7 @@ export function useSeclayer() {
     // Keep the URL in sync for the two views with a real, stable path; every
     // other view (dashboard/progress/report) is session-gated with no shareable
     // URL of its own, so it collapses back to '/'.
-    const path = view === 'docs' ? '/docs' : '/';
+    const path = view === 'docs' ? '/docs' : view === 'privacy' ? '/privacy' : view === 'terms' ? '/terms' : '/';
     if (window.location.pathname !== path) window.history.pushState({}, '', path);
     // Scroll smoothly back to top on transitions
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -150,6 +156,8 @@ export function useSeclayer() {
     const onPopState = () => {
       const path = window.location.pathname.replace(/\/+$/, '') || '/';
       if (path === '/docs') setCurrentView('docs');
+      else if (path === '/privacy') setCurrentView('privacy');
+      else if (path === '/terms') setCurrentView('terms');
       else if (path === '/') setCurrentView('landing');
     };
     window.addEventListener('popstate', onPopState);

@@ -6,6 +6,7 @@ import ReportViewer from './pages/ReportViewer.js';
 import ScanProgress from './pages/ScanProgress.js';
 import PublicReport from './pages/PublicReport.js';
 import DocsPage from './pages/DocsPage.js';
+import LegalPage from './pages/LegalPage.js';
 import LoginModal from './components/LoginModal.js';
 import { useSeclayer } from './hooks/useSeclayer.js';
 import { sameTarget } from './lib/targetUrl.js';
@@ -43,6 +44,18 @@ function AuthedApp() {
           path: '/docs',
           title: 'Documentation — how each Seclayer scan works | Seclayer',
           desc: 'How Seclayer scans: the seven AppSec pillars, active red-team probes, API-first (OpenAPI/Swagger) testing, network reconnaissance, and the PROVEN vs DETECTED evidence model.',
+        }
+      : currentView === 'privacy'
+      ? {
+          path: '/privacy',
+          title: 'Privacy Policy | Seclayer',
+          desc: 'What Seclayer stores to run a scan, which processors see it, how long it is kept, and how to have it deleted.',
+        }
+      : currentView === 'terms'
+      ? {
+          path: '/terms',
+          title: 'Terms of Service | Seclayer',
+          desc: 'Terms for using Seclayer, including the requirement to only scan systems you own or are explicitly authorized to test.',
         }
       : {
           path: '/',
@@ -88,6 +101,9 @@ function AuthedApp() {
         )}
 
         {currentView === 'docs' && <DocsPage onNavigate={handleNavigate} />}
+
+        {currentView === 'privacy' && <LegalPage kind="privacy" onNavigate={handleNavigate} />}
+        {currentView === 'terms' && <LegalPage kind="terms" onNavigate={handleNavigate} />}
 
         {currentView === 'dashboard' && user && (
           <Dashboard

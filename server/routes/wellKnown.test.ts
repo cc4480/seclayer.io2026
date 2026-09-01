@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { AddressInfo } from 'node:net';
 import { registerWellKnownRoutes, buildRobotsTxt, buildSecurityTxt, buildSitemapXml } from './wellKnown.js';
 
@@ -75,4 +78,32 @@ test('serves the files over HTTP as text/plain', async () => {
     assert.equal(sitemap.status, 200);
     assert.match(sitemap.headers.get('content-type') || '', /application\/xml/);
   });
+});
+
+// The sitemap tells crawlers which URLs exist; server.ts's SPA_ROUTES decides
+// which URLs actually return the app rather than a 404. They are declared in
+// separate files, so a page added to one and not the other is advertised to
+// Google and then answers 404 — invisible until a crawler finds it.
+test('every page in the sitemap is a path the server actually serves', () => {
+  const serverSrc = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'server.ts'),
+    'utf8',
+  );
+  const routesLine = serverSrc.match(/const SPA_ROUTES = \[(.*?)\];/s);
+  assert.ok(routesLine, 'could not find SPA_ROUTES in server.ts');
+
+  // Rebuild the regexes from source and check each advertised path against them.
+  const patterns = (routesLine![1].match(/\/\^[^,]*?\$\//g) ?? []).map((literal) => {
+    const body = literal.slice(1, literal.lastIndexOf('/'));
+    return new RegExp(body);
+  });
+  assert.ok(patterns.length > 0, 'parsed no route patterns from SPA_ROUTES');
+
+  for (const loc of buildSitemapXml().match(/<loc>([^<]+)<\/loc>/g) ?? []) {
+    const path = new URL(loc.replace(/<\/?loc>/g, '')).pathname;
+    assert.ok(
+      patterns.some((re) => re.test(path)),
+      `sitemap advertises ${path}, but SPA_ROUTES would 404 it`,
+    );
+  }
 });

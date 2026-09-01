@@ -213,7 +213,7 @@ async function startServer() {
     //
     // Keep this list in sync with the client router (src/hooks/useSeclayer.ts's
     // initial view + src/App.tsx's /r/:token share route).
-    const SPA_ROUTES = [/^\/$/, /^\/docs\/?$/, /^\/r\/[A-Za-z0-9_-]+\/?$/];
+    const SPA_ROUTES = [/^\/$/, /^\/docs\/?$/, /^\/privacy\/?$/, /^\/terms\/?$/, /^\/r\/[A-Za-z0-9_-]+\/?$/];
     app.get('*', (req, res) => {
       if (SPA_ROUTES.some((re) => re.test(req.path))) {
         return res.sendFile(path.join(distPath, 'index.html'));

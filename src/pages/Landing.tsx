@@ -23,6 +23,13 @@ export default function Landing({ onStartTrial, onNavigate, onSelectPack }: Land
       <footer className="border-t border-[#27272a] bg-[#0c0c0e] py-12 text-[#a1a1aa] text-xs font-mono text-center">
         <div className="max-w-7xl mx-auto px-6 space-y-4">
           <p className="text-[11px]">Domain: <strong className="text-white">seclayer.app</strong> • Stack: React + Express + DeepSeek AI</p>
+          <nav className="flex items-center justify-center gap-4 text-[11px]" aria-label="Legal">
+            <button onClick={() => onNavigate('docs')} className="text-[#52525b] hover:text-[#22c55e] transition-colors cursor-pointer">Docs</button>
+            <span className="text-[#27272a]" aria-hidden="true">•</span>
+            <button onClick={() => onNavigate('privacy')} className="text-[#52525b] hover:text-[#22c55e] transition-colors cursor-pointer" id="footer-privacy">Privacy Policy</button>
+            <span className="text-[#27272a]" aria-hidden="true">•</span>
+            <button onClick={() => onNavigate('terms')} className="text-[#52525b] hover:text-[#22c55e] transition-colors cursor-pointer" id="footer-terms">Terms of Service</button>
+          </nav>
           <p className="text-[#52525b]">© 2026 Seclayer Penetration Technologies. All rights reserved. Support: hello@seclayer.app</p>
         </div>
       </footer>

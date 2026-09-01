@@ -42,9 +42,10 @@ export function buildRobotsTxt(): string {
 }
 
 // Every publicly indexable, unauthenticated page. Keep in sync with the SPA's
-// path-based routes in useSeclayer.ts (currently just '/' and '/docs' — every
-// other view is session-gated or has no stable URL of its own).
-const PUBLIC_PAGES = ['/', '/docs'];
+// path-based routes in useSeclayer.ts AND with SPA_ROUTES in server.ts — a page
+// listed here that isn't in SPA_ROUTES is advertised to crawlers and then
+// answers 404. Every other view is session-gated or has no stable URL of its own.
+const PUBLIC_PAGES = ['/', '/docs', '/privacy', '/terms'];
 
 export function buildSitemapXml(): string {
   const origin = siteOrigin();
