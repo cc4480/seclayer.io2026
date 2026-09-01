@@ -1,10 +1,34 @@
 # --- Build stage: install all deps, build client + server, drop dev deps ---
 FROM node:22-bookworm-slim AS build
 WORKDIR /app
+
+# Browsers are fetched explicitly below, never by playwright's postinstall: the
+# install path must be a known, copyable location (the default is a HOME-relative
+# cache that differs between stages), and package.json's allowScripts list
+# governs which packages may run lifecycle scripts at all.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
 COPY package*.json ./
 RUN npm ci
 COPY . .
 RUN npm run build && npm prune --omit=dev
+
+# Chromium for the DOM-XSS probe and the crawl renderer (both gated behind
+# ENABLE_BROWSER_RENDERING). Installed AFTER the prune so it isn't discarded,
+# and only the browser — `--with-deps` would apt-install libraries into this
+# stage, which the runtime stage never receives; those are installed there
+# directly instead.
+#
+# Invoked through node against playwright's own cli.js rather than `npx
+# playwright`: npx resolves the binary through node_modules/.bin, which is not
+# reliably populated here (it exited 127, "command not found", even with
+# playwright present in the lockfile). Calling the CLI entrypoint directly has
+# no such dependency. The `ls` afterwards turns a silently-missing browser into
+# a failed build — without it, the image would ship fine and the DOM-XSS probe
+# would just never run at runtime.
+RUN node node_modules/playwright/cli.js install chromium && \
+    ls -d /ms-playwright/chromium-* > /dev/null
 
 # --- Runtime stage: minimal image with prod deps + built artifacts ---
 FROM node:22-bookworm-slim AS runtime
@@ -31,8 +55,17 @@ ENV NODE_ENV=production \
 # runs in unprivileged TCP-connect mode (-sT, no -O). Either way the feature is
 # PRESENT and functional; it stays absent only when the binary is missing (e.g.
 # the Vercel-hosted deployment), which the app feature-detects and hides cleanly.
+# Shared libraries headless Chromium links against, for the DOM-XSS probe and
+# crawl renderer. Listed explicitly rather than via `playwright install-deps`
+# because that needs the playwright CLI and npx, and npx is deliberately removed
+# from this image below. Installed in the same layer as nmap to avoid a second
+# apt cache round-trip.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends nmap && \
+    apt-get install -y --no-install-recommends \
+      nmap \
+      libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libatspi2.0-0 libcups2 \
+      libdrm2 libgbm1 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
+      libxrandr2 libpango-1.0-0 libcairo2 libasound2 libxshmfence1 fonts-liberation && \
     rm -rf /var/lib/apt/lists/*
 
 # The base image ships a global `npm` CLI (with its own vendored
@@ -55,6 +88,13 @@ RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./
+
+# The Chromium build fetched in the build stage. PLAYWRIGHT_BROWSERS_PATH must
+# match the path it was installed to there, or playwright looks in a
+# HOME-relative cache that doesn't exist here and reports the browser as missing
+# — which the app would surface as the DOM-XSS probe silently not running.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+COPY --from=build /ms-playwright /ms-playwright
 
 # SQLite database lives on a persistent volume, attached at deploy time (e.g.
 # docker-compose.yml's `seclayer-data:/data`, or a Railway Volume mounted at
