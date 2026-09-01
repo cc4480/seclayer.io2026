@@ -10,6 +10,13 @@ import type { NmapParsedResult, NmapParsedPort, NmapParsedOsMatch, NmapParsedScr
 const parser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: "@_",
+  // NSE output is multi-line, and nmap escapes those newlines/tabs as NUMERIC
+  // character references (&#xa;, &#x9;) inside the script element's `output`
+  // attribute. fast-xml-parser decodes the five named XML entities by default
+  // but leaves numeric ones untouched, so without this every script result
+  // rendered as one unreadable line with literal "&#xa;" between fields.
+  // processEntities does NOT cover this case — only htmlEntities does.
+  htmlEntities: true,
   // Force these to always be arrays, even when nmap emits exactly one, so
   // downstream code never has to branch on "object vs array".
   isArray: (name) => ["host", "port", "osmatch", "script"].includes(name),

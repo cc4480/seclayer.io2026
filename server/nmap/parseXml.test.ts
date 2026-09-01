@@ -139,3 +139,26 @@ test('compileNmapResult produces an empty port/finding list for a down host', ()
   assert.deepEqual(result.ports, []);
   assert.deepEqual(result.vulnFindings, []);
 });
+
+// Regression: nmap escapes the newlines and tabs inside multi-line NSE output as
+// NUMERIC character references (&#xa;, &#x9;) in the script element's `output`
+// attribute. fast-xml-parser decodes the five named XML entities by default but
+// not numeric ones, so a scan's script results rendered in the UI as a single
+// unreadable line with literal "&#xa;" between every field.
+test('multi-line NSE output has its numeric entity escapes decoded', () => {
+  const xml =
+    '<?xml version="1.0"?><nmaprun><host><status state="up"/>' +
+    '<address addr="203.0.113.10" addrtype="ipv4"/><ports><port protocol="tcp" portid="443">' +
+    '<state state="open"/><service name="https"/>' +
+    '<script id="http-slowloris-check" output="VULNERABLE:&#xa;  Slowloris DOS attack&#xa;    State: LIKELY VULNERABLE&#xa;    IDs:&#x9;CVE:CVE-2007-6750"/>' +
+    '</port></ports></host></nmaprun>';
+
+  const parsed = parseNmapXml(xml);
+  const script = parsed.ports[0].scripts[0];
+
+  assert.equal(script.id, 'http-slowloris-check');
+  assert.ok(!script.output.includes('&#x'), `numeric entities must be decoded, got: ${script.output}`);
+  assert.ok(script.output.includes('\n'), 'newlines must survive as real line breaks');
+  assert.ok(script.output.includes('\t'), 'tabs must survive as real tabs');
+  assert.match(script.output, /^VULNERABLE:\n {2}Slowloris DOS attack\n/);
+});
