@@ -101,9 +101,14 @@ answers `initialize` in about a second.
 
 | Symptom | Cause |
 |---|---|
-| Connection **times out** on first run | `npx` has to download the package before the server starts, which alone can exceed a client's 30-second startup timeout |
+| Connection **times out** | `npx` re-resolves the package against the registry on *every* start, not just the first. Measured on Windows: **105 seconds** to reach `initialize`, against a 30-second client startup limit — so it never connects. The same server launched directly answers in **1.4 seconds** |
 | **`CONNECTION_CLOSED`** | `npx` is a `.cmd` shim, so the client spawns `cmd` → `npx` → `node`; the extra process layers break the stdio pipe the protocol runs over |
 | Works in `claude mcp list`, **times out at session startup** | the config used the bare command `node`. The health check inherits your shell's `PATH`, but the client spawns servers with a different environment, where `node` may not resolve |
+
+Note that the first row is a *startup* problem, not a broken package: driven by
+hand, `npx -y @seclayer/mcp` returns a correct tool list — it just takes far
+longer than any MCP client will wait. macOS and Linux don't hit this; npx
+typically starts there in a second or two.
 
 The fix for all three is the same: install the package once, then give the
 client **absolute paths for both the interpreter and the script**, so nothing
