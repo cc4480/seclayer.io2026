@@ -6,6 +6,7 @@ import { config } from "../config.js";
 import { deepseekKeyStatus } from "./deepseekKeyStatus.js";
 import { rateLimit } from "../rateLimit.js";
 import { sendEmail, buildMagicLinkEmail, isEmailConfigured } from "../email.js";
+import { verifyGoogleIdToken } from "../googleAuth.js";
 import type { RouteContext } from "./context.js";
 
 // Minimal server-rendered pages for the magic-link confirmation step. Plain
@@ -157,6 +158,35 @@ export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
     const session = (await db.createSession(user.id));
     res.cookie(sessionCookie, session, cookieOptions);
     res.redirect("/");
+  });
+
+  // Public, pre-auth: the login form has no session yet, so it can't learn the
+  // client id from /api/auth/me. Returns null when Google sign-in isn't
+  // configured, which is how the client decides not to render the button.
+  // The client id is public by design — it ships in every GIS page.
+  app.get("/api/auth/providers", (_req, res) => {
+    res.json({ googleClientId: config.googleClientId ?? null });
+  });
+
+  // "Sign in with Google". Verifies the ID token, then joins the SAME path the
+  // magic link ends in — getOrCreateUser + createSession + the session cookie —
+  // so both methods produce identical sessions and identity stays keyed on the
+  // email address. A Google sign-in with an address that already has a
+  // magic-link account therefore lands in that same account rather than
+  // creating a duplicate.
+  app.post("/api/auth/google", requestLinkLimiter, async (req, res) => {
+    if (!config.googleClientId) {
+      return res.status(503).json({ status: "error", message: "Google sign-in is not configured on this deployment." });
+    }
+    const credential = typeof req.body?.credential === "string" ? req.body.credential : "";
+    const identity = await verifyGoogleIdToken(credential);
+    if (!identity) {
+      return res.status(401).json({ status: "error", message: "That Google sign-in could not be verified. Please try again." });
+    }
+    const user = (await db.getOrCreateUser(identity.email));
+    const session = (await db.createSession(user.id));
+    res.cookie(sessionCookie, session, cookieOptions);
+    res.json({ status: "ok" });
   });
 
   app.post("/api/auth/logout", async (req, res) => {

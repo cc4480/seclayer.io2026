@@ -54,6 +54,11 @@ export const config = {
   appVersion: clean(process.env.APP_VERSION) || 'dev',
   appUrl: clean(process.env.APP_URL, 'MY_APP_URL')?.replace(/\/+$/, ''),
   deepseekConfigured: !!clean(process.env.DEEPSEEK_API_KEY, 'MY_DEEPSEEK_API_KEY'),
+  // "Sign in with Google" (Google Identity Services). Public value — it ships in
+  // the client bundle by design, so it is served to the login form rather than
+  // kept secret. Absent = the button is simply not offered and the magic-link
+  // flow is unchanged, so deploying this code with the var unset is a no-op.
+  googleClientId: clean(process.env.GOOGLE_CLIENT_ID, 'MY_GOOGLE_CLIENT_ID'),
   emailConfigured: !!clean(process.env.RESEND_API_KEY, 'MY_RESEND_API_KEY'),
   stripeConfigured,
   freeMode,

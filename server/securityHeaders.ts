@@ -14,16 +14,29 @@ import type { Request, Response, NextFunction } from 'express';
 //   - font-src data: — belt-and-suspenders for any inlined font.
 // frame-ancestors 'none' also closes the clickjacking finding at the modern
 // layer; X-Frame-Options: DENY below keeps legacy browsers covered.
+// Google Identity Services ("Sign in with Google") is the ONLY third-party
+// origin this policy admits, and only on the four directives its button
+// genuinely needs: the loader script, the iframe the button/One Tap renders in,
+// the token endpoint it calls, and its stylesheet. Scoped to the /gsi/ paths
+// rather than all of accounts.google.com. Without these the button fails
+// SILENTLY and only in production — dev serves no CSP at all — so it is kept
+// beside the directives themselves rather than discovered later.
+const GSI_SCRIPT = 'https://accounts.google.com/gsi/client';
+const GSI_FRAME = 'https://accounts.google.com/gsi/';
+const GSI_CONNECT = 'https://accounts.google.com/gsi/';
+const GSI_STYLE = 'https://accounts.google.com/gsi/style';
+
 export const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
   "base-uri 'self'",
   "object-src 'none'",
   "frame-ancestors 'none'",
-  "script-src 'self'",
-  "style-src 'self' 'unsafe-inline'",
+  `script-src 'self' ${GSI_SCRIPT}`,
+  `style-src 'self' 'unsafe-inline' ${GSI_STYLE}`,
   "img-src 'self' data:",
   "font-src 'self' data:",
-  "connect-src 'self'",
+  `connect-src 'self' ${GSI_CONNECT}`,
+  `frame-src ${GSI_FRAME}`,
   "form-action 'self'",
 ].join('; ');
 

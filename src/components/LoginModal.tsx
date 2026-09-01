@@ -1,5 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Shield, Mail, Check, RefreshCw, X, ArrowRight, AlertTriangle } from 'lucide-react';
+
+// Google Identity Services attaches itself to window.google once its script
+// loads. Declared loosely rather than pulling in @types/google.one-tap for the
+// three fields this component touches.
+declare global {
+  interface Window {
+    google?: any;
+  }
+}
+
+const GSI_SRC = 'https://accounts.google.com/gsi/client';
 
 interface LoginModalProps {
   onClose: () => void;
@@ -11,6 +22,73 @@ export default function LoginModal({ onClose }: LoginModalProps) {
   const [isMagicLinkSent, setIsMagicLinkSent] = useState(false);
   const [devLink, setDevLink] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [googleClientId, setGoogleClientId] = useState<string | null>(null);
+  const googleButtonRef = useRef<HTMLDivElement | null>(null);
+
+  // Ask the server whether Google sign-in is configured. When it isn't, the
+  // whole block below never renders and this modal is exactly as it was.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/auth/providers')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!cancelled && d?.googleClientId) setGoogleClientId(d.googleClientId); })
+      .catch(() => { /* Google sign-in stays hidden; magic link is unaffected */ });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Load the GIS script once the client id is known, then render Google's own
+  // button into the div below. The button must be rendered by GIS itself — a
+  // hand-built button can't produce a credential.
+  useEffect(() => {
+    if (!googleClientId) return;
+    let cancelled = false;
+
+    const onCredential = async (response: { credential?: string }) => {
+      if (!response?.credential) return;
+      setIsSubmitting(true);
+      setError(null);
+      try {
+        const res = await fetch('/api/auth/google', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ credential: response.credential }),
+        });
+        if (res.ok) {
+          // The session cookie is set; reload so the app boots authenticated.
+          window.location.reload();
+          return;
+        }
+        const data = await res.json().catch(() => ({}));
+        setError(data.message || 'Could not sign in with Google. Please try again.');
+      } catch {
+        setError('Network error signing in with Google. Please try again.');
+      } finally {
+        setIsSubmitting(false);
+      }
+    };
+
+    const init = () => {
+      if (cancelled || !window.google?.accounts?.id || !googleButtonRef.current) return;
+      window.google.accounts.id.initialize({ client_id: googleClientId, callback: onCredential });
+      window.google.accounts.id.renderButton(googleButtonRef.current, {
+        theme: 'filled_black', size: 'large', width: 320, text: 'continue_with', shape: 'rectangular',
+      });
+    };
+
+    if (window.google?.accounts?.id) { init(); return () => { cancelled = true; }; }
+
+    // Reuse the tag if a previous mount already added it.
+    let script = document.querySelector<HTMLScriptElement>(`script[src="${GSI_SRC}"]`);
+    if (!script) {
+      script = document.createElement('script');
+      script.src = GSI_SRC;
+      script.async = true;
+      script.defer = true;
+      document.head.appendChild(script);
+    }
+    script.addEventListener('load', init);
+    return () => { cancelled = true; script?.removeEventListener('load', init); };
+  }, [googleClientId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -88,6 +166,20 @@ export default function LoginModal({ onClose }: LoginModalProps) {
             )}
           </div>
         ) : (
+          <>
+            {/* Rendered by Google Identity Services itself; absent entirely when
+                GOOGLE_CLIENT_ID isn't configured on the server. */}
+            {googleClientId && (
+              <div className="space-y-4">
+                <div ref={googleButtonRef} className="flex justify-center" id="google-signin-button" />
+                <div className="flex items-center gap-3" aria-hidden="true">
+                  <span className="h-px flex-1 bg-[#27272a]" />
+                  <span className="text-[10px] font-mono text-[#52525b] uppercase tracking-wider">or</span>
+                  <span className="h-px flex-1 bg-[#27272a]" />
+                </div>
+              </div>
+            )}
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="text-[10px] font-mono text-[#52525b] uppercase block mb-1.5 ml-1">Email address</label>
@@ -131,6 +223,7 @@ export default function LoginModal({ onClose }: LoginModalProps) {
               )}
             </button>
           </form>
+          </>
         )}
 
       </div>

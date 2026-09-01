@@ -35,13 +35,31 @@ test('HSTS and CSP are production-only (dev stays HMR-friendly)', () => {
 // The whole point of the finding fix: a CSP is now present AND it is not
 // self-defeatingly permissive on scripts.
 test('the CSP is strict on scripts but grants the SPA the inline styles/data images it needs', () => {
-  assert.match(CONTENT_SECURITY_POLICY, /(^|; )script-src 'self'(;|$)/);
+  // 'self' first, then only the Google Identity Services loader — the single
+  // third-party script origin this app admits, for "Sign in with Google".
+  assert.match(CONTENT_SECURITY_POLICY, /(^|; )script-src 'self' https:\/\/accounts\.google\.com\/gsi\/client(;|$)/);
   assert.ok(!/script-src[^;]*'unsafe-inline'/.test(CONTENT_SECURITY_POLICY), "script-src must not allow 'unsafe-inline'");
   assert.ok(!/'unsafe-eval'/.test(CONTENT_SECURITY_POLICY), "CSP must not allow 'unsafe-eval'");
   assert.match(CONTENT_SECURITY_POLICY, /style-src 'self' 'unsafe-inline'/);
   assert.match(CONTENT_SECURITY_POLICY, /img-src 'self' data:/);
   assert.match(CONTENT_SECURITY_POLICY, /frame-ancestors 'none'/);
   assert.match(CONTENT_SECURITY_POLICY, /object-src 'none'/);
+});
+
+// Any third-party origin in this policy is a place an attacker could serve
+// script from if that origin were ever compromised or its path loosened, so the
+// allowlist is asserted exhaustively rather than only checked for what it adds.
+test('accounts.google.com is the ONLY third-party origin, and only on the GSI paths', () => {
+  const origins = CONTENT_SECURITY_POLICY.match(/https?:\/\/[^\s;]+/g) ?? [];
+  for (const o of origins) {
+    assert.ok(
+      o.startsWith('https://accounts.google.com/gsi/'),
+      `unexpected third-party origin in CSP: ${o}`,
+    );
+  }
+  // The button renders in a Google-served iframe; without frame-src it would
+  // fall back to default-src 'self' and be blocked in production only.
+  assert.match(CONTENT_SECURITY_POLICY, /frame-src https:\/\/accounts\.google\.com\/gsi\//);
 });
 
 test('the middleware always calls next()', () => {
