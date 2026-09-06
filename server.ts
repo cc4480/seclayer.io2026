@@ -1,6 +1,8 @@
 import './server/env.js'; // must run first: loads .env before any module reads process.env
 import express from 'express';
 import path from 'path';
+import { metaForPath, applyPageMeta } from './server/pageMeta.js';
+import fs from 'fs';
 import cookieParser from 'cookie-parser';
 import { db } from './server/db.js';
 import { config, validateConfigOnBoot } from './server/config.js';
@@ -214,9 +216,22 @@ async function startServer() {
     // Keep this list in sync with the client router (src/hooks/useSeclayer.ts's
     // initial view + src/App.tsx's /r/:token share route).
     const SPA_ROUTES = [/^\/$/, /^\/docs\/?$/, /^\/privacy\/?$/, /^\/terms\/?$/, /^\/r\/[A-Za-z0-9_-]+\/?$/];
+    // Read once. The shell only changes on deploy, and re-reading it per
+    // request would put a disk hit in front of every page view.
+    const shellPath = path.join(distPath, 'index.html');
+    let shellHtml: string | null = null;
+    const shell = (): string => {
+      if (shellHtml === null) shellHtml = fs.readFileSync(shellPath, 'utf-8');
+      return shellHtml;
+    };
+
     app.get('*', (req, res) => {
       if (SPA_ROUTES.some((re) => re.test(req.path))) {
-        return res.sendFile(path.join(distPath, 'index.html'));
+        const meta = metaForPath(req.path);
+        // The homepage's metadata is already correct in the built file, so it
+        // is sent untouched rather than rewritten with a copy of itself.
+        if (!meta) return res.sendFile(shellPath);
+        return res.type('html').send(applyPageMeta(shell(), meta));
       }
       // Deliberately a minimal page with no sign-in affordance — a 404 that
       // still rendered the app shell would keep the same phishing fingerprint.
