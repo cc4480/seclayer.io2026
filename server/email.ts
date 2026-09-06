@@ -5,6 +5,13 @@
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const EMAIL_FROM = process.env.EMAIL_FROM || 'Seclayer <onboarding@resend.dev>';
 
+// onboarding@resend.dev and the seclayer.app From address are both send-only —
+// nothing reads mail sent back to them, so a customer's reply to a magic-link
+// or digest email vanishes silently unless this is set to an inbox a human
+// actually reads. Left unset, no reply_to header is attached, which is honest
+// rather than pointing replies at a black hole.
+const REPLY_TO_EMAIL = process.env.REPLY_TO_EMAIL?.trim() || undefined;
+
 export function isEmailConfigured(): boolean {
   return !!RESEND_API_KEY;
 }
@@ -33,6 +40,7 @@ export async function sendEmail(input: SendEmailInput): Promise<void> {
     },
     body: JSON.stringify({
       from: EMAIL_FROM,
+      ...(REPLY_TO_EMAIL ? { reply_to: REPLY_TO_EMAIL } : {}),
       to: input.to,
       subject: input.subject,
       html: input.html,
