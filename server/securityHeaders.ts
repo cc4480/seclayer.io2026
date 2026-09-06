@@ -55,6 +55,16 @@ export function securityHeaders({ isProd }: SecurityHeaderOptions) {
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    // Deny the powerful features outright rather than leaving them unstated:
+    // nothing here uses a camera, microphone, location or payment handler, and
+    // an absent Permissions-Policy grants by default rather than withholding.
+    res.setHeader(
+      'Permissions-Policy',
+      'camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()',
+    );
+    // Severs this origin from any window that opened it, so a page we link to
+    // cannot reach back through window.opener.
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
     if (isProd) {
       res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
       res.setHeader('Content-Security-Policy', CONTENT_SECURITY_POLICY);

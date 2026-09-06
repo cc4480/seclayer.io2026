@@ -19,6 +19,12 @@ test('baseline headers are set on every response regardless of env', () => {
     assert.equal(headers['X-Frame-Options'], 'DENY');
     assert.equal(headers['X-Content-Type-Options'], 'nosniff');
     assert.equal(headers['Referrer-Policy'], 'strict-origin-when-cross-origin');
+    // Both of these are checked by our own scanner, so their absence would be
+    // a finding we would raise against somebody else's site.
+    assert.equal(headers['Cross-Origin-Opener-Policy'], 'same-origin');
+    assert.match(headers['Permissions-Policy'] as string, /camera=\(\)/);
+    assert.match(headers['Permissions-Policy'] as string, /microphone=\(\)/);
+    assert.match(headers['Permissions-Policy'] as string, /geolocation=\(\)/);
   }
 });
 
