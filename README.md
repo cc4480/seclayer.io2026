@@ -1,5 +1,17 @@
 # Seclayer
 
+> **Repository identity.** This repo (`seclayer.io2026`) is **Seclayer**,
+> deployed at **seclayer.app** on the Railway project `seclayer-app`.
+>
+> It is **not** SecScan. SecScan is a separate product in a separate repo
+> (`VibeScan-Enterprise-Build`, deployed at secscan.us) with no shared git
+> history. Seclayer is the higher tier: everything SecScan does, plus real
+> nmap port/service scanning and the red-team attack modules in
+> `server/redTeam/`. Data lives in SQLite on a Railway volume
+> (`DB_PATH=/data/seclayer.sqlite`), not Postgres.
+>
+> The two launch separately. Never deploy one to the other's Railway service.
+
 Pay-Per-Scan black-box penetration testing SaaS with an MCP scan endpoint.
 
 Seclayer runs real black-box checks against a target URL, then enriches the
