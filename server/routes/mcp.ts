@@ -7,6 +7,7 @@ import { db } from "../db.js";
 import { config } from "../config.js";
 import { rateLimit } from "../rateLimit.js";
 import { runDiagnostics, compileStaticFindings, compileScanEvidence, assertScanTargetSafe } from "../scanner.js";
+import { scanSlots } from "../scanWorker.js";
 import { generateAiReport } from "../deepseek.js";
 import { activeProbesUnlocked } from "../activeProbeGate.js";
 import type { RouteContext } from "./context.js";
@@ -66,8 +67,21 @@ export function registerMcpRoutes(app: express.Express, ctx: RouteContext) {
       // "Full Attack" toggle (see server/routes/scans.ts).
       const allowAggressiveProbes = allowActiveProbes && aggressiveProbes === true;
 
-      // Runs scan diagnostic synchronously for MCP tools context
-      const diagnostics = await runDiagnostics(url, authHeader, { allowActiveProbes, allowAggressiveProbes, oob: ctx.oobCollaborator, scanId: scan.id });
+      // Runs the scan synchronously — an MCP client expects the finished report
+      // in this response, so this path cannot be made asynchronous like the
+      // dashboard's.
+      //
+      // But it MUST still take a slot from the same per-instance pool. Without
+      // it this endpoint was capped by nothing: N concurrent MCP requests
+      // started N concurrent scans, ignoring maxConcurrentScans entirely, which
+      // is the unbounded burst that cap exists to prevent — and an OOM here
+      // kills every other scan on the instance, not just this one.
+      //
+      // Under load the request now WAITS for a slot rather than piling on. That
+      // is the intended trade: a slower response beats an exhausted instance,
+      // and the client still gets its report.
+      const diagnostics = await scanSlots.run(() =>
+        runDiagnostics(url, authHeader, { allowActiveProbes, allowAggressiveProbes, oob: ctx.oobCollaborator, scanId: scan.id }));
       const staticCompiled = compileStaticFindings(diagnostics);
       // Use the key owner's personal DeepSeek key (BYOK) when set.
       const aiReport = await generateAiReport(url, diagnostics, staticCompiled, (await db.getUserDeepseekKey(user.id)));

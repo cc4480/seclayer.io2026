@@ -32,6 +32,19 @@ async function isCanceled(scanId: string): Promise<boolean> {
 
 // Comfortably inside STALE_LEASE_MS (5 min) so a slow tick, a long probe or a
 // brief database blip never lets a healthy scan's lease lapse.
+// ONE pool of scan slots per process, shared by every path that runs a scan.
+//
+// This used to live inside makeProcessScanJob, which meant it only governed the
+// dashboard/queue path. /api/mcp/scan runs runDiagnostics synchronously in its
+// own request handler and so was capped by nothing at all: N concurrent MCP
+// requests started N concurrent scans on that instance, which is exactly the
+// unbounded burst maxConcurrentScans exists to prevent, and the quickest way to
+// OOM a replica and take every other scan on it down too.
+//
+// Module scope, so both entry points draw from the same slots rather than each
+// getting their own allowance.
+export const scanSlots = new Semaphore(config.maxConcurrentScans);
+
 const LEASE_REFRESH_MS = 30 * 1000;
 
 // How often an idle worker looks for queued work. Short enough that a scan
@@ -45,7 +58,7 @@ export function makeProcessScanJob(oobCollaborator?: OobCollaborator) {
   // (dashboard "scan now", MCP, and the monitoring worker) so none can bypass
   // the cap. Excess scans wait here while their row stays 'queued' — crash-safe,
   // since recoverStuckScans sweeps 'queued' on the next boot.
-  const scanSlots = new Semaphore(config.maxConcurrentScans);
+
 
   const runScanJob = async function (
     scanId: string,
