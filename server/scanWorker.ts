@@ -18,6 +18,7 @@ import type { BolaIdentity, LoginCredentials } from "../src/types.js";
 import { Semaphore } from "./semaphore.js";
 import { config } from "./config.js";
 import type { ProcessScanJob } from "./routes/context.js";
+import { INSTANCE_ID } from "./instance.js";
 
 // There is no cancellation token threaded through the probe pipeline (see
 // db.cancelScan's doc comment), so a canceled scan's in-flight network work
@@ -58,7 +59,7 @@ export function makeProcessScanJob(oobCollaborator?: OobCollaborator) {
     let stream: ScanEventStream | undefined;
     let liveNarrator: ReturnType<typeof setInterval> | undefined;
     try {
-      console.log(`[Job Worker] Starting scan ${scanId}`);
+      console.log(`[Job Worker] [${INSTANCE_ID}] Starting scan ${scanId}`);
 
       const scan = (await db.getScan(scanId));
       if (!scan || await isCanceled(scanId)) return;
@@ -237,6 +238,10 @@ export function startScanQueueWorker(processScanJob: ProcessScanJob): NodeJS.Tim
       while (inFlight < config.maxConcurrentScans) {
         const job = await db.claimNextQueuedScan();
         if (!job) return; // queue empty — wait for the next tick
+        // Stamped with the instance so the fleet's behaviour is observable:
+        // without it there is no way to tell whether three workers are sharing
+        // the queue or one is doing everything.
+        console.log(`[scan queue] [${INSTANCE_ID}] claimed ${job.scanId}`);
         inFlight += 1;
         // Not awaited: the point is to fill every free slot, not to run the
         // queue one scan at a time. processScanJob keeps the lease refreshed
@@ -257,7 +262,7 @@ export function startScanQueueWorker(processScanJob: ProcessScanJob): NodeJS.Tim
     }
   };
 
-  console.log(`[scan queue] Pulling queued scans (up to ${config.maxConcurrentScans} concurrent on this instance).`);
+  console.log(`[scan queue] [${INSTANCE_ID}] Pulling queued scans (up to ${config.maxConcurrentScans} concurrent on this instance).`);
   void drain();
   const timer = setInterval(() => { void drain(); }, QUEUE_POLL_MS);
   timer.unref();

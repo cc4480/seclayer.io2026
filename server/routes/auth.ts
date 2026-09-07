@@ -7,6 +7,7 @@ import { deepseekKeyStatus } from "./deepseekKeyStatus.js";
 import { rateLimit } from "../rateLimit.js";
 import { sendEmail, buildMagicLinkEmail, isEmailConfigured } from "../email.js";
 import crypto from "node:crypto";
+import { INSTANCE_ID } from "../instance.js";
 import { verifyGoogleIdToken } from "../googleAuth.js";
 import type { RouteContext } from "./context.js";
 
@@ -53,9 +54,6 @@ function confirmSignInPage(token: string, email: string): string {
     "</main></body></html>"
   );
 }
-
-// See the health endpoint: distinguishes replicas without identifying them.
-const INSTANCE_ID = crypto.randomBytes(4).toString('hex');
 
 export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
   const { requireAuth, getUserId, cookieOptions, sessionCookie, nmapAvailable } = ctx;
