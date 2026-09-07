@@ -177,6 +177,16 @@ CREATE TABLE IF NOT EXISTS autofix_sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_autofix_sessions_user ON autofix_sessions(userId);
 
+
+-- Shared rate-limit counters -- see DbRateLimitStore. With more than one
+-- instance the in-memory store gives each replica its own buckets, so the
+-- effective limit becomes N x max. Rows are transient and pruned on write.
+CREATE TABLE IF NOT EXISTS rate_limit_hits (
+  bucketKey text NOT NULL,
+  hitAt     bigint NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_rate_limit_hits_key ON rate_limit_hits(bucketKey, hitAt);
+
 -- One-time data fix-up carried over from dbSchema.ts: revoke domains that were
 -- ever trusted on self-attestation alone (that path was removed; real DNS/file
 -- proof is required now). Idempotent.

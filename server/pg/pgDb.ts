@@ -492,6 +492,35 @@ export class PostgresDb implements Db {
   // Postgres backups are managed (Supabase snapshots / pg_dump), not a per-file
   // VACUUM INTO like SQLite — so this is a no-op. The backup worker is a no-op on
   // Postgres too (see server.ts wiring).
+  // Shared sliding-window rate limit (see SqliteDb.rateLimitHit). One statement
+  // so the prune, the count and the insert all run against the same snapshot
+  // and a replica cannot be preempted between them.
+  //
+  // The insert is conditional on the count, so a request that is already over
+  // the limit does not add another row and push its own retry time further out.
+  async rateLimitHit(bucketKey: string, windowMs: number, max: number, now = Date.now()):
+      Promise<{ limited: boolean; retryAfterSec: number }> {
+    const windowStart = now - windowMs;
+    const sql = `
+      WITH pruned AS (
+        DELETE FROM rate_limit_hits WHERE bucketKey = $1 AND hitAt < $2
+      ), cur AS (
+        SELECT count(*)::int AS n, min(hitAt) AS oldest
+        FROM rate_limit_hits WHERE bucketKey = $1 AND hitAt >= $2
+      ), ins AS (
+        INSERT INTO rate_limit_hits (bucketKey, hitAt)
+        SELECT $1, $3 FROM cur WHERE cur.n < $4
+        RETURNING 1
+      )
+      SELECT cur.n, cur.oldest, (SELECT count(*) FROM ins)::int AS inserted FROM cur`;
+    const r = await this.pool.query(sql, [bucketKey, windowStart, now, max]);
+    const row = (r.rows[0] ?? { n: 0, oldest: null, inserted: 1 }) as
+      { n: number; oldest: string | number | null; inserted: number };
+    if (row.inserted > 0) return { limited: false, retryAfterSec: 0 };
+    const oldest = row.oldest === null ? now : Number(row.oldest);
+    return { limited: true, retryAfterSec: Math.max(1, Math.ceil((windowMs - (now - oldest)) / 1000)) };
+  }
+
   // Postgres snapshots are the platform's job (Railway PITR / scheduled
   // backups), not this process's. Returning false — rather than silently
   // resolving — is what stops the backup worker reporting a snapshot it

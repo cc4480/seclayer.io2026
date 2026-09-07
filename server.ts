@@ -14,6 +14,7 @@ import { detectNmap } from './server/nmap/detect.js';
 import { startMonitorWorker } from './server/monitorWorker.js';
 import { startDigestWorker } from './server/digestWorker.js';
 import { startBackupWorker } from './server/backupWorker.js';
+import { installSharedRateLimitStore } from './server/rateLimit.js';
 import { registerAuthRoutes } from './server/routes/auth.js';
 import { registerScanRoutes } from './server/routes/scans.js';
 import { registerNmapRoutes } from './server/routes/nmap.js';
@@ -171,6 +172,16 @@ async function startServer() {
   // the 'worker'/'all' instances run them — otherwise EVERY web instance would
   // run its own timers and duplicate the monitoring scans, digest emails, and
   // backups N times over. Single-node ('all', the default) is unchanged.
+  // Rate limiting has to share state before a second instance exists, or each
+  // replica enforces its own private copy of every limit and the effective
+  // cap becomes N x max. Safe to install here: the middleware resolves the
+  // active store per REQUEST, not when the route is registered.
+  if (installSharedRateLimitStore()) {
+    console.log('[rateLimit] Shared database-backed store — safe for multiple instances.');
+  } else {
+    console.log('[rateLimit] In-memory store — correct for a SINGLE instance only.');
+  }
+
   if (runsWorkers) {
     startMonitorWorker(processScanJob);
     startDigestWorker();

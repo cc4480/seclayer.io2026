@@ -747,6 +747,29 @@ class SqliteDb {
   // Returns true when a snapshot file was actually written. The boolean is
   // the contract that lets the backup worker tell a real snapshot from a
   // backend that cannot take one — see PostgresDb.backupTo.
+  // Sliding-window rate limit against the DATABASE rather than process memory,
+  // so every replica shares one bucket. Returns whether THIS call is over the
+  // limit and, if so, when it would next be allowed.
+  //
+  // Synchronous transaction on SQLite, so the prune/count/insert cannot
+  // interleave with another request in this process.
+  async rateLimitHit(bucketKey: string, windowMs: number, max: number, now = Date.now()):
+      Promise<{ limited: boolean; retryAfterSec: number }> {
+    const windowStart = now - windowMs;
+    return this.db.transaction(() => {
+      this.db.prepare('DELETE FROM rate_limit_hits WHERE bucketKey = ? AND hitAt < ?').run(bucketKey, windowStart);
+      const row = this.db.prepare(
+        'SELECT count(*) AS n, min(hitAt) AS oldest FROM rate_limit_hits WHERE bucketKey = ? AND hitAt >= ?',
+      ).get(bucketKey, windowStart) as { n: number; oldest: number | null };
+      if (row.n >= max) {
+        const oldest = row.oldest ?? now;
+        return { limited: true, retryAfterSec: Math.max(1, Math.ceil((windowMs - (now - oldest)) / 1000)) };
+      }
+      this.db.prepare('INSERT INTO rate_limit_hits (bucketKey, hitAt) VALUES (?, ?)').run(bucketKey, now);
+      return { limited: false, retryAfterSec: 0 };
+    })();
+  }
+
   async backupTo(destPath: string): Promise<boolean> {
     const escaped = destPath.replace(/'/g, "''");
     this.db.exec(`VACUUM INTO '${escaped}'`);

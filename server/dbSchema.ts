@@ -112,6 +112,16 @@ export function runMigrations(db: Database.Database): void {
       createdAt TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(userId);
+    -- Shared rate-limit counters. Only used when a networked database backs the
+    -- app (see DbRateLimitStore): with more than one instance the in-memory
+    -- store gives each replica its own buckets, so the effective limit becomes
+    -- N x max. Rows are transient and pruned on write; nothing here is durable
+    -- state anyone reads back.
+    CREATE TABLE IF NOT EXISTS rate_limit_hits (
+      bucketKey TEXT NOT NULL,
+      hitAt INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_rate_limit_hits_key ON rate_limit_hits(bucketKey, hitAt);
     CREATE TABLE IF NOT EXISTS oob_tokens (
       token TEXT PRIMARY KEY,
       scanId TEXT,

@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
+import { db } from './db.js';
 
 // Rate limiting with a PLUGGABLE store so the same middleware works both on a
 // single node (default: in-memory) and across a horizontally-scaled fleet
@@ -72,6 +73,32 @@ export class MemoryRateLimitStore implements RateLimitStore {
 //       return { limited: false, retryAfterSec: 0 };
 //     }
 //   }
+
+// Shared store backed by the application database. Every replica counts into
+// one bucket, so the limit means what it says regardless of how many instances
+// are running — the property MemoryRateLimitStore cannot provide, where N
+// instances each keep their own buckets and the effective limit becomes N x max.
+//
+// Only worth switching on when the database is actually shared: on SQLite there
+// is exactly one instance by construction (one file, one attached volume), so
+// the memory store is both correct and faster. installSharedRateLimitStore below
+// keys off that.
+export class DbRateLimitStore implements RateLimitStore {
+  async hit(key: string, windowMs: number, max: number) {
+    return db.rateLimitHit(key, windowMs, max);
+  }
+}
+
+// Call once at boot, before any route middleware is created. Switches to the
+// shared store when the app is running against a networked database (the same
+// DATABASE_URL signal createDb() uses to pick the Postgres backend), and leaves
+// the in-memory store in place otherwise. Returns whether it swapped, so the
+// caller can log which regime is in force.
+export function installSharedRateLimitStore(): boolean {
+  if (!process.env.DATABASE_URL) return false;
+  setRateLimitStore(new DbRateLimitStore());
+  return true;
+}
 
 let activeStore: RateLimitStore = new MemoryRateLimitStore();
 
