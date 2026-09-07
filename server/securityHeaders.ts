@@ -26,16 +26,34 @@ const GSI_FRAME = 'https://accounts.google.com/gsi/';
 const GSI_CONNECT = 'https://accounts.google.com/gsi/';
 const GSI_STYLE = 'https://accounts.google.com/gsi/style';
 
+// Google Fonts. src/index.css opens with an @import for Space Grotesk and
+// JetBrains Mono, so without these the stylesheet is refused and every visitor
+// renders in the fallback stack — silently, and only in production, since dev
+// serves no CSP. Two origins because Google splits them: the CSS comes from
+// fonts.googleapis.com, the woff2 files it references from fonts.gstatic.com.
+// Self-hosting the files would remove both (font-src 'self' already covers it)
+// and is the stricter option if this third-party surface is unwanted.
+const FONTS_STYLE = 'https://fonts.googleapis.com';
+const FONTS_FILES = 'https://fonts.gstatic.com';
+
+// Cloudflare Web Analytics, injected by Cloudflare at the edge rather than by
+// anything in this repo — which is why nothing here referenced it and the
+// block only showed up in a browser console. The beacon script loads from
+// static.cloudflareinsights.com and reports to cloudflareinsights.com.
+// Turning the feature off in the Cloudflare dashboard is the alternative.
+const CF_BEACON_SCRIPT = 'https://static.cloudflareinsights.com';
+const CF_BEACON_REPORT = 'https://cloudflareinsights.com';
+
 export const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
   "base-uri 'self'",
   "object-src 'none'",
   "frame-ancestors 'none'",
-  `script-src 'self' ${GSI_SCRIPT}`,
-  `style-src 'self' 'unsafe-inline' ${GSI_STYLE}`,
+  `script-src 'self' ${GSI_SCRIPT} ${CF_BEACON_SCRIPT}`,
+  `style-src 'self' 'unsafe-inline' ${GSI_STYLE} ${FONTS_STYLE}`,
   "img-src 'self' data:",
-  "font-src 'self' data:",
-  `connect-src 'self' ${GSI_CONNECT}`,
+  `font-src 'self' data: ${FONTS_FILES}`,
+  `connect-src 'self' ${GSI_CONNECT} ${CF_BEACON_REPORT}`,
   `frame-src ${GSI_FRAME}`,
   "form-action 'self'",
 ].join('; ');
