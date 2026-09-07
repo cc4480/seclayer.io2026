@@ -45,6 +45,11 @@ async function startServer() {
   // single-node deployment (role 'all', the default) this runs exactly as before.
   const runsWorkers = config.role !== 'web';
   if (runsWorkers) {
+    // MUST precede recovery: on Postgres nothing applies schema.sql at runtime,
+    // so a deploy shipping only code would find no heartbeatAt column and the
+    // recovery query below would throw on the very first boot. Awaited, not
+    // fire-and-forget, for the same reason.
+    await db.ensureScanLeaseSchema();
     const recovered = (await db.recoverStuckScans());
     if (recovered > 0) {
       console.log(`[server] Recovered ${recovered} scan(s) left mid-flight by a prior process — marked failed and refunded.`);

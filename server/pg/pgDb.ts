@@ -24,6 +24,7 @@ import type { PgPool, PgQueryable } from "./pgClient.js";
 // Type-only import (erased at runtime), so this does NOT pull server/db.js in —
 // which would instantiate SqliteDb and open the SQLite file. It only makes tsc
 // verify this adapter satisfies the same contract SqliteDb defines.
+import { STALE_LEASE_MS } from "../db.js";
 import type { Db } from "../db.js";
 
 export class PostgresDb implements Db {
@@ -228,8 +229,25 @@ export class PostgresDb implements Db {
       return n;
     });
   }
+  async touchScan(scanId: string): Promise<void> {
+    await this.pool.query('UPDATE scans SET heartbeatAt = $1 WHERE id = $2', [new Date().toISOString(), scanId]);
+  }
+
+  // schema.sql is applied out of band, so a deploy shipping only code would find
+  // no heartbeatAt column and every lease refresh would throw.
+  async ensureScanLeaseSchema(): Promise<void> {
+    await this.pool.query('ALTER TABLE scans ADD COLUMN IF NOT EXISTS heartbeatAt text');
+  }
+
   async recoverStuckScans(): Promise<number> {
-    const stuck = await this.all("SELECT id, userId FROM scans WHERE status IN ('queued', 'scanning', 'analyzing')");
+    // Only scans NOBODY still owns — see SqliteDb.recoverStuckScans for why.
+    // Taking every in-flight scan unconditionally is correct on one instance and
+    // destructive on several: any replica booting would fail and refund the
+    // scans every OTHER replica was actively running.
+    const cutoff = new Date(Date.now() - STALE_LEASE_MS).toISOString();
+    const stuck = await this.all(
+      "SELECT id, userId FROM scans WHERE status IN ('queued', 'scanning', 'analyzing') AND (heartbeatAt IS NULL OR heartbeatAt < ?)",
+      [cutoff]);
     if (stuck.length === 0) return 0;
     const now = new Date().toISOString();
     await this.tx(async (q) => {

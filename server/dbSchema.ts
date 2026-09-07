@@ -186,6 +186,14 @@ export function runMigrations(db: Database.Database): void {
   addColumnIfMissing(db, "users", "emailDigest", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(db, "users", "lastDigestAt", "TEXT");
   addColumnIfMissing(db, "api_keys", "keyPreview", "TEXT");
+  // Liveness lease for a scan in flight. Refreshed by whichever process owns
+  // the scan, so crash recovery can tell a scan abandoned by a dead process
+  // from one another LIVE instance is still running. Without it, recovery
+  // fails every in-flight scan on every boot — fine on one instance, fatal
+  // with several, where any replica restarting would kill the whole fleet's
+  // work. NULL means no owner has claimed it since the column was added.
+  addColumnIfMissing(db, "scans", "heartbeatAt", "TEXT");
+
   addColumnIfMissing(db, "scans", "aiReasoning", "TEXT");
   addColumnIfMissing(db, "scans", "narrationLog", "TEXT");
   addColumnIfMissing(db, "scans", "executiveBreakdown", "TEXT");

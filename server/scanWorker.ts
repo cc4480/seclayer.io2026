@@ -28,6 +28,10 @@ async function isCanceled(scanId: string): Promise<boolean> {
   return (await db.getScan(scanId))?.status === "canceled";
 }
 
+// Comfortably inside STALE_LEASE_MS (5 min) so a slow tick, a long probe or a
+// brief database blip never lets a healthy scan's lease lapse.
+const LEASE_REFRESH_MS = 30 * 1000;
+
 export function makeProcessScanJob(oobCollaborator?: OobCollaborator) {
   // Cap concurrent in-process scans so a burst can't spawn unbounded
   // runDiagnostics work and exhaust this instance. Shared across every caller
@@ -177,6 +181,23 @@ export function makeProcessScanJob(oobCollaborator?: OobCollaborator) {
     allowAggressiveProbes?: boolean,
     loginCredentials?: LoginCredentials,
   ): Promise<void> {
-    return scanSlots.run(() => runScanJob(scanId, allowActiveProbes, bolaIdentities, allowAggressiveProbes, loginCredentials));
+    // Hold a liveness lease for as long as THIS process owns the scan — which
+    // starts here, not when the scan begins running: a scan can sit behind the
+    // semaphore for a long time, and during that wait it is owned but idle. If
+    // the lease only covered execution, another replica booting mid-wait would
+    // see a stale lease and fail a scan that is simply queued behind a slot.
+    //
+    // Recovery treats a lease older than STALE_LEASE_MS as abandoned, so the
+    // refresh interval has to be comfortably shorter than that.
+    void db.touchScan(scanId).catch(() => {});
+    const lease = setInterval(() => {
+      // Best effort: a missed refresh is harmless, and a database blip must not
+      // take down a scan that is otherwise progressing.
+      void db.touchScan(scanId).catch(() => {});
+    }, LEASE_REFRESH_MS);
+    lease.unref?.();
+    return scanSlots
+      .run(() => runScanJob(scanId, allowActiveProbes, bolaIdentities, allowAggressiveProbes, loginCredentials))
+      .finally(() => clearInterval(lease));
   };
 }

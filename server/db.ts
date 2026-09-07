@@ -11,6 +11,11 @@ import { hashToken, maskKey } from './dbCrypto.js';
 import { PostgresDb } from './pg/pgDb.js';
 import type { PgPool } from './pg/pgClient.js';
 
+// How long a scan's lease may go unrefreshed before recovery treats its owner
+// as dead. Comfortably longer than the heartbeat interval so a slow tick, a
+// long probe or a brief database blip never orphans a healthy scan.
+export const STALE_LEASE_MS = 5 * 60 * 1000;
+
 const DB_FILE = process.env.DB_PATH || path.join(process.cwd(), 'data.sqlite');
 
 // --- URL + scoring helpers ---------------------------------------------------
@@ -342,10 +347,32 @@ class SqliteDb {
   // stay stuck in that status forever with no terminal state. Called once at
   // boot to fail every such scan cleanly and refund the credit it spent,
   // since the interruption was a platform fault, not the user's.
+  // Refresh the lease on a scan this process owns. Cheap and frequent; a miss
+  // is harmless because recovery only acts once a lease is well past stale.
+  async touchScan(scanId: string): Promise<void> {
+    this.db.prepare("UPDATE scans SET heartbeatAt = ? WHERE id = ?").run(new Date().toISOString(), scanId);
+  }
+
+  // Also used to ensure the schema is present on Postgres, where nothing
+  // applies schema.sql at runtime. No-op here: dbSchema.ts adds the column.
+  async ensureScanLeaseSchema(): Promise<void> {}
+
   async recoverStuckScans(): Promise<number> {
+    // Only scans NOBODY is still working on. The owning process refreshes
+    // heartbeatAt while it holds the scan (see touchScan), so a lease older than
+    // STALE_LEASE_MS means that process is gone.
+    //
+    // This used to take every queued/scanning/analyzing scan unconditionally,
+    // which is correct on exactly one instance and destructive on more than one:
+    // any replica booting would fail every scan the OTHER replicas were actively
+    // running, refund them, and tell the users their scan was interrupted.
+    //
+    // A NULL heartbeat is treated as stale so scans predating this column, and
+    // any left by an older build, are still recovered.
+    const cutoff = new Date(Date.now() - STALE_LEASE_MS).toISOString();
     const stuck = this.db.prepare(
-      "SELECT id, userId FROM scans WHERE status IN ('queued', 'scanning', 'analyzing')"
-    ).all() as Array<{ id: string; userId: string }>;
+      "SELECT id, userId FROM scans WHERE status IN ('queued', 'scanning', 'analyzing') AND (heartbeatAt IS NULL OR heartbeatAt < ?)"
+    ).all(cutoff) as Array<{ id: string; userId: string }>;
     if (stuck.length === 0) return 0;
     const now = new Date().toISOString();
     const tx = this.db.transaction(() => {
