@@ -24,6 +24,12 @@ test('robots.txt keeps the API surface out of indexes', () => {
   assert.match(body, /Disallow: \/api\//);
 });
 
+test('robots.txt keeps private per-report share links out of indexes', () => {
+  // /r/:token is somebody's private scan. This rule lived only in a
+  // public/robots.txt that this route shadowed, so it was never served.
+  assert.match(buildRobotsTxt(), /^Disallow: \/r\/$/m);
+});
+
 test('robots.txt points crawlers at the sitemap', () => {
   assert.match(buildRobotsTxt(), /^Sitemap: https?:\/\/.+\/sitemap\.xml$/m);
 });

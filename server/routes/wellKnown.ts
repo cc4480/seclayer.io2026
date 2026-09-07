@@ -29,12 +29,28 @@ function securityContact(): string {
   return 'mailto:security@seclayer.app';
 }
 
+// THE robots.txt. There is deliberately no public/robots.txt: this route is
+// registered before express.static(dist), so a static file of that name is
+// unreachable and silently dead. One existed for a while and drifted out of
+// sync with this function — it still carried the `Disallow: /r/` rule below,
+// which had therefore never actually been served to a crawler. Edit crawler
+// policy HERE.
+//
+// This is not the whole story in production: Cloudflare's "managed robots.txt"
+// feature, when enabled on the zone, PREPENDS its own AI-crawler block above
+// whatever this returns, so the served file can disagree with this function.
+// That is a dashboard setting, not something this file can control.
 export function buildRobotsTxt(): string {
   // Allow the marketing surface to be indexed; keep the API and app internals out.
   return [
     'User-agent: *',
     'Disallow: /api/',
     'Disallow: /dashboard',
+    // Per-report share links are somebody's private scan of their own
+    // site. They already carry <meta name="robots" content="noindex,
+    // nofollow"> (server/pageMeta.ts), but a crawler has to fetch the
+    // page to discover that; this keeps it from being requested at all.
+    'Disallow: /r/',
     'Allow: /',
     `Sitemap: ${siteOrigin()}/sitemap.xml`,
     '',
