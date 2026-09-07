@@ -130,6 +130,27 @@
     </script>
   </head>
   <body>
+    <!--
+      A crawler is handed this HTML before any JavaScript runs. Without these
+      links the only route to /docs, /privacy and /terms is the sitemap, which
+      makes them look like orphan pages — discovered but linked from nowhere —
+      and a new domain does not get much rendering budget to find the real nav.
+      Inside <noscript> because that is honest: it is genuinely what someone
+      with JavaScript disabled gets, and the same links exist in the rendered
+      page, so nothing is shown to crawlers that users do not see.
+    -->
+    <noscript>
+      <h1>Seclayer — black-box penetration testing</h1>
+      <p>Seclayer needs JavaScript to run a scan. These pages read fine without it:</p>
+      <nav>
+        <ul>
+          <li><a href="/">Home</a></li>
+          <li><a href="/docs">Documentation — API and MCP server</a></li>
+          <li><a href="/privacy">Privacy policy</a></li>
+          <li><a href="/terms">Terms of service</a></li>
+        </ul>
+      </nav>
+    </noscript>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
