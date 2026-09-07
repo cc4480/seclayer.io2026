@@ -247,6 +247,22 @@ export function startScanQueueWorker(processScanJob: ProcessScanJob): NodeJS.Tim
       // couple of seconds of ramp against jobs measured in minutes, and under a
       // deep queue every worker saturates anyway.
       if (inFlight < config.maxConcurrentScans) {
+        // Hesitate in proportion to how loaded this worker already is.
+        //
+        // Claiming one-per-tick alone did NOT spread a burst: with scans
+        // submitted seconds apart, each one goes to whichever worker's timer
+        // fires next, so a worker whose phase happens to lead wins every race
+        // no matter how much it is already running. Observed twice in
+        // production: three scans on one instance, one on another, one idle.
+        //
+        // An idle worker (inFlight 0) claims immediately and therefore wins;
+        // a loaded one waits long enough for an idle peer to take the job
+        // first. The jitter stops two equally-loaded workers from lockstepping
+        // on the same phase forever. Costs nothing when the queue is deep —
+        // the busy worker still claims once no idle peer takes it.
+        if (inFlight > 0) {
+          await new Promise((r) => setTimeout(r, inFlight * 300 + Math.random() * 200));
+        }
         const job = await db.claimNextQueuedScan();
         if (!job) return; // queue empty — wait for the next tick
         // Stamped with the instance so the fleet's behaviour is observable:
