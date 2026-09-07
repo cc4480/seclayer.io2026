@@ -49,7 +49,10 @@ CREATE TABLE IF NOT EXISTS scans (
   shareToken         text,
   -- Liveness lease; see dbSchema.ts. Lets recovery distinguish a scan
   -- abandoned by a dead process from one a live instance is still running.
-  heartbeatAt        text
+  heartbeatAt        text,
+  -- Queued job parameters so any worker can run the scan; booleans only,
+  -- never credentials (see dbSchema.ts).
+  jobParams          text
 );
 CREATE INDEX IF NOT EXISTS idx_scans_user ON scans(userId);
 -- Nullable unique: Postgres (like SQLite) allows many NULLs in a UNIQUE index,

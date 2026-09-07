@@ -347,6 +347,41 @@ class SqliteDb {
   // stay stuck in that status forever with no terminal state. Called once at
   // boot to fail every such scan cleanly and refund the credit it spent,
   // since the interruption was a platform fault, not the user's.
+  // Mark a scan runnable by ANY worker. Leaves status 'queued' and the lease
+  // NULL — an unleased queued scan is precisely what "waiting to be claimed"
+  // means, so claiming and leasing are the same act and cannot disagree.
+  async enqueueScanJob(scanId: string, params: { allowActiveProbes: boolean; allowAggressiveProbes?: boolean }): Promise<void> {
+    this.db.prepare("UPDATE scans SET jobParams = ?, heartbeatAt = NULL WHERE id = ?")
+      .run(JSON.stringify(params), scanId);
+  }
+
+  // Atomically take ONE queued scan nobody else holds. The claim IS the lease:
+  // setting heartbeatAt in the same statement that selects the row is what stops
+  // two workers running the same scan, and it means a claimed scan is
+  // immediately protected from recovery.
+  //
+  // A stale lease is re-claimable: that is how a scan whose worker died gets
+  // picked up by another instead of waiting for the recovery sweep to fail it.
+  async claimNextQueuedScan(): Promise<{ scanId: string; params: { allowActiveProbes: boolean; allowAggressiveProbes?: boolean } } | null> {
+    const cutoff = new Date(Date.now() - STALE_LEASE_MS).toISOString();
+    const now = new Date().toISOString();
+    // better-sqlite3 is synchronous and this runs in one transaction, so no
+    // other statement in this process can interleave; SQLite's single-writer
+    // lock covers the (single) other process case.
+    return this.db.transaction(() => {
+      const row = this.db.prepare(
+        "SELECT id, jobParams FROM scans WHERE status = 'queued' AND jobParams IS NOT NULL AND (heartbeatAt IS NULL OR heartbeatAt < ?) ORDER BY createdAt LIMIT 1",
+      ).get(cutoff) as { id: string; jobParams: string } | undefined;
+      if (!row) return null;
+      this.db.prepare("UPDATE scans SET heartbeatAt = ? WHERE id = ?").run(now, row.id);
+      try {
+        return { scanId: row.id, params: JSON.parse(row.jobParams) };
+      } catch {
+        return null; // unparseable params: leave it for recovery rather than guess
+      }
+    })();
+  }
+
   // Refresh the lease on a scan this process owns. Cheap and frequent; a miss
   // is harmless because recovery only acts once a lease is well past stale.
   async touchScan(scanId: string): Promise<void> {

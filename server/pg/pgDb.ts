@@ -229,6 +229,39 @@ export class PostgresDb implements Db {
       return n;
     });
   }
+  async enqueueScanJob(scanId: string, params: { allowActiveProbes: boolean; allowAggressiveProbes?: boolean }): Promise<void> {
+    await this.pool.query('UPDATE scans SET jobParams = $1, heartbeatAt = NULL WHERE id = $2',
+      [JSON.stringify(params), scanId]);
+  }
+
+  // One statement, so the select and the lease cannot be split by another
+  // worker. FOR UPDATE SKIP LOCKED is what makes this scale: concurrent workers
+  // step over each other's locked rows and each takes a different scan, instead
+  // of serialising on the head of the queue or colliding on the same one.
+  async claimNextQueuedScan(): Promise<{ scanId: string; params: { allowActiveProbes: boolean; allowAggressiveProbes?: boolean } } | null> {
+    const cutoff = new Date(Date.now() - STALE_LEASE_MS).toISOString();
+    const now = new Date().toISOString();
+    const r = await this.pool.query(
+      `UPDATE scans SET heartbeatAt = $1
+         WHERE id = (
+           SELECT id FROM scans
+             WHERE status = 'queued' AND jobParams IS NOT NULL
+               AND (heartbeatAt IS NULL OR heartbeatAt < $2)
+             ORDER BY createdAt
+             LIMIT 1
+             FOR UPDATE SKIP LOCKED
+         )
+       RETURNING id, jobParams`,
+      [now, cutoff]);
+    const row = r.rows[0];
+    if (!row) return null;
+    try {
+      return { scanId: String(row.id), params: JSON.parse(String(row.jobparams ?? row.jobParams)) };
+    } catch {
+      return null;
+    }
+  }
+
   async touchScan(scanId: string): Promise<void> {
     await this.pool.query('UPDATE scans SET heartbeatAt = $1 WHERE id = $2', [new Date().toISOString(), scanId]);
   }
@@ -237,6 +270,7 @@ export class PostgresDb implements Db {
   // no heartbeatAt column and every lease refresh would throw.
   async ensureScanLeaseSchema(): Promise<void> {
     await this.pool.query('ALTER TABLE scans ADD COLUMN IF NOT EXISTS heartbeatAt text');
+    await this.pool.query('ALTER TABLE scans ADD COLUMN IF NOT EXISTS jobParams text');
   }
 
   async recoverStuckScans(): Promise<number> {

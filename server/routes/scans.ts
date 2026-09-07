@@ -112,8 +112,27 @@ export function registerScanRoutes(app: express.Express, ctx: RouteContext) {
     // when active probing is already unlocked for this target.
     const allowAggressiveProbes = allowActiveProbes && req.body.aggressiveProbes === true;
 
-    // Trigger asynchronous background worker flow mimicking the pg-boss worker pipeline
-    processScanJob(scan.id, allowActiveProbes, bolaIdentities, allowAggressiveProbes, loginCredentials);
+    // Hand the scan to the fleet, not to this process.
+    //
+    // A queued scan is claimed by whichever worker has a free slot, so a burst
+    // of submissions queues instead of trying to run all at once, and
+    // throughput is set by how many workers are running rather than by which
+    // instance the request happened to land on.
+    //
+    // EXCEPT when the request carries credentials. bolaIdentities and
+    // loginCredentials are real secrets for a target the caller owns, and
+    // queueing them would mean writing them to the database — which this
+    // codebase has no facility to do safely (dbCrypto hashes and masks; there
+    // is no encryption at rest). So a credentialed scan runs here, in the
+    // process that already holds those secrets in memory, and they are never
+    // persisted. processScanJob takes the lease immediately, so no other worker
+    // will touch it.
+    const carriesCredentials = Boolean(bolaIdentities || loginCredentials);
+    if (carriesCredentials) {
+      processScanJob(scan.id, allowActiveProbes, bolaIdentities, allowAggressiveProbes, loginCredentials);
+    } else {
+      (await db.enqueueScanJob(scan.id, { allowActiveProbes, allowAggressiveProbes }));
+    }
 
     res.json({ status: "ok", scan });
   });

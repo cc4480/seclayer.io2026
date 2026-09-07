@@ -8,7 +8,7 @@ import { db } from './server/db.js';
 import { config, validateConfigOnBoot } from './server/config.js';
 import { parseWebhookEvent } from './server/stripe.js';
 import { createOobCollaborator } from './server/oob.js';
-import { makeProcessScanJob } from './server/scanWorker.js';
+import { makeProcessScanJob, startScanQueueWorker } from './server/scanWorker.js';
 import { processNmapScanJob } from './server/nmapWorker.js';
 import { detectNmap } from './server/nmap/detect.js';
 import { startMonitorWorker } from './server/monitorWorker.js';
@@ -195,6 +195,9 @@ async function startServer() {
   }
 
   if (runsWorkers) {
+    // Pull queued scans. Every worker instance runs this; the claim is atomic,
+    // so they share one queue rather than duplicating work.
+    startScanQueueWorker(processScanJob);
     startMonitorWorker(processScanJob);
     startDigestWorker();
     startBackupWorker();

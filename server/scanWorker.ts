@@ -17,6 +17,7 @@ import type { OobCollaborator } from "./oob.js";
 import type { BolaIdentity, LoginCredentials } from "../src/types.js";
 import { Semaphore } from "./semaphore.js";
 import { config } from "./config.js";
+import type { ProcessScanJob } from "./routes/context.js";
 
 // There is no cancellation token threaded through the probe pipeline (see
 // db.cancelScan's doc comment), so a canceled scan's in-flight network work
@@ -31,6 +32,11 @@ async function isCanceled(scanId: string): Promise<boolean> {
 // Comfortably inside STALE_LEASE_MS (5 min) so a slow tick, a long probe or a
 // brief database blip never lets a healthy scan's lease lapse.
 const LEASE_REFRESH_MS = 30 * 1000;
+
+// How often an idle worker looks for queued work. Short enough that a scan
+// submitted while the fleet is idle starts promptly, long enough that idle
+// workers are not hammering the database.
+const QUEUE_POLL_MS = 2000;
 
 export function makeProcessScanJob(oobCollaborator?: OobCollaborator) {
   // Cap concurrent in-process scans so a burst can't spawn unbounded
@@ -200,4 +206,60 @@ export function makeProcessScanJob(oobCollaborator?: OobCollaborator) {
       .run(() => runScanJob(scanId, allowActiveProbes, bolaIdentities, allowAggressiveProbes, loginCredentials))
       .finally(() => clearInterval(lease));
   };
+}
+
+// Pull-based scan execution.
+//
+// Callers used to PUSH: whichever process received the request ran the scan
+// itself, gated by a per-process semaphore. That ties throughput to which
+// instance a request happened to land on, lets N replicas run N x the cap
+// between them, and puts minutes of scan CPU in the same event loop that is
+// serving pages.
+//
+// Workers now PULL instead. A submitted scan is queued, and any worker with a
+// free slot claims it. Throughput becomes a dial: add workers. A burst of a
+// thousand submissions no longer tries to run a thousand scans — they queue,
+// and drain at whatever rate the fleet is sized for.
+//
+// The claim is atomic and doubles as the lease (see claimNextQueuedScan), so a
+// scan is run by exactly one worker and is immediately protected from the
+// recovery sweep.
+export function startScanQueueWorker(processScanJob: ProcessScanJob): NodeJS.Timeout {
+  let inFlight = 0;
+  let draining = false;
+
+  const drain = async (): Promise<void> => {
+    // One drain pass at a time: overlapping passes would both see free slots
+    // and over-claim past the cap.
+    if (draining) return;
+    draining = true;
+    try {
+      while (inFlight < config.maxConcurrentScans) {
+        const job = await db.claimNextQueuedScan();
+        if (!job) return; // queue empty — wait for the next tick
+        inFlight += 1;
+        // Not awaited: the point is to fill every free slot, not to run the
+        // queue one scan at a time. processScanJob keeps the lease refreshed
+        // for as long as it holds the scan.
+        // ProcessScanJob is declared as returning void (routes fire and forget)
+        // while the implementation returns a promise. Normalise rather than
+        // widen a type every route depends on — and the slot MUST be released
+        // on both paths, or the worker leaks capacity until it stops claiming.
+        void Promise.resolve(processScanJob(job.scanId, job.params.allowActiveProbes, undefined, job.params.allowAggressiveProbes))
+          .catch((err: any) => console.error(`[scan queue] job ${job.scanId} failed:`, err?.message || err))
+          .finally(() => { inFlight -= 1; });
+      }
+    } catch (err: any) {
+      // A database blip must not kill the loop — the next tick retries.
+      console.warn('[scan queue] claim failed:', err?.message || err);
+    } finally {
+      draining = false;
+    }
+  };
+
+  console.log(`[scan queue] Pulling queued scans (up to ${config.maxConcurrentScans} concurrent on this instance).`);
+  void drain();
+  const timer = setInterval(() => { void drain(); }, QUEUE_POLL_MS);
+  timer.unref();
+  return timer;
 }

@@ -193,6 +193,12 @@ export function runMigrations(db: Database.Database): void {
   // with several, where any replica restarting would kill the whole fleet's
   // work. NULL means no owner has claimed it since the column was added.
   addColumnIfMissing(db, "scans", "heartbeatAt", "TEXT");
+  // The queued job's parameters, so ANY worker can run the scan rather than
+  // only the process that accepted the request. Deliberately holds just the
+  // two booleans: bolaIdentities and loginCredentials are real credentials,
+  // and this codebase has no encryption at rest (dbCrypto only hashes and
+  // masks), so a scan carrying them is never queued — see enqueueScanJob.
+  addColumnIfMissing(db, "scans", "jobParams", "TEXT");
 
   addColumnIfMissing(db, "scans", "aiReasoning", "TEXT");
   addColumnIfMissing(db, "scans", "narrationLog", "TEXT");
