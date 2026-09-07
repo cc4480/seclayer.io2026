@@ -347,6 +347,31 @@ class SqliteDb {
   // stay stuck in that status forever with no terminal state. Called once at
   // boot to fail every such scan cleanly and refund the credit it spent,
   // since the interruption was a platform fault, not the user's.
+  // Take a short lease on one due monitored target so only one instance
+  // processes it. Returns true to exactly one caller.
+  //
+  // Separate from nextRun on purpose. Claiming by advancing nextRun looks
+  // simpler and is wrong: that column encodes scheduling decisions the tick has
+  // not made yet — a target with no credits must keep its due time so it retries
+  // next tick, while an unsafe URL is deferred a whole cadence. Moving it up
+  // front collapses both into "rescheduled" and silently drops the retry.
+  //
+  // A stale lease is re-claimable so a target is not stranded if the instance
+  // holding it dies mid-tick.
+  async claimMonitoredTick(targetId: string, staleBeforeIso: string, nowIso: string): Promise<boolean> {
+    const res = this.db.prepare(
+      "UPDATE monitored_targets SET claimedAt = ? WHERE id = ? AND (claimedAt IS NULL OR claimedAt < ?)",
+    ).run(nowIso, targetId, staleBeforeIso);
+    return res.changes === 1;
+  }
+
+  // Released as soon as the tick finishes, so the next tick can process it
+  // normally — the lease exists to stop CONCURRENT instances, not to change how
+  // often a target is looked at.
+  async releaseMonitoredTick(targetId: string): Promise<void> {
+    this.db.prepare("UPDATE monitored_targets SET claimedAt = NULL WHERE id = ?").run(targetId);
+  }
+
   // Atomically win the right to send this user's digest. Returns true to
   // exactly ONE caller per period, however many instances tick at once.
   //

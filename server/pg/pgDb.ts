@@ -229,6 +229,18 @@ export class PostgresDb implements Db {
       return n;
     });
   }
+  // See SqliteDb.claimMonitoredTick for why this is not done through nextRun.
+  async claimMonitoredTick(targetId: string, staleBeforeIso: string, nowIso: string): Promise<boolean> {
+    const r = await this.pool.query(
+      'UPDATE monitored_targets SET claimedAt = $1 WHERE id = $2 AND (claimedAt IS NULL OR claimedAt < $3)',
+      [nowIso, targetId, staleBeforeIso]);
+    return (r.rowCount ?? 0) === 1;
+  }
+
+  async releaseMonitoredTick(targetId: string): Promise<void> {
+    await this.pool.query('UPDATE monitored_targets SET claimedAt = NULL WHERE id = $1', [targetId]);
+  }
+
   // See SqliteDb.claimDigestSend — one statement so the check and the write
   // cannot be split by another replica ticking at the same moment.
   async claimDigestSend(userId: string, notSinceIso: string, nowIso: string): Promise<boolean> {
@@ -287,6 +299,7 @@ export class PostgresDb implements Db {
   async ensureScanLeaseSchema(): Promise<void> {
     await this.pool.query('ALTER TABLE scans ADD COLUMN IF NOT EXISTS heartbeatAt text');
     await this.pool.query('ALTER TABLE scans ADD COLUMN IF NOT EXISTS jobParams text');
+    await this.pool.query('ALTER TABLE monitored_targets ADD COLUMN IF NOT EXISTS claimedAt text');
   }
 
   async recoverStuckScans(): Promise<number> {

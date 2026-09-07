@@ -116,7 +116,9 @@ CREATE TABLE IF NOT EXISTS monitored_targets (
   scanMinute     integer,
   scanWeekday    integer,
   lastError      text,
-  paused         integer NOT NULL DEFAULT 0
+  paused         integer NOT NULL DEFAULT 0,
+  -- Short-lived tick lease; see dbSchema.ts. Never nextRun.
+  claimedAt          text
 );
 CREATE INDEX IF NOT EXISTS idx_mon_user ON monitored_targets(userId);
 

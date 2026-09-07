@@ -199,6 +199,11 @@ export function runMigrations(db: Database.Database): void {
   // and this codebase has no encryption at rest (dbCrypto only hashes and
   // masks), so a scan carrying them is never queued — see enqueueScanJob.
   addColumnIfMissing(db, "scans", "jobParams", "TEXT");
+  // Short-lived tick lease so only one instance processes a due monitored
+  // target. Deliberately NOT nextRun: the scheduling column carries real
+  // semantics (no credits retries next tick, an unsafe URL defers a full
+  // cadence) and claiming through it would destroy them.
+  addColumnIfMissing(db, "monitored_targets", "claimedAt", "TEXT");
 
   addColumnIfMissing(db, "scans", "aiReasoning", "TEXT");
   addColumnIfMissing(db, "scans", "narrationLog", "TEXT");
