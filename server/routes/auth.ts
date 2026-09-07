@@ -6,6 +6,7 @@ import { config } from "../config.js";
 import { deepseekKeyStatus } from "./deepseekKeyStatus.js";
 import { rateLimit } from "../rateLimit.js";
 import { sendEmail, buildMagicLinkEmail, isEmailConfigured } from "../email.js";
+import crypto from "node:crypto";
 import { verifyGoogleIdToken } from "../googleAuth.js";
 import type { RouteContext } from "./context.js";
 
@@ -53,6 +54,9 @@ function confirmSignInPage(token: string, email: string): string {
   );
 }
 
+// See the health endpoint: distinguishes replicas without identifying them.
+const INSTANCE_ID = crypto.randomBytes(4).toString('hex');
+
 export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
   const { requireAuth, getUserId, cookieOptions, sessionCookie, nmapAvailable } = ctx;
 
@@ -67,6 +71,12 @@ export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
       version: config.appVersion,
       checks: { database: dbOk ? "ok" : "error" },
       uptimeSeconds: Math.round(process.uptime()),
+      // Opaque per-process id, regenerated on every boot. Without it there is no
+      // way to tell from outside whether one replica is serving or five: uptime
+      // cannot separate replicas that started together. Deliberately random
+      // rather than RAILWAY_REPLICA_ID so this leaks no platform detail — it only
+      // has to differ between processes.
+      instance: INSTANCE_ID,
       timestamp: new Date().toISOString(),
     });
   });
