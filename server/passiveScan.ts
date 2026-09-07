@@ -33,8 +33,22 @@ export const MAX_COOKIE_ISSUES = 6;
 // are flagged, naming the specific cookie. Missing SameSite is deliberately
 // NOT flagged: modern browsers default absent cookies to SameSite=Lax, so
 // reporting it produces low-signal, false-positive-flavored noise.
-export function cookieFlagIssues(setCookieList: string[], isHttps: boolean, alreadyFound: number): string[] {
-  const issues: string[] = [];
+// One cookie problem plus the line it came from. `observed` has the cookie
+// VALUE stripped — a Set-Cookie value can be a live session token, and these
+// strings are persisted in scan reports and shown in the UI.
+export interface CookieIssue {
+  message: string;
+  observed: string;
+}
+
+// NAME=<redacted>; attr; attr — keeps every security attribute (which is the
+// whole point of quoting the line) and discards only the secret part.
+export function redactCookieValue(raw: string): string {
+  return raw.replace(/^(\s*[^=;\s]+)=[^;]*/, '$1=<redacted>').trim();
+}
+
+export function cookieFlagIssues(setCookieList: string[], isHttps: boolean, alreadyFound: number): CookieIssue[] {
+  const issues: CookieIssue[] = [];
   const budget = () => alreadyFound + issues.length < MAX_COOKIE_ISSUES;
   for (const cookie of setCookieList) {
     if (!budget()) break;
@@ -43,11 +57,11 @@ export function cookieFlagIssues(setCookieList: string[], isHttps: boolean, alre
     // A cookie explicitly scoped to be read by client JS can't carry
     // HttpOnly by design, so only the Secure gap is a clear issue there.
     if (isHttps && !/;\s*secure(\s*;|\s*$)/i.test(cookie)) {
-      issues.push(`Cookie "${name}" is set without the Secure attribute over HTTPS`);
+      issues.push({ message: `Cookie "${name}" is set without the Secure attribute over HTTPS`, observed: redactCookieValue(cookie) });
     }
     if (!budget()) break;
     if (!/;\s*httponly(\s*;|\s*$)/i.test(cookie)) {
-      issues.push(`Cookie "${name}" is set without the HttpOnly attribute`);
+      issues.push({ message: `Cookie "${name}" is set without the HttpOnly attribute`, observed: redactCookieValue(cookie) });
     }
   }
   return issues;
@@ -138,7 +152,10 @@ export async function runPassiveScan(
         ? (response.headers as any).getSetCookie()
         : (result.headers["set-cookie"] ? [result.headers["set-cookie"]] : []);
     const isHttps = url.startsWith("https://");
-    result.cookieIssues.push(...cookieFlagIssues(setCookieList, isHttps, result.cookieIssues.length));
+    for (const ci of cookieFlagIssues(setCookieList, isHttps, result.cookieIssues.length)) {
+      result.cookieIssues.push(ci.message);
+      result.cookieEvidence[ci.message] = ci.observed;
+    }
 
     // 2. SAST secrets + 3. SCA libraries (over the served markup).
     // (DAST CSRF inference from static markup is intentionally omitted — it is

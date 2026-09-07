@@ -43,6 +43,15 @@ export interface DiagnosticResult {
     meta?: { title: string; severity: Severity; description: string; fix: string };
   }>;
   cookieIssues: string[];
+  // The literal Set-Cookie line each cookie issue was derived from, keyed by
+  // the issue text, with the cookie VALUE redacted. Exists because these
+  // findings are routinely disputed: a target can serve different cookie
+  // attributes to a browser than to the scanner (google.com serves NID
+  // WITHOUT Secure to a non-browser UA and WITH it to Chrome), so a user who
+  // checks in DevTools sees the opposite of what we reported and concludes we
+  // are wrong. Quoting what we were actually served makes a true finding
+  // defensible instead of arguable.
+  cookieEvidence: Record<string, string>;
 
   // High-fidelity AppSec dimensions
   sastFindings: Array<{

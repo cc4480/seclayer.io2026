@@ -73,6 +73,7 @@ export async function runDiagnostics(
     techLeaked: [],
     probedPaths: [],
     cookieIssues: [],
+    cookieEvidence: {},
     sastFindings: [],
     scaLibraries: [],
     easmPerimeter: {
@@ -193,8 +194,12 @@ export async function runDiagnostics(
           seenSecretKeys.add(key);
           result.sastFindings.push(df);
         }
-        for (const issue of cookieFlagIssues(capture.setCookie, isHttpsTarget, result.cookieIssues.length)) {
-          if (!result.cookieIssues.includes(issue)) result.cookieIssues.push(issue);
+        for (const ci of cookieFlagIssues(capture.setCookie, isHttpsTarget, result.cookieIssues.length)) {
+          const issue = ci.message;
+          if (!result.cookieIssues.includes(issue)) {
+            result.cookieIssues.push(issue);
+            result.cookieEvidence[issue] = ci.observed;
+          }
         }
         // Passive — no new request, just inspecting what the crawler already
         // fetched — so this runs unconditionally like the checks above, not

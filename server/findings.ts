@@ -218,6 +218,16 @@ function buildCookieFindings(diag: DiagnosticResult): Finding[] {
         ? "Add the Secure attribute to this cookie so it is only ever sent over HTTPS."
         : "Add the HttpOnly attribute to this cookie unless it must be read by client-side JavaScript; if it must, keep the sensitive session token in a separate HttpOnly cookie.",
       category: "IAST",
+      // Quote the exact line we were served, cookie value redacted. These get
+      // disputed more than any other finding, because a target can serve
+      // different cookie attributes to the scanner than to a browser —
+      // google.com sends NID WITHOUT Secure to a non-browser UA and WITH it to
+      // Chrome. A user who checks in DevTools then sees the opposite of what we
+      // reported and files a true finding as a false positive. Showing what we
+      // were actually served turns that argument into a fact.
+      verification: diag.cookieEvidence?.[issue]
+        ? `Observed on ${diag.url} in this response header (cookie value redacted): "Set-Cookie: ${diag.cookieEvidence[issue]}". A site may serve different cookie attributes to different clients, so a browser can show otherwise.`
+        : undefined,
     });
   }
   return findings;
