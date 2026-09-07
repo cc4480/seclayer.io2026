@@ -492,7 +492,13 @@ export class PostgresDb implements Db {
   // Postgres backups are managed (Supabase snapshots / pg_dump), not a per-file
   // VACUUM INTO like SQLite — so this is a no-op. The backup worker is a no-op on
   // Postgres too (see server.ts wiring).
-  async backupTo(_destPath: string): Promise<void> { /* managed externally on Postgres */ }
+  // Postgres snapshots are the platform's job (Railway PITR / scheduled
+  // backups), not this process's. Returning false — rather than silently
+  // resolving — is what stops the backup worker reporting a snapshot it
+  // never took: it used to log "Wrote snapshot <name>" every 24h against a
+  // file that did not exist, so the logs read healthy while nothing was
+  // being backed up at all.
+  async backupTo(_destPath: string): Promise<boolean> { return false; }
   async close(): Promise<void> {
     try { await this.pool.end(); } catch (err: any) { console.warn("[pgDb] Error while closing pool:", err?.message || err); }
   }

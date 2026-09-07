@@ -69,3 +69,21 @@ test('pruneOldBackups is a no-op when under the retention limit', () => {
   assert.deepEqual(pruneOldBackups(dir, 7), []);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+// The regression this guards: PostgresDb.backupTo resolved without writing
+// anything, runBackup returned the destination path regardless, and the worker
+// logged "Wrote snapshot <name>" every 24h for a file that never existed. The
+// logs read healthy while nothing at all was being backed up.
+test('runBackup returns null when the backend cannot write a snapshot', async () => {
+  const { PostgresDb } = await import('./pg/pgDb.js');
+  const pg = new PostgresDb({} as never);
+  // false is the signal runBackup keys off; a void/undefined resolve would be
+  // indistinguishable from a snapshot that succeeded.
+  assert.equal(await pg.backupTo('/tmp/never-written.sqlite'), false);
+});
+
+test('SqliteDb.backupTo reports true so a real snapshot is still announced', async () => {
+  const dest = path.join(tmpDir(), 'reports-true.sqlite');
+  assert.equal(await db.backupTo(dest), true);
+  assert.ok(fs.existsSync(dest), 'a true return must mean the file is really there');
+});

@@ -744,9 +744,13 @@ class SqliteDb {
   // ideal for off-box backup. `destPath` is operator-controlled (never user
   // input); single quotes are still escaped for SQL safety since VACUUM does not
   // accept a bound parameter for the target.
-  async backupTo(destPath: string): Promise<void> {
+  // Returns true when a snapshot file was actually written. The boolean is
+  // the contract that lets the backup worker tell a real snapshot from a
+  // backend that cannot take one — see PostgresDb.backupTo.
+  async backupTo(destPath: string): Promise<boolean> {
     const escaped = destPath.replace(/'/g, "''");
     this.db.exec(`VACUUM INTO '${escaped}'`);
+    return true;
   }
 
   // Checkpoints the WAL and releases the file lock. Called from the graceful

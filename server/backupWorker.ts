@@ -69,7 +69,12 @@ export async function runBackup(now: Date = new Date()): Promise<string | null> 
   if (cfg.disabled) return null;
   fs.mkdirSync(cfg.dir, { recursive: true });
   const dest = path.join(cfg.dir, snapshotFilename(now));
-  (await db.backupTo(dest));
+  // false = this backend does not write file snapshots (Postgres). Returning
+  // null keeps the caller from announcing a file that was never created, and
+  // skips the prune — pruning against a directory nothing is being added to
+  // would only delete the last snapshots the previous backend left behind.
+  const wrote = (await db.backupTo(dest));
+  if (!wrote) return null;
   pruneOldBackups(cfg.dir, cfg.retention);
   return dest;
 }
@@ -81,7 +86,6 @@ export function startBackupWorker(): NodeJS.Timeout | undefined {
     console.log('[backup] BACKUP_ENABLED=false — automated database snapshots are off.');
     return undefined;
   }
-  console.log(`[backup] Snapshots every ${cfg.intervalHours}h to ${cfg.dir} (keeping ${cfg.retention}).`);
   const interval = setInterval(async () => {
     try {
       const dest = await runBackup();
@@ -90,6 +94,33 @@ export function startBackupWorker(): NodeJS.Timeout | undefined {
       console.error('[backup] Snapshot failed:', err);
     }
   }, cfg.intervalHours * 60 * 60 * 1000);
+
+  // Take one immediately instead of waiting a whole interval, and use it to
+  // report what is actually happening.
+  //
+  // Two bugs this closes. The timer only ever fired after intervalHours, so a
+  // service redeployed more often than that never snapshotted once — the
+  // schedule restarted every boot. And on a backend that cannot snapshot, the
+  // startup line claimed snapshots were being written every N hours to a
+  // directory nothing would ever be added to.
+  void (async () => {
+    try {
+      const dest = await runBackup();
+      if (dest) {
+        console.log(`[backup] Snapshots every ${cfg.intervalHours}h to ${cfg.dir} (keeping ${cfg.retention}). Wrote ${path.basename(dest)}.`);
+      } else {
+        clearInterval(interval);
+        console.warn(
+          '[backup] This database backend does not write file snapshots — ' +
+          'backups are handled by the platform (e.g. Railway PITR or ' +
+          'scheduled database backups). NOTHING is being backed up by this ' +
+          'process; make sure the platform side is actually enabled.',
+        );
+      }
+    } catch (err) {
+      console.error('[backup] Startup snapshot failed:', err);
+    }
+  })();
   interval.unref();
   return interval;
 }
