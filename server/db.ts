@@ -347,6 +347,33 @@ class SqliteDb {
   // stay stuck in that status forever with no terminal state. Called once at
   // boot to fail every such scan cleanly and refund the credit it spent,
   // since the interruption was a platform fault, not the user's.
+  // Atomically win the right to send this user's digest. Returns true to
+  // exactly ONE caller per period, however many instances tick at once.
+  //
+  // runDueDigests used to read lastDigestAt, send, then write it. That is a
+  // read-then-write race: three replicas ticking together all read the same old
+  // value, all decide the digest is due, and the user gets three identical
+  // emails. Claiming by conditional UPDATE closes the window because the check
+  // and the write are one statement — the losers update zero rows and skip.
+  //
+  // Marks BEFORE sending on purpose: a duplicate email is worse than a missed
+  // one, so the failure mode is "not sent this period" rather than "sent twice".
+  async claimDigestSend(userId: string, notSinceIso: string, nowIso: string): Promise<boolean> {
+    const res = this.db.prepare(
+      "UPDATE users SET lastDigestAt = ? WHERE id = ? AND (lastDigestAt IS NULL OR lastDigestAt < ?)",
+    ).run(nowIso, userId, notSinceIso);
+    return res.changes === 1;
+  }
+
+  // Same pattern for a monitored target's due run: whichever instance moves
+  // nextRun forward owns this run, and the others see it is no longer due.
+  async claimMonitoredRun(targetId: string, dueBeforeIso: string, nextRunIso: string): Promise<boolean> {
+    const res = this.db.prepare(
+      "UPDATE monitored_targets SET nextRun = ? WHERE id = ? AND nextRun <= ?",
+    ).run(nextRunIso, targetId, dueBeforeIso);
+    return res.changes === 1;
+  }
+
   // Mark a scan runnable by ANY worker. Leaves status 'queued' and the lease
   // NULL — an unleased queued scan is precisely what "waiting to be claimed"
   // means, so claiming and leasing are the same act and cannot disagree.

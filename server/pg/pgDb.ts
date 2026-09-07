@@ -229,6 +229,22 @@ export class PostgresDb implements Db {
       return n;
     });
   }
+  // See SqliteDb.claimDigestSend — one statement so the check and the write
+  // cannot be split by another replica ticking at the same moment.
+  async claimDigestSend(userId: string, notSinceIso: string, nowIso: string): Promise<boolean> {
+    const r = await this.pool.query(
+      'UPDATE users SET lastDigestAt = $1 WHERE id = $2 AND (lastDigestAt IS NULL OR lastDigestAt < $3)',
+      [nowIso, userId, notSinceIso]);
+    return (r.rowCount ?? 0) === 1;
+  }
+
+  async claimMonitoredRun(targetId: string, dueBeforeIso: string, nextRunIso: string): Promise<boolean> {
+    const r = await this.pool.query(
+      'UPDATE monitored_targets SET nextRun = $1 WHERE id = $2 AND nextRun <= $3',
+      [nextRunIso, targetId, dueBeforeIso]);
+    return (r.rowCount ?? 0) === 1;
+  }
+
   async enqueueScanJob(scanId: string, params: { allowActiveProbes: boolean; allowAggressiveProbes?: boolean }): Promise<void> {
     await this.pool.query('UPDATE scans SET jobParams = $1, heartbeatAt = NULL WHERE id = $2',
       [JSON.stringify(params), scanId]);

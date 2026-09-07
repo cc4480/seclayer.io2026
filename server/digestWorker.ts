@@ -30,8 +30,19 @@ export async function runDueDigests(now: Date = new Date()): Promise<void> {
       const digest = buildDigest(inputs, config.appUrl || "https://seclayer.app");
       if (!digest) { (await db.markDigestSent(user.id, now.toISOString())); continue; }
 
+      // Claim the send atomically, immediately before sending. The check above
+      // is a cheap filter but is a read-then-write race on its own: three
+      // replicas ticking together all read the same stale lastDigestAt, all
+      // decide the digest is due, and the user gets three identical emails.
+      // This conditional UPDATE is won by exactly one instance.
+      //
+      // Stamped BEFORE the send, not after: a duplicate email cannot be recalled,
+      // whereas a digest missed because the send failed after claiming arrives
+      // next period. The safe failure is "not sent", not "sent three times".
+      if (!(await db.claimDigestSend(user.id, new Date(now.getTime() - WEEK_MS).toISOString(), now.toISOString()))) {
+        continue; // another instance is sending this one
+      }
       await sendEmail({ to: user.email, subject: digest.subject, text: digest.text, html: digest.html });
-      (await db.markDigestSent(user.id, now.toISOString()));
     } catch (err) {
       // One user's failure must never stop the rest of the run.
       console.warn(`[digest] failed for ${user.email}:`, err);
