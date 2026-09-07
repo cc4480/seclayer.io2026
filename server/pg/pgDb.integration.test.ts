@@ -9,9 +9,16 @@ import { PostgresDb } from "./pgDb.js";
 import type { PgPool } from "./pgClient.js";
 
 const DATABASE_URL = process.env.DATABASE_URL;
+// Mirror createDb()'s handling in server/db.ts: managed Postgres requires TLS,
+// a local one has none. Hardcoding ssl here made this suite impossible to run
+// against a Postgres container — every test died on "The server does not
+// support SSL connections" — so the adapter's own integration coverage could
+// only ever run against a remote database.
+const isLocal = /localhost|127\.0\.0\.1/.test(DATABASE_URL || "");
+const SSL = isLocal ? undefined : { rejectUnauthorized: false };
 
 test("PostgresDb: full adapter breadth against a real Postgres", { skip: !DATABASE_URL }, async () => {
-  const pool = new pg.Pool({ connectionString: DATABASE_URL, ssl: { rejectUnauthorized: false } });
+  const pool = new pg.Pool({ connectionString: DATABASE_URL, ssl: SSL });
   const db = new PostgresDb(pool as unknown as PgPool);
   const email = `pgint+${Date.now()}@seclayer.test`;
   let userId = "";
@@ -126,7 +133,7 @@ test("PostgresDb: full adapter breadth against a real Postgres", { skip: !DATABA
 // double-spend, balance never negative). The SQLite path has an equivalent test
 // in server/routes/scans.test.ts; this asserts the production backend directly.
 test("PostgresDb: concurrent deductCredits never double-spends the last credit", { skip: !DATABASE_URL }, async () => {
-  const pool = new pg.Pool({ connectionString: DATABASE_URL, ssl: { rejectUnauthorized: false } });
+  const pool = new pg.Pool({ connectionString: DATABASE_URL, ssl: SSL });
   const db = new PostgresDb(pool as unknown as PgPool);
   const email = `pgconc+${Date.now()}@seclayer.test`;
   let userId = "";
