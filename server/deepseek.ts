@@ -10,6 +10,10 @@ import { compileLocalSummary, compileLocalBreakdown, sanitizeBreakdown } from '.
 // server/narrate.ts.)
 const MODEL_PRO = process.env.DEEPSEEK_MODEL_PRO || 'deepseek-v4-pro';
 
+// Reasoning and the final answer share this budget (see deepseekClient.ts).
+// Named so the empty-content log below can report spend against it.
+const MAX_REPORT_TOKENS = 32000;
+
 // The active-exploit pillars are authored entirely by the scanner, never the model.
 const EXPLOIT_CATEGORIES = new Set(['RED_TEAM', 'API_SEC']);
 
@@ -123,7 +127,7 @@ export async function generateAiReport(
   try {
     const prompt = buildReportPrompt(url, diagnostics, staticCompiled);
 
-    const { content: bodyTextRaw, reasoningContent } = await callDeepSeek(MODEL_PRO, prompt, {
+    const { content: bodyTextRaw, reasoningContent, finishReason, completionTokens } = await callDeepSeek(MODEL_PRO, prompt, {
       thinking: 'enabled',
       reasoningEffort: 'high',
       // Reasoning + a findings-heavy JSON report SHARE this budget (see
@@ -133,7 +137,7 @@ export async function generateAiReport(
       // truncated mid-string and JSON.parse threw, silently degrading every
       // report to the local summary. Sized generously so reasoning AND a full
       // findings report both fit with headroom.
-      maxTokens: 32000,
+      maxTokens: MAX_REPORT_TOKENS,
       // High-effort thinking mode over a large token budget legitimately takes
       // a while; generous but still bounded so a stalled call can't hang a
       // scan in "analyzing" forever (see deepseekClient.ts). Raised alongside
@@ -148,6 +152,23 @@ export async function generateAiReport(
       timeoutMs: 300000,
     }, effectiveKey);
     if (!bodyTextRaw) {
+      // The model produced no answer. This returned the local summary SILENTLY,
+      // which made the degrade invisible: the scan shipped a fallback report and
+      // the logs showed nothing at all, so "the AI report isn't working" could not
+      // be confirmed or ruled out from the outside. The sibling catch below always
+      // logged; this path never did, and it is the one that fires when the call
+      // itself succeeded but came back empty.
+      //
+      // finish_reason is what distinguishes the causes: 'length' means reasoning
+      // consumed the whole budget before any JSON was emitted (the failure mode
+      // DeepSeekCallOptions warns about), anything else means the API returned an
+      // empty completion for another reason.
+      console.warn(
+        `DeepSeek returned no report content, using high-quality local summary: ` +
+        `finish_reason=${finishReason ?? 'unknown'} ` +
+        `completion_tokens=${completionTokens ?? '?'}/${MAX_REPORT_TOKENS} ` +
+        `reasoning_chars=${(reasoningContent || '').length}`,
+      );
       return { ...staticCompiled, aiSummary: compileLocalSummary(url, staticCompiled), executiveBreakdown: compileLocalBreakdown(url, staticCompiled) };
     }
 

@@ -46,6 +46,10 @@ export function resolveApiKey(override?: string | null): string | null {
 export interface DeepSeekResult {
   content: string | null;
   reasoningContent?: string;
+  /** Why generation stopped: 'stop', 'length' (budget exhausted), 'content_filter', … */
+  finishReason?: string;
+  /** Completion tokens actually spent. Reasoning and the answer SHARE this budget. */
+  completionTokens?: number;
 }
 
 export interface DeepSeekCallOptions {
@@ -122,7 +126,13 @@ export async function callDeepSeek(model: string, prompt: string, opts: DeepSeek
   const message = data?.choices?.[0]?.message;
   const content = typeof message?.content === 'string' ? message.content : null;
   const reasoningContent = typeof message?.reasoning_content === 'string' ? message.reasoning_content : undefined;
-  return { content, reasoningContent };
+  // finish_reason and token usage are the only signals that separate a
+  // truncated generation from an empty one. Callers that fall back on empty
+  // content need them to say WHY in a log line — without them a silent
+  // degrade is indistinguishable from a healthy run.
+  const finishReason = typeof data?.choices?.[0]?.finish_reason === 'string' ? data.choices[0].finish_reason : undefined;
+  const completionTokens = typeof data?.usage?.completion_tokens === 'number' ? data.usage.completion_tokens : undefined;
+  return { content, reasoningContent, finishReason, completionTokens };
 }
 
 // --- Multi-turn tool-calling (autofix agent loop) ---
