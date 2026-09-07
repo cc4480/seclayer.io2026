@@ -21,7 +21,9 @@ test('baseline headers are set on every response regardless of env', () => {
     assert.equal(headers['Referrer-Policy'], 'strict-origin-when-cross-origin');
     // Both of these are checked by our own scanner, so their absence would be
     // a finding we would raise against somebody else's site.
-    assert.equal(headers['Cross-Origin-Opener-Policy'], 'same-origin');
+    // Not 'same-origin': that severs the GIS popup from its opener and Google
+    // sign-in hangs with no error on either side. See securityHeaders.ts.
+    assert.equal(headers['Cross-Origin-Opener-Policy'], 'same-origin-allow-popups');
     assert.match(headers['Permissions-Policy'] as string, /camera=\(\)/);
     assert.match(headers['Permissions-Policy'] as string, /microphone=\(\)/);
     assert.match(headers['Permissions-Policy'] as string, /geolocation=\(\)/);

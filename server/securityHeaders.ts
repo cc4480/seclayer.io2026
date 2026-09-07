@@ -62,9 +62,19 @@ export function securityHeaders({ isProd }: SecurityHeaderOptions) {
       'Permissions-Policy',
       'camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()',
     );
-    // Severs this origin from any window that opened it, so a page we link to
-    // cannot reach back through window.opener.
-    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+    // Protects this origin from cross-origin windows that open it: a page we
+    // link to cannot reach back through window.opener.
+    //
+    // MUST stay 'same-origin-allow-popups', NOT 'same-origin'. Google Identity
+    // Services completes sign-in in a popup that hands the credential back to
+    // its opener. 'same-origin' severs that link, so the popup can never
+    // deliver the credential: the flow hangs forever and POST /api/auth/google
+    // is never sent — no error anywhere, client or server, because nothing
+    // fails, it just waits. 'same-origin-allow-popups' keeps the protection
+    // above (we are still shielded from windows that open US) while letting
+    // popups WE open keep their opener. This is the value Google documents for
+    // GIS. Tightening it to 'same-origin' silently breaks Google sign-in.
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
     if (isProd) {
       res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
       res.setHeader('Content-Security-Policy', CONTENT_SECURITY_POLICY);
