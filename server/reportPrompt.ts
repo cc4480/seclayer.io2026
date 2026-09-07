@@ -60,6 +60,7 @@ Please return a JSON object containing exactly these keys:
    - "businessImpact": 2-3 sentences framing the real-world consequence in business terms (data exposure, downtime, reputational/compliance risk, financial cost) if the current issues go unaddressed.
    - "priorityActions": an array of 3-6 short, ranked, imperative action items (most urgent first) a team should do this week — concrete engineering tasks, not vague advice.
 4. "findings": An array corresponding to the detected issues, rewritten with clearer titles/descriptions of how an attacker would exploit the issue. Each item MUST have exactly these fields:
+   - "sourceTitles": an array of the EXACT titles, copied verbatim, of the DETECTED ISSUES listed above that this finding covers — normally one, or several when you consolidate. This is the ONLY way your prose is matched back to the scanner's own finding list, because you are told above to reword titles and to merge similar issues, so neither your titles nor your array order can be relied on. A finding whose "sourceTitles" do not match verbatim has its "agentPrompt" discarded and the developer gets a generic fallback instead.
    - "title": short, specific vulnerability name.
    - "description": how an attacker would actually exploit this against "${url}".
    - "severity": one of "info", "low", "medium", "high", "critical".

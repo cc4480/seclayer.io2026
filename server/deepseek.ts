@@ -54,6 +54,53 @@ export function refineCategory(aiCategory: string, title: string): string {
   return aiCategory;
 }
 
+// Merge the model's PROSE onto the static findings.
+//
+// The model's finding list is deliberately not authoritative (see the
+// DETERMINISM note in generateAiReport): identity, severity, grouping and score
+// come only from compileStaticFindings. But the model is also asked, in
+// server/reportPrompt.ts, to author the per-finding PROSE that cannot move the
+// score: `description`, `fix`, `impact` and `agentPrompt`. All of it was being
+// dropped along with the rest of the model's array, so every report shipped the
+// generic static text even though a sharper, target- and stack-specific version
+// had already been generated and paid for on every single scan. Both fix-prompt
+// surfaces were affected: the MCP endpoint's per-finding `agentPrompt`, and the
+// report UI's "Complete Fix Prompt" (src/lib/scanFixPrompt.ts), which composes
+// from `description`/`impact`/`fix`.
+//
+// Exploit-pillar findings (RED_TEAM/API_SEC) are skipped entirely. They carry a
+// replayable receipt, and reattachEvidence exists precisely so a proven exploit
+// is never reworded or softened by the model; that invariant holds here too.
+//
+// Matching is by `sourceTitles` — the verbatim static titles the model says
+// each of its findings covers — because the prompt explicitly tells it to
+// reword titles and to consolidate similar issues, so neither its titles nor
+// its array length line up with the static list. A consolidated finding applies
+// its prompt to every issue it absorbed. Anything unmatched keeps the static
+// fallback, so this can only ever upgrade a report, never blank one out.
+export function mergeModelProse(staticFindings: Finding[], modelFindings: unknown): Finding[] {
+  const merged = staticFindings.map((f) => ({ ...f }));
+  if (!Array.isArray(modelFindings)) return merged;
+
+  const byTitle = new Map<string, Finding>();
+  for (const f of merged) byTitle.set(f.title.trim().toLowerCase(), f);
+
+  for (const m of modelFindings as any[]) {
+    const titles = Array.isArray(m?.sourceTitles) ? m.sourceTitles : [];
+    for (const t of titles) {
+      if (typeof t !== 'string') continue;
+      const target = byTitle.get(t.trim().toLowerCase());
+      if (!target) continue;
+      if (EXPLOIT_CATEGORIES.has(target.category)) continue;
+      for (const field of ['description', 'fix', 'impact', 'agentPrompt'] as const) {
+        const v = m[field];
+        if (typeof v === 'string' && v.trim()) target[field] = v.trim();
+      }
+    }
+  }
+  return merged;
+}
+
 export async function generateAiReport(
   url: string,
   diagnostics: any,
@@ -120,12 +167,13 @@ export async function generateAiReport(
     // MERGE vs SPLIT the same issue (e.g. reporting the two cookie flag gaps as
     // one finding on one run and two on the next) changed the finding count — and
     // therefore the recalculated score — for a target that had not changed. The
-    // model now contributes only the NARRATIVE prose (executive summary +
-    // breakdown); the findings panel and the score are fully reproducible.
+    // model now contributes only NARRATIVE prose — the executive summary, the
+    // breakdown, and the per-finding fix prompt/impact merged by mergeModelProse
+    // above; the findings panel and the score are fully reproducible.
     return {
       score: staticCompiled.score,
       severity: staticCompiled.severity,
-      findings: staticCompiled.findings,
+      findings: mergeModelProse(staticCompiled.findings, data.findings),
       aiSummary: data.aiSummary || compileLocalSummary(url, staticCompiled),
       aiReasoning: truncateReasoning(reasoningContent),
       executiveBreakdown: sanitizeBreakdown(data.executiveBreakdown, url, staticCompiled),
