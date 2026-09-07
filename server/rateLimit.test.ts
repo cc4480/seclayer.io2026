@@ -142,3 +142,43 @@ test('MemoryRateLimitStore is the default and enforces the window directly', asy
   assert.equal(third.limited, true);
   assert.ok(third.retryAfterSec > 0);
 });
+
+// The attack an IP-keyed limiter cannot see: one mailbox, many source IPs.
+// A caller on CGNAT or mobile egresses from several addresses, so each gets its
+// own IP bucket and the target inbox absorbs the sum of all of them.
+test('keyFrom buckets on the mailbox, so rotating source IPs do not multiply the allowance', async () => {
+  const prev = setRateLimitStore(new MemoryRateLimitStore());
+  try {
+    const mw = rateLimit({ windowMs: 60_000, max: 2, keyPrefix: 'auth-email',
+      keyFrom: (req: any) => String(req.body.email).toLowerCase().trim() });
+    const run = async (ip: string, email: string) => {
+      let status = 200;
+      const res: any = { setHeader() {}, status(c: number) { status = c; return res; }, json() { return res; } };
+      await mw({ ip, body: { email }, socket: {} } as any, res, () => {});
+      return status;
+    };
+    // Same mailbox, a different source IP every time.
+    assert.equal(await run('1.1.1.1', 'victim@example.com'), 200);
+    assert.equal(await run('2.2.2.2', 'victim@example.com'), 200);
+    assert.equal(await run('3.3.3.3', 'victim@example.com'), 429, 'a new IP must not buy a fresh allowance for the same mailbox');
+    // Casing and whitespace must not open a second bucket for one address.
+    assert.equal(await run('4.4.4.4', '  VICTIM@Example.com  '), 429);
+    // A different mailbox is genuinely a different bucket.
+    assert.equal(await run('1.1.1.1', 'someone-else@example.com'), 200);
+  } finally { setRateLimitStore(prev); }
+});
+
+test('keyFrom returning undefined skips limiting rather than bucketing everyone together', async () => {
+  const prev = setRateLimitStore(new MemoryRateLimitStore());
+  try {
+    // A request with no email has no identity to bucket on. Falling back to a
+    // shared constant key would let one malformed request exhaust the limit for
+    // everybody; the handler's own validation rejects these anyway.
+    const mw = rateLimit({ windowMs: 60_000, max: 1, keyPrefix: 'auth-email',
+      keyFrom: (req: any) => (req.body.email ? String(req.body.email) : undefined) });
+    let nexted = 0;
+    const res: any = { setHeader() {}, status() { return res; }, json() { return res; } };
+    for (let i = 0; i < 5; i++) await mw({ ip: '1.1.1.1', body: {}, socket: {} } as any, res, () => { nexted++; });
+    assert.equal(nexted, 5, 'identity-less requests must pass through, not consume a shared bucket');
+  } finally { setRateLimitStore(prev); }
+});

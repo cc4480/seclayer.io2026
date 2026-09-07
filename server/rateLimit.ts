@@ -124,9 +124,28 @@ function clientIp(req: Request): string {
   return req.ip || req.socket.remoteAddress || 'unknown';
 }
 
-export function rateLimit(opts: { windowMs: number; max: number; keyPrefix: string; message?: string }) {
+// `keyFrom` buckets on something other than the client IP. IP alone is a weak
+// identity in both directions: a client on CGNAT or mobile egresses from
+// several addresses and multiplies its own allowance, while everyone behind
+// one office NAT shares a bucket and can lock each other out. For an endpoint
+// whose abuse target is a specific resource — the mailbox a magic link is sent
+// to — bucketing on that resource is what actually protects it.
+//
+// Returning undefined SKIPS limiting for that request: the identity is absent
+// (no email in the body), so there is nothing to bucket on and the handler's
+// own validation will reject it. Compose with an IP-keyed limiter rather than
+// replacing it — this is a second gate, not a substitute.
+export function rateLimit(opts: {
+  windowMs: number;
+  max: number;
+  keyPrefix: string;
+  message?: string;
+  keyFrom?: (req: Request) => string | undefined;
+}) {
   return async (req: Request, res: Response, next: NextFunction) => {
-    const key = `${opts.keyPrefix}:${clientIp(req)}`;
+    const identity = opts.keyFrom ? opts.keyFrom(req) : clientIp(req);
+    if (identity === undefined) return next();
+    const key = `${opts.keyPrefix}:${identity}`;
     let result: { limited: boolean; retryAfterSec: number };
     try {
       result = await activeStore.hit(key, opts.windowMs, opts.max);

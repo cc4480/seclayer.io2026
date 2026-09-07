@@ -100,7 +100,29 @@ export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
     keyPrefix: "auth",
     message: "Too many sign-in attempts. Please wait a few minutes and try again.",
   });
-  app.post("/api/auth/request-link", requestLinkLimiter, async (req, res) => {
+  // Second gate on the MAILBOX, not the sender. The IP limiter above stops one
+  // client hammering the endpoint, but IP is a weak identity: a caller on CGNAT
+  // or mobile egresses from several addresses and gets a fresh allowance from
+  // each, so mailbombing one inbox only costs them a few extra source IPs.
+  // Bucketing on the normalised address caps how often ANY sender can have a
+  // link sent to a given mailbox.
+  //
+  // Normalisation matches the handler's (lowercase + trim), or the same address
+  // in different casing would be a different bucket and walk straight past this.
+  // An hour rather than the IP limiter's 15 minutes: nobody legitimately needs
+  // several sign-in links to one inbox within an hour, and the link itself is
+  // valid for 15 minutes.
+  const requestLinkEmailLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 5,
+    keyPrefix: "auth-email",
+    keyFrom: (req) => {
+      const raw = (req.body || {}).email;
+      return typeof raw === "string" && raw.trim() ? raw.toLowerCase().trim() : undefined;
+    },
+    message: "Too many sign-in links have been requested for that address. Please wait a while and try again.",
+  });
+  app.post("/api/auth/request-link", requestLinkLimiter, requestLinkEmailLimiter, async (req, res) => {
     const { email } = req.body || {};
     if (!email || typeof email !== "string" || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
       return res.status(400).json({ status: "error", message: "A valid email address is required." });
