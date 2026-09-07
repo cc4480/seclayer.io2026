@@ -47,9 +47,29 @@ export function buildRobotsTxt(): string {
 // answers 404. Every other view is session-gated or has no stable URL of its own.
 const PUBLIC_PAGES = ['/', '/docs', '/privacy', '/terms'];
 
+// Per-page crawl hints for the sitemap.
+//
+// lastmod is maintained by hand, deliberately. Deriving it from the deploy
+// time would claim every page changed on every deploy, which Google learns to
+// ignore — and an ignored lastmod is worse than none, because the signal is
+// gone exactly when a page really has changed. Update a date when that page's
+// content actually changes.
+const PAGE_META: Record<string, { lastmod: string; changefreq: string; priority: string }> = {
+  '/':        { lastmod: '2026-09-06', changefreq: 'weekly',  priority: '1.0' },
+  '/docs':    { lastmod: '2026-09-06', changefreq: 'monthly', priority: '0.8' },
+  '/privacy': { lastmod: '2026-09-06', changefreq: 'yearly',  priority: '0.3' },
+  '/terms':   { lastmod: '2026-09-06', changefreq: 'yearly',  priority: '0.3' },
+};
+
 export function buildSitemapXml(): string {
   const origin = siteOrigin();
-  const urls = PUBLIC_PAGES.map((path) => `  <url><loc>${origin}${path}</loc></url>`).join('\n');
+  const urls = PUBLIC_PAGES.map((path) => {
+    const m = PAGE_META[path];
+    const hints = m
+      ? `\n    <lastmod>${m.lastmod}</lastmod>\n    <changefreq>${m.changefreq}</changefreq>\n    <priority>${m.priority}</priority>`
+      : '';
+    return `  <url>\n    <loc>${origin}${path}</loc>${hints}\n  </url>`;
+  }).join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`;
 }
 
