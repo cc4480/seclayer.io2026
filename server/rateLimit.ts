@@ -96,6 +96,11 @@ export class DbRateLimitStore implements RateLimitStore {
 // caller can log which regime is in force.
 export function installSharedRateLimitStore(): boolean {
   if (!process.env.DATABASE_URL) return false;
+  // The table may not exist yet — nothing applies the Postgres schema at
+  // runtime. Fire-and-forget: rateLimit() fails OPEN, so a slow or failed
+  // create degrades to allowing requests rather than blocking boot.
+  void db.ensureRateLimitSchema().catch((err) =>
+    console.error('[rateLimit] could not ensure rate_limit_hits exists — limits will fail open:', err?.message || err));
   setRateLimitStore(new DbRateLimitStore());
   return true;
 }

@@ -747,6 +747,10 @@ class SqliteDb {
   // Returns true when a snapshot file was actually written. The boolean is
   // the contract that lets the backup worker tell a real snapshot from a
   // backend that cannot take one — see PostgresDb.backupTo.
+  // No-op on SQLite: dbSchema.ts already creates rate_limit_hits when the
+  // database is opened. Present so both backends satisfy one contract.
+  async ensureRateLimitSchema(): Promise<void> {}
+
   // Sliding-window rate limit against the DATABASE rather than process memory,
   // so every replica shares one bucket. Returns whether THIS call is over the
   // limit and, if so, when it would next be allowed.

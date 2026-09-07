@@ -492,6 +492,20 @@ export class PostgresDb implements Db {
   // Postgres backups are managed (Supabase snapshots / pg_dump), not a per-file
   // VACUUM INTO like SQLite — so this is a no-op. The backup worker is a no-op on
   // Postgres too (see server.ts wiring).
+  // Creates rate_limit_hits if it is missing. Needed because NOTHING applies
+  // server/pg/schema.sql at runtime — it is applied out of band by
+  // scripts/migrate-sqlite-to-pg.ts — so a deploy that merely ships this code
+  // would find no table, throw on every rate-limited request, fail open (see
+  // rateLimit()) and silently disable rate limiting while filling the log.
+  // Idempotent, and scoped to this one transient table; the domain schema
+  // stays owned by schema.sql.
+  async ensureRateLimitSchema(): Promise<void> {
+    await this.pool.query(
+      'CREATE TABLE IF NOT EXISTS rate_limit_hits (bucketKey text NOT NULL, hitAt bigint NOT NULL)');
+    await this.pool.query(
+      'CREATE INDEX IF NOT EXISTS idx_rate_limit_hits_key ON rate_limit_hits(bucketKey, hitAt)');
+  }
+
   // Shared sliding-window rate limit (see SqliteDb.rateLimitHit). One statement
   // so the prune, the count and the insert all run against the same snapshot
   // and a replica cannot be preempted between them.
