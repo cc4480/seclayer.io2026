@@ -235,7 +235,18 @@ export function startScanQueueWorker(processScanJob: ProcessScanJob): NodeJS.Tim
     if (draining) return;
     draining = true;
     try {
-      while (inFlight < config.maxConcurrentScans) {
+      // ONE claim per tick, not a greedy fill.
+      //
+      // Claiming until this worker's slots were full meant whichever instance
+      // polled first took the whole burst: four scans submitted together went
+      // 3/1/0 across three workers, so they ran mostly on one box while two sat
+      // idle. Since a scan takes minutes, that is minutes of avoidable latency.
+      //
+      // Taking one per tick lets the other workers claim before this one comes
+      // back. A worker still reaches full capacity, just over a few ticks — a
+      // couple of seconds of ramp against jobs measured in minutes, and under a
+      // deep queue every worker saturates anyway.
+      if (inFlight < config.maxConcurrentScans) {
         const job = await db.claimNextQueuedScan();
         if (!job) return; // queue empty — wait for the next tick
         // Stamped with the instance so the fleet's behaviour is observable:
@@ -243,9 +254,10 @@ export function startScanQueueWorker(processScanJob: ProcessScanJob): NodeJS.Tim
         // the queue or one is doing everything.
         console.log(`[scan queue] [${INSTANCE_ID}] claimed ${job.scanId}`);
         inFlight += 1;
-        // Not awaited: the point is to fill every free slot, not to run the
-        // queue one scan at a time. processScanJob keeps the lease refreshed
-        // for as long as it holds the scan.
+        // Not awaited: this worker must stay free to claim again on the next
+        // tick while this scan runs, otherwise it would process the queue one
+        // scan at a time and maxConcurrentScans would mean nothing.
+        // processScanJob keeps the lease refreshed for as long as it holds it.
         // ProcessScanJob is declared as returning void (routes fire and forget)
         // while the implementation returns a promise. Normalise rather than
         // widen a type every route depends on — and the slot MUST be released
