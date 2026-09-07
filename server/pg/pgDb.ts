@@ -492,6 +492,41 @@ export class PostgresDb implements Db {
   // Postgres backups are managed (Supabase snapshots / pg_dump), not a per-file
   // VACUUM INTO like SQLite — so this is a no-op. The backup worker is a no-op on
   // Postgres too (see server.ts wiring).
+  async appendScanEvents(scanId: string, events: { seq: number; ts: number; channel: string; text: string }[]): Promise<void> {
+    if (!events.length) return;
+    // One statement: a scan emits events in bursts, and a round-trip per event
+    // would put the database in the middle of the scanner's hot loop.
+    const values: unknown[] = [];
+    const tuples = events.map((e, i) => {
+      values.push(scanId, e.seq, e.ts, e.channel, e.text);
+      const b = i * 5;
+      return `($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5})`;
+    });
+    // ON CONFLICT DO NOTHING: a retried flush must not fail the scan, and (scanId,
+    // seq) is stable, so re-writing the same event is a no-op rather than a dup.
+    await this.pool.query(
+      `INSERT INTO scan_events (scanId, seq, ts, channel, text) VALUES ${tuples.join(', ')} ON CONFLICT DO NOTHING`,
+      values);
+  }
+
+  async getScanEventsSince(scanId: string, cursor: number):
+      Promise<{ events: { seq: number; ts: number; channel: string; text: string }[]; found: boolean }> {
+    const any = await this.pool.query('SELECT 1 FROM scan_events WHERE scanId = $1 LIMIT 1', [scanId]);
+    if (!any.rows.length) return { events: [], found: false };
+    const r = await this.pool.query(
+      'SELECT seq, ts, channel, text FROM scan_events WHERE scanId = $1 AND seq > $2 ORDER BY seq', [scanId, cursor]);
+    return {
+      events: r.rows.map((row: any) => ({
+        seq: Number(row.seq), ts: Number(row.ts), channel: String(row.channel), text: String(row.text),
+      })),
+      found: true,
+    };
+  }
+
+  async deleteScanEvents(scanId: string): Promise<void> {
+    await this.pool.query('DELETE FROM scan_events WHERE scanId = $1', [scanId]);
+  }
+
   // Creates rate_limit_hits if it is missing. Needed because NOTHING applies
   // server/pg/schema.sql at runtime — it is applied out of band by
   // scripts/migrate-sqlite-to-pg.ts — so a deploy that merely ships this code
@@ -504,6 +539,16 @@ export class PostgresDb implements Db {
       'CREATE TABLE IF NOT EXISTS rate_limit_hits (bucketKey text NOT NULL, hitAt bigint NOT NULL)');
     await this.pool.query(
       'CREATE INDEX IF NOT EXISTS idx_rate_limit_hits_key ON rate_limit_hits(bucketKey, hitAt)');
+  }
+
+  // Same reason as ensureRateLimitSchema: server/pg/schema.sql is applied out
+  // of band, so a deploy that only ships code would find no table and every
+  // event flush would fail.
+  async ensureScanEventSchema(): Promise<void> {
+    await this.pool.query(
+      'CREATE TABLE IF NOT EXISTS scan_events (scanId text NOT NULL, seq integer NOT NULL, ts bigint NOT NULL, channel text NOT NULL, text text NOT NULL, PRIMARY KEY (scanId, seq))');
+    await this.pool.query(
+      'CREATE INDEX IF NOT EXISTS idx_scan_events_scan ON scan_events(scanId, seq)');
   }
 
   // Shared sliding-window rate limit (see SqliteDb.rateLimitHit). One statement

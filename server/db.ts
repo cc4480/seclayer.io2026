@@ -747,9 +747,38 @@ class SqliteDb {
   // Returns true when a snapshot file was actually written. The boolean is
   // the contract that lets the backup worker tell a real snapshot from a
   // backend that cannot take one — see PostgresDb.backupTo.
+  // Live scan ticker persistence. See server/scanEvents.ts for why: the scan
+  // runs on one instance, the poll can land on another.
+  async appendScanEvents(scanId: string, events: { seq: number; ts: number; channel: string; text: string }[]): Promise<void> {
+    if (!events.length) return;
+    const stmt = this.db.prepare(
+      'INSERT OR IGNORE INTO scan_events (scanId, seq, ts, channel, text) VALUES (?, ?, ?, ?, ?)');
+    this.db.transaction(() => {
+      for (const e of events) stmt.run(scanId, e.seq, e.ts, e.channel, e.text);
+    })();
+  }
+
+  // `found` distinguishes "this scan has a feed but nothing new since cursor"
+  // from "no feed at all" — the client falls back to the stored narration log on
+  // the latter, so conflating them would blank a finished scan's ticker.
+  async getScanEventsSince(scanId: string, cursor: number):
+      Promise<{ events: { seq: number; ts: number; channel: string; text: string }[]; found: boolean }> {
+    const any = this.db.prepare('SELECT 1 FROM scan_events WHERE scanId = ? LIMIT 1').get(scanId);
+    if (!any) return { events: [], found: false };
+    const rows = this.db.prepare(
+      'SELECT seq, ts, channel, text FROM scan_events WHERE scanId = ? AND seq > ? ORDER BY seq').all(scanId, cursor);
+    return { events: rows as any[], found: true };
+  }
+
+  async deleteScanEvents(scanId: string): Promise<void> {
+    this.db.prepare('DELETE FROM scan_events WHERE scanId = ?').run(scanId);
+  }
+
   // No-op on SQLite: dbSchema.ts already creates rate_limit_hits when the
   // database is opened. Present so both backends satisfy one contract.
   async ensureRateLimitSchema(): Promise<void> {}
+  // Also a no-op: dbSchema.ts creates scan_events on open.
+  async ensureScanEventSchema(): Promise<void> {}
 
   // Sliding-window rate limit against the DATABASE rather than process memory,
   // so every replica shares one bucket. Returns whether THIS call is over the

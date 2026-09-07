@@ -112,7 +112,7 @@ export function registerNmapRoutes(app: express.Express, ctx: RouteContext) {
     }
     const since = Number.parseInt(String(req.query.since ?? "0"), 10);
     const cursor = Number.isFinite(since) && since >= 0 ? since : 0;
-    const { events, cursor: nextCursor, found } = scanEvents.getSince(scan.id, cursor);
+    const { events, cursor: nextCursor, found } = await scanEvents.getSince(scan.id, cursor);
     res.json({ status: "ok", events, cursor: nextCursor, found, scanStatus: scan.status });
   });
 

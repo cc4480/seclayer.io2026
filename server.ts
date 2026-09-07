@@ -15,6 +15,7 @@ import { startMonitorWorker } from './server/monitorWorker.js';
 import { startDigestWorker } from './server/digestWorker.js';
 import { startBackupWorker } from './server/backupWorker.js';
 import { installSharedRateLimitStore } from './server/rateLimit.js';
+import { installSharedScanEvents } from './server/scanEvents.js';
 import { registerAuthRoutes } from './server/routes/auth.js';
 import { registerScanRoutes } from './server/routes/scans.js';
 import { registerNmapRoutes } from './server/routes/nmap.js';
@@ -176,6 +177,12 @@ async function startServer() {
   // replica enforces its own private copy of every limit and the effective
   // cap becomes N x max. Safe to install here: the middleware resolves the
   // active store per REQUEST, not when the route is registered.
+  // The live scan ticker has the same single-instance assumption: the scan
+  // buffers events in the process that runs it, but a poll can land anywhere.
+  if (installSharedScanEvents()) {
+    console.log('[scanEvents] Live feed shared via the database — pollable from any instance.');
+  }
+
   if (installSharedRateLimitStore()) {
     console.log('[rateLimit] Shared database-backed store — safe for multiple instances.');
   } else {

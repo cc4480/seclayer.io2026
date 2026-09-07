@@ -187,6 +187,20 @@ CREATE TABLE IF NOT EXISTS rate_limit_hits (
 );
 CREATE INDEX IF NOT EXISTS idx_rate_limit_hits_key ON rate_limit_hits(bucketKey, hitAt);
 
+
+-- Live scan ticker feed -- see server/scanEvents.ts. The scan runs on ONE
+-- instance and buffers events in memory; the client's poll can land on any
+-- instance. Rows are transient and swept once the scan is done.
+CREATE TABLE IF NOT EXISTS scan_events (
+  scanId  text NOT NULL,
+  seq     integer NOT NULL,
+  ts      bigint NOT NULL,
+  channel text NOT NULL,
+  text    text NOT NULL,
+  PRIMARY KEY (scanId, seq)
+);
+CREATE INDEX IF NOT EXISTS idx_scan_events_scan ON scan_events(scanId, seq);
+
 -- One-time data fix-up carried over from dbSchema.ts: revoke domains that were
 -- ever trusted on self-attestation alone (that path was removed; real DNS/file
 -- proof is required now). Idempotent.

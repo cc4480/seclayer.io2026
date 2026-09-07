@@ -44,7 +44,7 @@ test('processNmapScanJob transitions scanning -> failed when target resolution i
 
   // The live stream is closed on completion but its buffered tail should
   // still be readable immediately after (EVICT_AFTER_MS hasn't elapsed).
-  const { events } = scanEvents.getSince(scan.id, 0);
+  const { events } = await scanEvents.getSince(scan.id, 0);
   assert.ok(events.some((e) => /Resolving/.test(e.text)));
   assert.ok(events.some((e) => /Scan failed/.test(e.text)));
 });

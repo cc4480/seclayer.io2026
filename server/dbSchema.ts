@@ -122,6 +122,19 @@ export function runMigrations(db: Database.Database): void {
       hitAt INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_rate_limit_hits_key ON rate_limit_hits(bucketKey, hitAt);
+    -- Live scan ticker feed. Only used when a networked database backs the app:
+    -- the scan runs on ONE instance and holds its events in memory, but the
+    -- client's poll can land on ANY instance, which would then see no stream and
+    -- report an empty feed. Rows are transient and swept once the scan is done.
+    CREATE TABLE IF NOT EXISTS scan_events (
+      scanId  TEXT NOT NULL,
+      seq     INTEGER NOT NULL,
+      ts      INTEGER NOT NULL,
+      channel TEXT NOT NULL,
+      text    TEXT NOT NULL,
+      PRIMARY KEY (scanId, seq)
+    );
+    CREATE INDEX IF NOT EXISTS idx_scan_events_scan ON scan_events(scanId, seq);
     CREATE TABLE IF NOT EXISTS oob_tokens (
       token TEXT PRIMARY KEY,
       scanId TEXT,

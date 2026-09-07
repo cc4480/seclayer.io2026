@@ -71,9 +71,11 @@ export function makeProcessScanJob(oobCollaborator?: OobCollaborator) {
       emit("system", `Launching scan of ${scan.url} — validating target & resolving DNS…`);
       let narrateCursor = 0;
       let narrating = false;
-      liveNarrator = setInterval(() => {
+      liveNarrator = setInterval(async () => {
         if (narrating) return;
-        const { events, cursor } = scanEvents.getSince(scanId, narrateCursor);
+        // getSince is async now that a feed can live in the shared store; the
+        // `narrating` guard above already prevents overlapping passes.
+        const { events, cursor } = await scanEvents.getSince(scanId, narrateCursor);
         narrateCursor = cursor;
         const batch = events.filter((e) => e.channel !== "flash"); // never feed Flash its own output
         if (batch.length === 0) return;
