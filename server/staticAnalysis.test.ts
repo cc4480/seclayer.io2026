@@ -82,3 +82,18 @@ test('does NOT flag an empty or unrelated body', () => {
   assert.deepEqual(analyzeDataDumpExposure('', 'http://target/'), []);
   assert.deepEqual(analyzeDataDumpExposure('<html><body>hello</body></html>', 'http://target/'), []);
 });
+
+test('Private Key Block: a PEM formatting template is not a leaked key (JSEncrypt FP)', () => {
+  // JSEncrypt and similar RSA libraries, loaded on countless login forms, hold
+  // the header literal to format their output — no key material near it. The
+  // bare-header pattern reported that as a CVSS-critical on every such site.
+  const jsencrypt = 'getPrivateKey:function(){var t="-----BEGIN RSA PRIVATE KEY-----\n";return t+e(this.getPrivateBaseKeyB64())}';
+  const hit = analyzeSecrets(jsencrypt).filter((f) => /Private Key/i.test(f.issue ?? ""));
+  assert.equal(hit.length, 0, 'a formatting template must not be a finding');
+});
+
+test('Private Key Block: a real key embedded in source is still caught', () => {
+  const inline = '"-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA7Yn3kQ2mVrJk1pQ0zXcFbN9dLmVpQrStUvWxYzAbCdEf\n"';
+  const hit = analyzeSecrets(inline).filter((f) => /Private Key/i.test(f.issue ?? ""));
+  assert.equal(hit.length, 1, 'a genuine embedded key must still be reported');
+});

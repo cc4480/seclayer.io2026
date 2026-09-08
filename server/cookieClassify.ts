@@ -9,7 +9,32 @@
 //
 // Pure and dependency-free so it's unit-tested directly.
 
-export type CookieClass = "session" | "analytics" | "preference" | "unknown";
+export type CookieClass = "session" | "analytics" | "preference" | "infra" | "unknown";
+
+// Cookies set by a CDN, WAF or bot-management layer in front of the site — not
+// by the application, and not something the operator can add flags to. Flagging
+// a missing HttpOnly on Cloudflare's or DataDome's own cookie is unactionable:
+// the fix would require the vendor, not the site owner. Checked first, like
+// analytics, because some carry "session"/"sid" substrings.
+const INFRA_PATTERNS: RegExp[] = [
+  /^datadome$/i,                         // DataDome bot management
+  /^bm_/i, /^ak_bmsc$/i, /^_abck$/i,     // Akamai Bot Manager
+  /^__cf_bm$/i, /^cf_clearance$/i, /^_cfuvid$/i, /^__cflb$/i, // Cloudflare
+  /^incap_ses/i, /^visid_incap/i, /^nlbi_/i, // Imperva/Incapsula
+  /^__cfruid$/i,
+];
+
+// Double-submit CSRF tokens are read by the page and echoed in a request header,
+// so they MUST be JS-readable — HttpOnly would break the defence. They still
+// need Secure and SameSite, so they stay classified "session"; this predicate
+// only exempts them from the HttpOnly finding specifically.
+export function isCsrfToken(name: string): boolean {
+  const n = (name || "").trim();
+  if (!/csrf|xsrf/i.test(n)) return false;
+  // A name carrying both a CSRF and a stronger session marker is ambiguous;
+  // keep it locked down rather than exempt it.
+  return !/sess|jwt|login|remember|credential|(^|[._-])sid([._-]|$)/i.test(n);
+}
 
 // Third-party analytics / marketing / product-telemetry cookies, set by embedded
 // SDKs and required to be JS-readable. Checked FIRST because some carry "session"
@@ -59,6 +84,7 @@ const SESSION_PATTERNS: RegExp[] = [
 export function classifyCookie(name: string): CookieClass {
   const n = (name || "").trim();
   if (!n) return "unknown";
+  if (INFRA_PATTERNS.some((re) => re.test(n))) return "infra";
   if (ANALYTICS_PATTERNS.some((re) => re.test(n))) return "analytics";
   if (SESSION_PATTERNS.some((re) => re.test(n))) return "session";
   if (PREFERENCE_PATTERNS.some((re) => re.test(n))) return "preference";

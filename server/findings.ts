@@ -10,7 +10,7 @@
 import type { DiagnosticResult } from "./scanner.js";
 import { Finding, Severity, ScanEvidence } from "../src/types.js";
 import { scoreFindings } from "./scoring.js";
-import { classifyCookie } from "./cookieClassify.js";
+import { classifyCookie, isCsrfToken } from "./cookieClassify.js";
 import { mapOwasp } from "./owasp.js";
 import { buildAgentPrompt, buildImpactFallback } from "./agentPrompt.js";
 import crypto from "crypto";
@@ -199,6 +199,18 @@ function buildCookieFindings(diag: DiagnosticResult): Finding[] {
     // cookie we can't confidently classify as non-session ("session" or "unknown")
     // is still reported, so a genuine session-cookie gap is never missed.
     if (cls === "analytics" || cls === "preference") continue;
+
+    // Set by a CDN/WAF/bot-management layer, not the app — the operator cannot
+    // add flags to DataDome's or Cloudflare's own cookie, so the finding is
+    // unactionable. (datadome, bm_so and friends were flagged on nytimes,
+    // reuters, etsy, ebay.)
+    if (cls === "infra") continue;
+
+    // A double-submit CSRF token has to be readable by JavaScript, so demanding
+    // HttpOnly on it is wrong — it would break the CSRF defence. It still needs
+    // Secure, so only the HttpOnly finding is suppressed. (dropbox's
+    // __Host-js_csrf was flagged here.)
+    if (!isSecureIssue && isCsrfToken(name)) continue;
 
     // Confidence reflects how sure we are it's a real RISK, not just that the flag
     // is absent: a session-named cookie is high; an unclassifiable one is medium

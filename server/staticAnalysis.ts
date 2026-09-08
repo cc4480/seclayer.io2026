@@ -32,7 +32,14 @@ const SECRET_SIGNATURES = [
     },
     {
       name: "Private Key Block",
-      regex: /-----BEGIN (RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----/,
+      // A PEM header alone is not a key. JSEncrypt and similar RSA libraries —
+      // loaded on countless login forms — contain the literal
+      // "-----BEGIN RSA PRIVATE KEY-----\n" purely to FORMAT their output, with
+      // no key material anywhere near it. Matching the bare header made every
+      // such site a critical. Require a base64 key body to follow, allowing the
+      // escaped "\n" separator that appears when the header sits inside a JS
+      // string literal, so a key genuinely embedded in source is still caught.
+      regex: /-----BEGIN (RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----[\s\\rn"']{0,12}[A-Za-z0-9+/]{40,}/,
       severity: "critical" as Severity,
       confidence: "high" as const,
       note: "A PEM private key block was served to the client; the corresponding key must be rotated.",
