@@ -169,6 +169,24 @@ function buildHeaderFindings(diag: DiagnosticResult): Finding[] {
       category: "IAST",
     });
   }
+
+  // X-Content-Type-Options is one of the four essential tracked headers (only
+  // referrer-policy is advisory), but it had no finding builder — so a missing
+  // nosniff was counted as an essential gap in coverage yet never surfaced to
+  // the user. Without it a browser may MIME-sniff a response and execute a
+  // user-uploaded file as script. Same medium/medium posture as the others.
+  if (diag.missingHeaders.includes("x-content-type-options")) {
+    findings.push({
+      id: fid(),
+      title: "Missing X-Content-Type-Options (MIME Sniffing)",
+      description:
+        "No X-Content-Type-Options: nosniff header was observed on the scanned response. Without it a browser may ignore the declared Content-Type and MIME-sniff the body, which can turn an uploaded or user-controlled file served with the wrong type into executable script. Its absence is a defense-in-depth gap, not itself an exploit.",
+      severity: "medium",
+      confidence: "medium",
+      fix: 'Send "X-Content-Type-Options: nosniff" on all responses so the declared Content-Type is always honoured.',
+      category: "IAST",
+    });
+  }
   return findings;
 }
 

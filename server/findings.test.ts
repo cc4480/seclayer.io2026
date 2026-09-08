@@ -146,3 +146,27 @@ test('a finding with an exploit receipt is verified as actively confirmed', () =
   const rt = r.findings.find((f) => /sql injection/i.test(f.title));
   assert.match(rt!.verification!, /active exploitation|replayable|receipt/i);
 });
+
+test('X-Content-Type-Options gap becomes a finding (it is essential, not advisory)', () => {
+  // Regression: nosniff was one of the four essential tracked headers but had no
+  // finding builder, so a missing header was counted in coverage yet never
+  // surfaced to the user. Detected by the detection-check fixture.
+  const diag = baseDiag({ missingHeaders: ['x-content-type-options'] });
+  const r = compileStaticFindings(diag);
+  assert.ok(
+    r.findings.some((f) => /X-Content-Type-Options/i.test(f.title)),
+    'a missing nosniff header must surface as a finding',
+  );
+});
+
+test('Referrer-Policy stays advisory — its absence is not a finding', () => {
+  // The browser default (strict-origin-when-cross-origin) is already safe, so
+  // this must NOT become noise. Guards against someone "fixing" the gap above
+  // by blanket-reporting every tracked header.
+  const diag = baseDiag({ missingHeaders: ['referrer-policy'] });
+  const r = compileStaticFindings(diag);
+  assert.ok(
+    !r.findings.some((f) => /Referrer-Policy/i.test(f.title)),
+    'a missing Referrer-Policy must not be reported',
+  );
+});
