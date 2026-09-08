@@ -10,7 +10,7 @@ import type {
   User, Scan, CreditTransaction, ApiKey, Finding, SuppressionRule, MonitoredTarget,
   DomainVerification, OobEvent, NmapScan, AutofixSession,
 } from "../../src/types.js";
-import { hashToken, maskKey } from "../dbCrypto.js";
+import { hashToken, maskKey, sealSecret, openSecret } from "../dbCrypto.js";
 import {
   rowToUser, rowToScan, rowToApiKey, rowToDomainVerification, rowToMonitoredTarget,
   rowToNmapScan, rowToAutofixSession,
@@ -137,12 +137,14 @@ export class PostgresDb implements Db {
   async markDigestSent(userId: string, iso: string): Promise<void> {
     await this.run("UPDATE users SET lastDigestAt = ? WHERE id = ?", [iso, userId]);
   }
+  // Sealed here rather than at the route — see the note in db.ts.
   async setUserDeepseekKey(userId: string, key: string | null): Promise<void> {
-    await this.run("UPDATE users SET deepseekApiKey = ? WHERE id = ?", [key && key.trim() ? key.trim() : null, userId]);
+    const trimmed = key && key.trim() ? key.trim() : null;
+    await this.run("UPDATE users SET deepseekApiKey = ? WHERE id = ?", [trimmed ? sealSecret(trimmed) : null, userId]);
   }
   async getUserDeepseekKey(userId: string): Promise<string | null> {
     const row = await this.get("SELECT deepseekApiKey FROM users WHERE id = ?", [userId]);
-    return row?.deepseekApiKey ?? null;
+    return openSecret(row?.deepseekApiKey ?? null);
   }
 
   // --- Users + credits ------------------------------------------------------

@@ -4,6 +4,9 @@ import express from 'express';
 import type { AddressInfo } from 'node:net';
 
 process.env.DB_PATH = ':memory:';
+// The per-user key is sealed at rest (dbCrypto.sealSecret), so storing one now
+// requires a configured key. Set before the db module is imported.
+process.env.ENCRYPTION_KEY = (await import('node:crypto')).randomBytes(32).toString('base64');
 const { db } = await import('./db.js');
 const { resolveApiKey } = await import('./deepseekClient.js');
 const { registerAccountRoutes } = await import('./routes/account.js');
@@ -72,7 +75,14 @@ test('PUT /api/user/deepseek-key sets a key (masked preview, raw never returned)
     assert.equal(body.deepseekKeySet, true);
     assert.ok(body.deepseekKeyPreview && body.deepseekKeyPreview !== rawKey, 'a masked preview, not the raw key');
     assert.ok(!JSON.stringify(body).includes(rawKey), 'the raw key is never in the response');
-    assert.equal((await db.getUserDeepseekKey(u.id)), rawKey, 'the raw key is stored server-side');
+    assert.equal((await db.getUserDeepseekKey(u.id)), rawKey, 'the raw key round-trips server-side');
+    // ...but the column itself must hold ciphertext, not the key. This is the
+    // whole point: a database dump must not yield a billable DeepSeek key.
+    const atRest = (db as any).db?.prepare?.('SELECT deepseekApiKey FROM users WHERE id = ?').get(u.id)?.deepseekApiKey;
+    if (atRest) {
+      assert.ok(!String(atRest).includes(rawKey), 'the column holds ciphertext, not the raw key');
+      assert.ok(String(atRest).startsWith('enc.v1.'), 'sealed with the versioned format');
+    }
 
     // Junk key rejected, existing key untouched.
     const bad = await fetch(`${base}/api/user/deepseek-key`, {
@@ -89,4 +99,32 @@ test('PUT /api/user/deepseek-key sets a key (masked preview, raw never returned)
     assert.equal((await clear.json()).deepseekKeySet, false);
     assert.equal((await db.getUserDeepseekKey(u.id)), null);
   });
+});
+
+test('PUT /api/user/deepseek-key refuses to store a key when the server has no ENCRYPTION_KEY', async () => {
+  const u = (await db.getOrCreateUser(`ds-noenc-${Date.now()}@test.io`));
+  const prev = process.env.ENCRYPTION_KEY;
+  delete process.env.ENCRYPTION_KEY;
+  try {
+    await withAccountApp(u.id, async (base) => {
+      const res = await fetch(`${base}/api/user/deepseek-key`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'sk-1234567890abcdefghijklmnop' }),
+      });
+      // 503, not a 500 from the crypto layer and not a silent plaintext write.
+      assert.equal(res.status, 503);
+      assert.equal((await db.getUserDeepseekKey(u.id)), null, 'nothing was stored');
+
+      // Clearing must still work, so a user is never stuck with a key they
+      // cannot remove after the server loses its encryption key.
+      const clear = await fetch(`${base}/api/user/deepseek-key`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: '' }),
+      });
+      assert.equal(clear.status, 200);
+    });
+  } finally {
+    if (prev === undefined) delete process.env.ENCRYPTION_KEY;
+    else process.env.ENCRYPTION_KEY = prev;
+  }
 });

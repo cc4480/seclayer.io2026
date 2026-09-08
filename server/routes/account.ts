@@ -4,6 +4,7 @@ import express from "express";
 import { db, cleanUrl } from "../db.js";
 import { config } from "../config.js";
 import { deepseekKeyStatus } from "./deepseekKeyStatus.js";
+import { isEncryptionConfigured } from "../dbCrypto.js";
 import { assertScanTargetSafe } from "../scanner.js";
 import { computeNextRun } from "../schedule.js";
 import { activeProbesUnlocked } from "../activeProbeGate.js";
@@ -227,6 +228,19 @@ export function registerAccountRoutes(app: express.Express, ctx: RouteContext) {
       return res.status(400).json({ status: "error", message: "That doesn't look like a valid DeepSeek API key (it should start with 'sk-' and contain no spaces)." });
     }
     const userId = getUserId(req);
+    // Storing a key means holding a live, billable third-party credential, and
+    // the database layer now seals it with ENCRYPTION_KEY. Without that key
+    // configured there is no safe way to keep it, so refuse rather than fall
+    // back to the cleartext column this replaced. Clearing a key (empty body)
+    // still works, so a user is never trapped with a key they cannot remove.
+    if (trimmed && !isEncryptionConfigured()) {
+      return res.status(503).json({
+        status: "error",
+        message:
+          "This server cannot store personal API keys yet: it has no ENCRYPTION_KEY configured. " +
+          "Scans still run using the server's own AI key.",
+      });
+    }
     (await db.setUserDeepseekKey(userId, trimmed || null));
     res.json({ status: "ok", ...deepseekKeyStatus((await db.getUserDeepseekKey(userId))) });
   });
