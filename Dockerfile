@@ -14,8 +14,12 @@ RUN npm ci
 COPY . .
 RUN npm run build && npm prune --omit=dev
 
-# Chromium for the DOM-XSS probe and the crawl renderer (both gated behind
-# ENABLE_BROWSER_RENDERING). Installed AFTER the prune so it isn't discarded,
+# Chromium has three consumers, behind two independent flags: the DOM-XSS probe
+# and the crawl renderer (ENABLE_BROWSER_RENDERING), and the target screenshot
+# shown on a report's Overview tab (ENABLE_TARGET_SCREENSHOT). The flags are
+# separate on purpose — an operator may want a landing-page visual without
+# paying for a full JS crawl — so neither being set is enough to conclude this
+# browser is unused. Installed AFTER the prune so it isn't discarded,
 # and only the browser — `--with-deps` would apt-install libraries into this
 # stage, which the runtime stage never receives; those are installed there
 # directly instead.
