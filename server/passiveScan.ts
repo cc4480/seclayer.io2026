@@ -5,6 +5,7 @@
 // passed DiagnosticResult in place and returns the root HTML so the caller can
 // seed the crawler with it. A failure reaching the target throws, so the scan is
 // surfaced as failed rather than a misleading "clean" report.
+import { detectChallengePage } from "./challengePage.js";
 import type { DiagnosticResult } from "./scanner.js";
 import type { EmitFn } from "./scanEvents.js";
 import { safeFetch } from "./ssrf.js";
@@ -123,6 +124,17 @@ export async function runPassiveScan(
 
     const htmlText = await response.text().catch(() => "");
     rootHtml = htmlText;
+
+    // Decided once, here, on the root document: did the edge answer instead of
+    // the site? Everything below reads this response, so if it is an
+    // interstitial the findings describe Cloudflare rather than the customer.
+    result.challenge = detectChallengePage(response.status, htmlText, result.headers);
+    if (result.challenge.isChallenge) {
+      emit?.(
+        "recon",
+        `Intercepted by ${result.challenge.vendor ?? "an edge"} bot protection — ${result.challenge.signal}. Content-derived checks will be withheld rather than attributed to this site.`,
+      );
+    }
 
     // Missing security headers.
     for (const header of SECURITY_HEADERS) {

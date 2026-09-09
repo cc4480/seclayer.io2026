@@ -83,6 +83,28 @@ function buildSurfaceFindings(diag: DiagnosticResult): Finding[] {
 }
 
 // 1. EASM (External Attack Surface Management): transport + framework signature.
+/**
+ * Emitted when the target's edge served a challenge instead of the site.
+ *
+ * Without this the report is quietly wrong rather than visibly incomplete. A
+ * scan that withheld two thirds of its checks and said nothing would read as a
+ * clean bill of health, which is the opposite of what happened — so this names
+ * the interception, what it cost, and how to get a real scan.
+ */
+function interceptedFinding(diag: DiagnosticResult): Finding {
+  const vendor = diag.challenge?.vendor;
+  return {
+    id: fid(),
+    title: "Scan was intercepted by a bot-protection challenge",
+    description:
+      `The request for this page was answered by ${vendor ? `${vendor}'s` : "an edge"} bot-protection layer rather than by the site itself, so what was analysed is the challenge page. Every check that reads the response — security headers, cookies, Content-Security-Policy, exposed secrets, detected libraries, exposed paths — would have described that interstitial rather than this site, so those findings have been withheld rather than reported against you. THIS IS NOT A CLEAN RESULT: it is an incomplete one, and the score reflects only what could still be observed.${diag.challenge?.signal ? ` Detected by: ${diag.challenge.signal}.` : ""}`,
+    severity: "info",
+    confidence: "high",
+    fix: "Allow the scanner through the bot-protection rules for the duration of a scan — by source IP, or by User-Agent — then scan again. Verifying domain ownership also lets the scan authenticate itself.",
+    category: "EASM",
+  };
+}
+
 function buildEasmFindings(diag: DiagnosticResult): Finding[] {
   const findings: Finding[] = [];
   if (!diag.sslSecure) {
@@ -395,6 +417,35 @@ export function compileStaticFindings(diag: DiagnosticResult): {
   severity: Severity;
   findings: Finding[];
 } {
+  // ── Withhold everything read from a bot-protection interstitial ───────────
+  //
+  // When the edge answered instead of the site, every check that read the
+  // response describes that interstitial: the absent CSP is Cloudflare's, the
+  // cookies are the challenge's, the leaked "Server" banner is the WAF's. Those
+  // statements are false about the customer, and a report full of them is worse
+  // than a short one — it is confidently wrong about a site the reader can go
+  // and check.
+  //
+  // The bias here is deliberate and one-directional. Over-suppressing behind an
+  // aggressive WAF costs a finding; under-suppressing publishes another
+  // company's error page under your customer's name. So this keeps only the two
+  // things that did not read the response at all — whether the URL was
+  // plaintext (a property of the scheme) and whether active probing ran — plus
+  // the note explaining why the rest is missing.
+  if (diag.challenge?.isChallenge) {
+    const survives = new Set(["Insecure Connection Protocol (HTTP)", "Active Exploit Probing Skipped (Unverified Target)"]);
+    const kept = [...buildEasmFindings(diag), ...buildSurfaceFindings(diag)].filter((f) => survives.has(f.title));
+    const withheld = [interceptedFinding(diag), ...kept];
+    for (const f of withheld) {
+      if (!f.owasp) f.owasp = mapOwasp(f.category, f.title);
+      if (!f.impact) f.impact = buildImpactFallback(f.severity);
+      if (!f.agentPrompt) f.agentPrompt = buildAgentPrompt(f, diag.url);
+      if (!f.verification) f.verification = verificationNote(f);
+    }
+    const { score, severity } = scoreFindings(withheld);
+    return { score, severity, findings: withheld };
+  }
+
   // Assembled in precedence order (first occurrence of a title wins the dedupe).
   const findings: Finding[] = [
     ...buildSurfaceFindings(diag),

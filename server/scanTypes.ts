@@ -1,6 +1,7 @@
 // Shared scan data contracts: the DiagnosticResult produced by runDiagnostics
 // and the ScanOptions that configure it. Extracted so the probe/analysis modules
 // can depend on the shapes without importing the scanner entry point.
+import type { ChallengeVerdict } from "./challengePage.js";
 import type { Finding, Severity, ExploitEvidence, BolaIdentity, LoginCredentials, ScanCoverage } from "../src/types.js";
 import type { OobCollaborator } from "./oob.js";
 import type { EmitFn } from "./scanEvents.js";
@@ -101,6 +102,12 @@ export interface DiagnosticResult {
   // True when active exploit probing (SQLi/XSS/cmd-injection/SSRF/GraphQL/BOLA
   // fuzzing) was skipped because the target's domain ownership isn't verified.
   activeProbesSkipped?: boolean;
+  /**
+   * Set when the target's edge answered with a challenge or block page instead
+   * of the site. Every content-derived check then describes that interstitial,
+   * so findings read from it are withheld rather than attributed to the target.
+   */
+  challenge?: ChallengeVerdict;
   // Full-transparency record of exactly which check groups ran and how many
   // discrete checks each fired against this target (see server/coverage.ts).
   coverage?: ScanCoverage;
