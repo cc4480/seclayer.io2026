@@ -302,7 +302,7 @@ export default function ReportViewer({ scan, previousScan, onBack, onRefreshScan
             </div>
 
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 shrink-0">
-              {previousScan && typeof previousScan.score === 'number' && (
+              {previousScan && typeof previousScan.score === 'number' && typeof scan.score === 'number' && (
                 <div className="p-4 rounded border border-zinc-800 bg-black flex items-center space-x-5 h-full">
                   <div className="text-right">
                     <span className="text-[9px] font-mono text-zinc-500 uppercase block tracking-wider select-none">Score Delta</span>
