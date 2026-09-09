@@ -75,19 +75,94 @@ export function isBlockedIp(ip: string): boolean {
     if (a === 192 && b === 168) return true; // private
     if (a === 169 && b === 254) return true; // link-local + cloud metadata
     if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+    if (a === 192 && b === 0 && ip.split(".").map(Number)[2] === 0) return true; // 192.0.0.0/24 IETF protocol assignments
+    if (a === 198 && (b === 18 || b === 19)) return true; // 198.18.0.0/15 benchmarking
     if (a >= 224) return true; // multicast / reserved
     return false;
   }
   if (net.isIPv6(ip)) {
     const lower = ip.toLowerCase();
     if (lower === "::1" || lower === "::") return true; // loopback / unspecified
-    if (lower.startsWith("fe80")) return true; // link-local
     if (lower.startsWith("fc") || lower.startsWith("fd")) return true; // unique local
-    const mapped = lower.match(/::ffff:(\d+\.\d+\.\d+\.\d+)/); // IPv4-mapped
-    if (mapped) return isBlockedIp(mapped[1]);
+
+    // Link-local is fe80::/10 — first 10 bits 1111111010 — which spans fe80
+    // through febf, not just the fe80 prefix everyone writes.
+    if (/^fe[89ab][0-9a-f]:/.test(lower)) return true;
+
+    // Addresses that EMBED an IPv4 address must be judged on the IPv4 they
+    // carry, in every notation.
+    //
+    // This is the check that was broken, and it mattered. It used to match only
+    // the dotted form (`/::ffff:(\d+\.\d+\.\d+\.\d+)/`) — but Node's URL
+    // parser rewrites `[::ffff:127.0.0.1]` to `[::ffff:7f00:1]`, so by the time
+    // a scan target reached this function the dotted form no longer existed and
+    // the check could never fire. Every internal range was reachable by writing
+    // it in hex: ::ffff:7f00:1 (loopback), ::ffff:a9fe:a9fe (cloud metadata),
+    // ::ffff:a00:1 (RFC1918). Expanding the address first makes the notation
+    // irrelevant.
+    const embedded = embeddedIpv4(lower);
+    if (embedded) return isBlockedIp(embedded);
+
     return false;
   }
   return true; // unrecognized format -> block
+}
+
+/**
+ * The IPv4 address embedded in an IPv6 address, in dotted form, or null.
+ *
+ * Covers IPv4-mapped (::ffff:0:0/96), the deprecated IPv4-compatible form
+ * (::/96), and NAT64's well-known prefix (64:ff9b::/96) — a gateway translating
+ * the last one lands on the embedded IPv4 for real. Works from the fully
+ * expanded address, so hex, dotted, compressed and expanded notations of the
+ * same address all reduce to the same answer.
+ */
+function embeddedIpv4(addr: string): string | null {
+  const groups = expandIpv6(addr);
+  if (!groups) return null;
+  const [g0, g1, g2, g3, g4, g5, g6, g7] = groups;
+  const toDotted = () =>
+    `${(g6 >> 8) & 0xff}.${g6 & 0xff}.${(g7 >> 8) & 0xff}.${g7 & 0xff}`;
+
+  // ::ffff:a.b.c.d — IPv4-mapped
+  if (g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0xffff) return toDotted();
+  // 64:ff9b::a.b.c.d — NAT64 well-known prefix
+  if (g0 === 0x64 && g1 === 0xff9b && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0) return toDotted();
+  // ::a.b.c.d — deprecated IPv4-compatible. "::" and "::1" are handled above.
+  if (g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0 && (g6 !== 0 || g7 > 1)) {
+    return toDotted();
+  }
+  return null;
+}
+
+/** An IPv6 address as its eight 16-bit groups, or null if it will not parse. */
+function expandIpv6(addr: string): number[] | null {
+  let text = addr.trim().toLowerCase().replace(/^\[|\]$/g, "").replace(/%.*$/, ""); // drop zone id
+  if (!net.isIPv6(text)) return null;
+
+  // A trailing dotted quad occupies the last two groups.
+  let tail: number[] = [];
+  const dotted = text.match(/(\d+\.\d+\.\d+\.\d+)$/);
+  if (dotted) {
+    const octets = dotted[1].split(".").map(Number);
+    if (octets.length !== 4 || octets.some((o) => !Number.isInteger(o) || o < 0 || o > 255)) return null;
+    tail = [(octets[0] << 8) | octets[1], (octets[2] << 8) | octets[3]];
+    text = text.slice(0, -dotted[1].length).replace(/:$/, "") + ":";
+    if (text === ":") text = "::";
+  }
+
+  const [head, rest, extra] = text.split("::");
+  if (extra !== undefined) return null; // more than one "::" is invalid
+  const parse = (part: string) =>
+    part.split(":").filter(Boolean).map((h) => parseInt(h, 16));
+  const left = parse(head ?? "");
+  const right = rest === undefined ? [] : parse(rest);
+  const groups =
+    rest === undefined
+      ? [...left, ...tail]
+      : [...left, ...new Array(Math.max(0, 8 - left.length - right.length - tail.length)).fill(0), ...right, ...tail];
+  if (groups.length !== 8 || groups.some((g) => !Number.isInteger(g) || g < 0 || g > 0xffff)) return null;
+  return groups;
 }
 
 // Dev-only, opt-in escape hatch for scanning a LOCAL target on this machine
