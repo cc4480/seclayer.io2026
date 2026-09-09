@@ -47,9 +47,9 @@ test("proves conditional signature verification (rejected for USD, accepted for 
     const finding = await probeWebhookSignatureBypass(`http://127.0.0.1:${port}/`, [], H);
     assert.ok(finding, "expected a webhook signature-bypass finding");
     assert.match(finding!.testName, /Webhook Signature Verification Bypass/);
-    assert.equal(finding!.evidence.method, "differential");
-    assert.match(finding!.evidence.control.response, /400/);
-    assert.ok(finding!.evidence.attack.response.includes(finding!.evidence.signal.quote));
+    assert.equal(finding!.evidence!.method, "differential");
+    assert.match(finding!.evidence!.control!.response, /400/);
+    assert.ok(finding!.evidence!.attack.response.includes(finding!.evidence!.signal.quote));
   });
 });
 
@@ -83,6 +83,6 @@ test("finds a webhook endpoint supplied via discovered POST targets (off the gue
   await withServer(handler, async (port) => {
     const finding = await probeWebhookSignatureBypass(`http://127.0.0.1:${port}/`, [`http://127.0.0.1:${port}/events/inbound`], H);
     assert.ok(finding, "expected the discovered webhook endpoint to be caught");
-    assert.match(finding!.evidence.attack.request, /\/events\/inbound/);
+    assert.match(finding!.evidence!.attack.request, /\/events\/inbound/);
   });
 });

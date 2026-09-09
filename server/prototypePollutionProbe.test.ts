@@ -63,9 +63,9 @@ test("proves prototype pollution via the json-spaces formatting gadget (differen
     assert.ok(finding, "expected a prototype-pollution finding");
     assert.match(finding!.testName, /Prototype Pollution/i);
     assert.equal(finding!.severity, "high");
-    assert.equal(finding!.evidence.method, "differential");
+    assert.equal(finding!.evidence!.method, "differential");
     // PROVEN: the quoted indentation signal is a literal substring of the attack response.
-    assert.ok(finding!.evidence.attack.response.includes(finding!.evidence.signal.quote));
+    assert.ok(finding!.evidence!.attack.response.includes(finding!.evidence!.signal.quote));
   });
 });
 

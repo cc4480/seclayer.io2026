@@ -6,7 +6,6 @@ import type { Finding } from "../src/types.js";
 function f(over: Partial<Finding> & { title: string }): Finding {
   return {
     id: Math.random().toString(16).slice(2),
-    title: over.title,
     description: "d",
     severity: over.severity || "medium",
     confidence: "high",

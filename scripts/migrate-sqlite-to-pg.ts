@@ -26,12 +26,16 @@ import pg from 'pg';
 
 const DRY = process.argv.includes('--dry-run');
 const SQLITE_PATH = process.env.SQLITE_PATH || process.env.DB_PATH || 'data.sqlite';
-const DATABASE_URL = process.env.DATABASE_URL;
+const RAW_DATABASE_URL = process.env.DATABASE_URL;
 
 const here = path.dirname(url.fileURLToPath(import.meta.url));
 const SCHEMA_SQL = path.join(here, '..', 'server', 'pg', 'schema.sql');
 
-if (!DATABASE_URL) { console.error('DATABASE_URL is required (the TARGET Postgres).'); process.exit(2); }
+if (!RAW_DATABASE_URL) { console.error('DATABASE_URL is required (the TARGET Postgres).'); process.exit(2); }
+// Restated as a narrowed constant: the guard above exits the process, but that
+// narrowing does not flow into the hoisted function declarations below, so main()
+// would otherwise see this as possibly undefined.
+const DATABASE_URL: string = RAW_DATABASE_URL;
 if (!fs.existsSync(SQLITE_PATH)) { console.error(`SQLite file not found: ${SQLITE_PATH}`); process.exit(2); }
 
 // Table order comes from schema.sql itself rather than a hardcoded list, so it

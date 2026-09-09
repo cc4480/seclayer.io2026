@@ -53,8 +53,8 @@ test("proves an Edge Function that accepts any token where no token is denied", 
     assert.ok(finding, "expected an Edge Function auth-bypass finding");
     assert.match(finding!.testName, /Edge Function Authorization Bypass/);
     assert.equal(finding!.severity, "critical");
-    assert.match(finding!.evidence.control.response, /401/);
-    assert.ok(finding!.evidence.attack.response.includes(finding!.evidence.signal.quote));
+    assert.match(finding!.evidence!.control!.response, /401/);
+    assert.ok(finding!.evidence!.attack.response.includes(finding!.evidence!.signal.quote));
   });
 });
 

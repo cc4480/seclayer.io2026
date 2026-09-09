@@ -77,7 +77,7 @@ async function main() {
   const list = targets.length ? targets : DEFAULT_TARGETS;
   console.log(`[live-scan] Passive scan of ${list.length} target(s). Review non-info findings for false positives.\n`);
 
-  const results = [];
+  const results: { url: string; score: number; nonInfo: number; findings: any[]; diag?: any }[] = [];
   const collected: any[] = [];
   for (const url of list) {
     const r = await scanOne(url);

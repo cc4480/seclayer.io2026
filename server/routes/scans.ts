@@ -306,7 +306,12 @@ export function registerScanRoutes(app: express.Express, ctx: RouteContext) {
       return res.status(400).json({ status: "error", message: e?.message || "This target can no longer be reached safely." });
     }
     const result = await retestFinding(finding, scan);
-    res.json({ status: "ok", ...result });
+    // No { status: "ok" } envelope here: RetestResult carries its own status
+    // ("still_present", "not_reproduced", "unsupported") and the spread overwrote
+    // the envelope anyway. The client switches on those values — see
+    // FindingCard.tsx — so the envelope was dead code that only looked like a
+    // contract.
+    res.json(result);
   });
 
   // --- False Positive & Suppression Rules ---

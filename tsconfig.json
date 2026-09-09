@@ -12,6 +12,12 @@
     "skipLibCheck": true,
     "moduleResolution": "bundler",
     "isolatedModules": true,
+    // Enabled 2026-09-09. It cost 28 errors across ~36k lines and caught two
+    // real defects (a "NaN" score delta, a possibly-undefined DATABASE_URL),
+    // which is a good trade for the class of bug it prevents from here on.
+    // noImplicitAny is deliberately NOT enabled: it reports 2743 errors and is
+    // a different size of job.
+    "strictNullChecks": true,
     "moduleDetection": "force",
     "allowJs": true,
     "jsx": "react-jsx",

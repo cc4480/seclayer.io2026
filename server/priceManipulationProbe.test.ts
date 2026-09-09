@@ -44,8 +44,8 @@ test("proves price tampering when the charge total tracks the client-supplied pr
     assert.ok(finding, "expected a price-tampering finding");
     assert.match(finding!.testName, /Price Tampering/i);
     assert.equal(finding!.severity, "high");
-    assert.equal(finding!.evidence.method, "differential");
-    assert.ok(finding!.evidence.attack.response.includes(finding!.evidence.signal.quote));
+    assert.equal(finding!.evidence!.method, "differential");
+    assert.ok(finding!.evidence!.attack.response.includes(finding!.evidence!.signal.quote));
   });
 });
 
@@ -90,6 +90,6 @@ test("finds a checkout endpoint supplied only via discovered POST targets (not t
   await withServer(handler, async (port) => {
     const finding = await probePriceManipulation(`http://127.0.0.1:${port}/`, [`http://127.0.0.1:${port}/store/pay-now`], H);
     assert.ok(finding, "expected the discovered-target checkout to be caught");
-    assert.match(finding!.evidence.attack.request, /\/store\/pay-now/);
+    assert.match(finding!.evidence!.attack.request, /\/store\/pay-now/);
   });
 });
