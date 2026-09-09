@@ -224,3 +224,20 @@ or a bare local `npm run dev` checkout without nmap installed.
       (CI builds the app and both test suites, but does not build the image).
 - [ ] Note: the frontend is verified manually (browser) — there is no automated
       UI test suite in CI yet.
+
+## Railway configuration
+
+Set on the service itself, not from a file in this repo.
+
+There used to be a `railway.json` here. It was never applied — the Railway API
+reported `railwayConfigFile: null` and every setting it declared disagreed with
+what was actually running (it asked for the `DOCKERFILE` builder and a
+`/api/system/health` healthcheck; the live service was on `RAILPACK` with no
+healthcheck at all). Railway also deprecated that format, with existing files
+stopping work on 2026-12-01, so it was removed rather than migrated: there was
+no behaviour to carry across.
+
+Change build and deploy settings in the Railway dashboard under
+Service -> Settings, or with `railway api` against `serviceInstanceUpdate`, and
+verify the change took rather than assuming — that is the same lesson the
+config file taught the expensive way.
