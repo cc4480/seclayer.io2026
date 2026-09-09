@@ -11,6 +11,7 @@ import type { DiagnosticResult } from "./scanner.js";
 import { Finding, Severity, ScanEvidence } from "../src/types.js";
 import { scoreFindings } from "./scoring.js";
 import { classifyCookie, isCsrfToken } from "./cookieClassify.js";
+import { isHstsPreloaded } from "./hstsPreload.js";
 import { mapOwasp } from "./owasp.js";
 import { buildAgentPrompt, buildImpactFallback } from "./agentPrompt.js";
 import crypto from "crypto";
@@ -121,7 +122,26 @@ function buildEasmFindings(diag: DiagnosticResult): Finding[] {
 // as "high" on an otherwise well-hardened target.
 function buildHeaderFindings(diag: DiagnosticResult): Finding[] {
   const findings: Finding[] = [];
-  if (diag.missingHeaders.includes("content-security-policy")) {
+  // A report-only policy is NOT the same as no policy, and saying "no
+  // Content-Security-Policy header was observed" about a site plainly serving
+  // one reads as a false positive to anyone who checks — google.com serves
+  // Content-Security-Policy-Report-Only with a nonce and strict-dynamic, and was
+  // told it had none. The gap is real (report-only means the browser reports the
+  // violation and runs the script anyway) but it is a different finding, and
+  // describing it accurately is what keeps the rest of the report credible.
+  const cspReportOnly = diag.headers["content-security-policy-report-only"];
+  if (diag.missingHeaders.includes("content-security-policy") && cspReportOnly) {
+    findings.push({
+      id: fid(),
+      title: "Content-Security-Policy is report-only (not enforced)",
+      description:
+        "A Content-Security-Policy is present but sent as Content-Security-Policy-Report-Only. In that mode the browser reports each violation and still executes the offending script, so the policy provides no protection against cross-site scripting — it only shows what an enforcing policy would have blocked. This is the correct way to trial a policy, and is a problem only if it was meant to be enforcing.",
+      severity: "low",
+      confidence: "high",
+      fix: 'Once the violation reports are clean, send the same policy as "Content-Security-Policy" to begin enforcing it. Serving both headers during the transition is normal and safe.',
+      category: "IAST",
+    });
+  } else if (diag.missingHeaders.includes("content-security-policy")) {
     findings.push({
       id: fid(),
       title: "Missing Content-Security-Policy (CSP)",
@@ -138,7 +158,15 @@ function buildHeaderFindings(diag: DiagnosticResult): Finding[] {
   // HSTS is both redundant with the "Insecure Connection Protocol (HTTP)" finding
   // above and not independently actionable (you fix it by adding TLS, not the
   // header), so flagging it here would be double-counted noise.
-  if (diag.sslSecure && diag.missingHeaders.includes("strict-transport-security")) {
+  //
+  // Nor is it meaningful on a domain in the browsers' built-in HSTS preload
+  // list. Those hosts are forced to HTTPS before a request is ever sent, so the
+  // stated risk — protocol downgrade, SSL stripping — cannot occur whether or
+  // not the header is served. google.com was graded down for this.
+  const hstsPreloaded = (() => {
+    try { return isHstsPreloaded(new URL(diag.url).hostname); } catch { return false; }
+  })();
+  if (diag.sslSecure && !hstsPreloaded && diag.missingHeaders.includes("strict-transport-security")) {
     findings.push({
       id: fid(),
       title: "Missing Strict-Transport-Security (HSTS) Policy",
@@ -229,6 +257,14 @@ function buildCookieFindings(diag: DiagnosticResult): Finding[] {
     // Secure, so only the HttpOnly finding is suppressed. (dropbox's
     // __Host-js_csrf was flagged here.)
     if (!isSecureIssue && isCsrfToken(name)) continue;
+
+    // The __Secure- and __Host- prefixes are enforced by the browser: it
+    // refuses to store such a cookie at all unless it carries Secure (and, for
+    // __Host-, path=/ and no Domain). So "missing Secure" on one of these
+    // cannot describe anything a browser would ever accept — if the cookie is
+    // present, the attribute is present. The HttpOnly finding still stands,
+    // since the prefix says nothing about JavaScript access.
+    if (isSecureIssue && /^__(Secure|Host)-/i.test(name)) continue;
 
     // Confidence reflects how sure we are it's a real RISK, not just that the flag
     // is absent: a session-named cookie is high; an unclassifiable one is medium

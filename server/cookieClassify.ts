@@ -53,6 +53,15 @@ const ANALYTICS_PATTERNS: RegExp[] = [
   /^_pk_/i,                // Matomo
   /optimizely/i,           // Optimizely
   /^_clck$|^_clsk$/i,      // Microsoft Clarity
+  /^NID$/i,                // Google ads/personalisation preferences
+  /^AEC$/i,                // Google anti-abuse
+  /^1P_JAR$/i, /^DSID$/i, /^IDE$/i, /^ANID$/i, // Google/DoubleClick ads
+  /^__utm[a-z]$/i,         // Google Analytics (legacy urchin)
+  /^s_[a-z]{2,4}$/i,       // Adobe Analytics (s_cc, s_sq, s_vi)
+  /^_uet[sv]id$/i,         // Microsoft UET
+  /^li_(sugr|gc)$/i, /^bcookie$/i, /^lidc$/i, // LinkedIn Insight
+  /^_pin_unauth$/i,        // Pinterest
+  /^_ttp$/i, /^_tt_enable_cookie$/i, // TikTok pixel
 ];
 
 // Non-secret UX preference cookies: they exist to be read by client-side JS to

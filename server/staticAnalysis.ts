@@ -51,13 +51,21 @@ const SECRET_SIGNATURES = [
       confidence: "medium" as const,
       note: "An AWS access key id is exposed. Confirm the matching secret is not also leaked and rotate it.",
     },
-    {
-      name: "Google API Key",
-      regex: /AIzaSy[A-Za-z0-9_\-]{33}/,
-      severity: "low" as Severity,
-      confidence: "low" as const,
-      note: "Google browser API keys are often intentionally public; verify it is restricted by HTTP referrer/API and not a server key.",
-    },
+    // NO "Google API Key" (AIzaSy…) signature, deliberately.
+    //
+    // These are browser keys. Maps, Firebase, reCAPTCHA and YouTube embeds all
+    // require the key to be served to the client — it cannot work otherwise —
+    // so its presence in client-served content is the designed behaviour, not
+    // an exposure. Whether a given key is properly restricted by HTTP referrer
+    // is a server-side property a black-box scan cannot observe, so there is no
+    // signal here to report on, only a shape.
+    //
+    // It was previously emitted at low/low with a note conceding it was "often
+    // intentionally public" — which is a finding admitting it is probably not
+    // one. google.com was flagged for its own key. A finding the reader must
+    // dismiss teaches them to dismiss the next one too, and it still moved the
+    // score. Report the resulting exposure (an open Firebase database, a
+    // writable bucket) if one is actually found; never the key on its own.
   ];
 export const SECRET_SIGNATURE_COUNT = SECRET_SIGNATURES.length;
 
