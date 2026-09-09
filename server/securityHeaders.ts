@@ -6,9 +6,15 @@ import type { Request, Response, NextFunction } from 'express';
 // (the built dist/index.html contains no inline <script> — verified), so
 // script-src can stay strict at 'self' with no 'unsafe-inline'/'unsafe-eval'.
 // What the app genuinely needs loosened:
-//   - style-src 'unsafe-inline' — framer-motion and React style={{…}} write
-//     inline style attributes at runtime; there is no hash-based alternative for
-//     style attributes. (Style injection is low-severity next to script.)
+//   - style-src no longer carries 'unsafe-inline'. The old comment here said
+//     framer-motion and React style={{…}} required it. framer-motion is not a
+//     dependency, and the React claim is wrong: React DOM applies the style prop
+//     through the CSSOM (node.style.setProperty), and CSP governs <style>
+//     elements and style="" content attributes — not CSSOM mutation. Verified
+//     against the production build, which contains zero style="" attributes,
+//     zero <style> tags, and no setAttribute("style") in the bundle. The eight
+//     style={{…}} uses in src/ are all dynamic values (gauge size, bar widths)
+//     that could not be hashed anyway, and all keep working.
 //   - img-src data:  — target screenshots are embedded as data: URIs
 //     (see TargetScreenshot.dataUri), and inline SVG/canvas exports.
 //   - font-src data: — belt-and-suspenders for any inlined font.
@@ -50,7 +56,10 @@ export const CONTENT_SECURITY_POLICY = [
   "object-src 'none'",
   "frame-ancestors 'none'",
   `script-src 'self' ${GSI_SCRIPT} ${CF_BEACON_SCRIPT}`,
-  `style-src 'self' 'unsafe-inline' ${GSI_STYLE} ${FONTS_STYLE}`,
+  `style-src 'self' ${GSI_STYLE} ${FONTS_STYLE}`,
+  // Belt and braces: even if a future dependency starts writing style=
+  // attributes, they stay blocked. The app has none today.
+  "style-src-attr 'none'",
   "img-src 'self' data:",
   `font-src 'self' data: ${FONTS_FILES}`,
   `connect-src 'self' ${GSI_CONNECT} ${CF_BEACON_REPORT}`,
@@ -93,6 +102,10 @@ export function securityHeaders({ isProd }: SecurityHeaderOptions) {
     // popups WE open keep their opener. This is the value Google documents for
     // GIS. Tightening it to 'same-origin' silently breaks Google sign-in.
     res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+    // Stops other origins embedding our responses as a no-cors subresource.
+    // Unlike COEP this needs no cooperation from anyone we load, so it is
+    // safe on every response — it governs how OTHERS may use ours.
+    res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
     if (isProd) {
       res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
       res.setHeader('Content-Security-Policy', CONTENT_SECURITY_POLICY);

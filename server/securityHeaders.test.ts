@@ -42,7 +42,7 @@ test('HSTS and CSP are production-only (dev stays HMR-friendly)', () => {
 
 // The whole point of the finding fix: a CSP is now present AND it is not
 // self-defeatingly permissive on scripts.
-test('the CSP is strict on scripts but grants the SPA the inline styles/data images it needs', () => {
+test('the CSP is strict on scripts and grants the SPA only the data images it needs', () => {
   // 'self' first, then only the Google Identity Services loader — the single
   // third-party script origin this app admits, for "Sign in with Google".
   assert.match(CONTENT_SECURITY_POLICY, /(^|; )script-src 'self' https:\/\/accounts\.google\.com\/gsi\/client /);
@@ -51,7 +51,7 @@ test('the CSP is strict on scripts but grants the SPA the inline styles/data ima
   assert.match(CONTENT_SECURITY_POLICY, /script-src[^;]*https:\/\/static\.cloudflareinsights\.com/);
   assert.ok(!/script-src[^;]*'unsafe-inline'/.test(CONTENT_SECURITY_POLICY), "script-src must not allow 'unsafe-inline'");
   assert.ok(!/'unsafe-eval'/.test(CONTENT_SECURITY_POLICY), "CSP must not allow 'unsafe-eval'");
-  assert.match(CONTENT_SECURITY_POLICY, /style-src 'self' 'unsafe-inline'/);
+  assert.match(CONTENT_SECURITY_POLICY, /style-src 'self' https/);
   assert.match(CONTENT_SECURITY_POLICY, /img-src 'self' data:/);
   // src/index.css @imports Space Grotesk and JetBrains Mono: the CSS comes from
   // fonts.googleapis.com, the woff2 files it references from fonts.gstatic.com.
@@ -100,4 +100,37 @@ test('vercel.json enforces the identical CSP served by Express', () => {
   const rule = vercel.headers.find((h: any) => h.source && h.source.includes('api'));
   const csp = rule.headers.find((h: any) => h.key === 'Content-Security-Policy');
   assert.equal(csp.value, CONTENT_SECURITY_POLICY);
+});
+
+test('style-src does not allow inline styles', () => {
+  // The app writes no inline styles: React DOM applies the style prop through
+  // the CSSOM (node.style.setProperty), which CSP does not govern, and the
+  // production build contains no style="" attributes and no <style> tags.
+  assert.ok(
+    !/style-src[^;]*'unsafe-inline'/.test(CONTENT_SECURITY_POLICY),
+    "style-src must not carry 'unsafe-inline'",
+  );
+  assert.match(CONTENT_SECURITY_POLICY, /style-src-attr 'none'/);
+});
+
+test('script-src stays strict — the directive that actually matters', () => {
+  const scriptSrc = /script-src ([^;]*)/.exec(CONTENT_SECURITY_POLICY)?.[1] ?? '';
+  assert.ok(!scriptSrc.includes("'unsafe-inline'"), 'no inline script');
+  assert.ok(!scriptSrc.includes("'unsafe-eval'"), 'no eval');
+  // A bare * would defeat the allowlist entirely.
+  assert.ok(!scriptSrc.split(/\s+/).includes('*'), 'no wildcard origin');
+});
+
+test('Cross-Origin-Resource-Policy is set on every response', () => {
+  // Governs how OTHER origins may embed our responses, so it needs no
+  // cooperation from anything we load — safe in dev and prod alike.
+  for (const isProd of [true, false]) {
+    assert.equal(run(isProd).headers['Cross-Origin-Resource-Policy'], 'same-origin');
+  }
+});
+
+test('COOP stays same-origin-allow-popups', () => {
+  // Regression guard: 'same-origin' severs window.opener and Google sign-in
+  // hangs forever with no error on either side.
+  assert.equal(run(true).headers['Cross-Origin-Opener-Policy'], 'same-origin-allow-popups');
 });
