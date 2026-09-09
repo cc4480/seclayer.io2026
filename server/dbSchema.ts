@@ -195,9 +195,11 @@ export function runMigrations(db: Database.Database): void {
   addColumnIfMissing(db, "scans", "heartbeatAt", "TEXT");
   // The queued job's parameters, so ANY worker can run the scan rather than
   // only the process that accepted the request. Deliberately holds just the
-  // two booleans: bolaIdentities and loginCredentials are real credentials,
-  // and this codebase has no encryption at rest (dbCrypto only hashes and
-  // masks), so a scan carrying them is never queued — see enqueueScanJob.
+  // two booleans: bolaIdentities and loginCredentials are real credentials, and
+  // a scan carrying them is never queued — see enqueueScanJob. dbCrypto can now
+  // seal a secret at rest (sealSecret/openSecret, used for the per-user DeepSeek
+  // key), but scan credentials deliberately still never touch the database at
+  // all: not writing them is a stronger guarantee than writing them encrypted.
   addColumnIfMissing(db, "scans", "jobParams", "TEXT");
   // Short-lived tick lease so only one instance processes a due monitored
   // target. Deliberately NOT nextRun: the scheduling column carries real

@@ -84,6 +84,7 @@ See [.env.example](.env.example). Key variables:
 | `DB_PATH` | SQLite file path (default `./data.sqlite`) |
 | `ENABLE_BROWSER_RENDERING` | `true` to crawl SPAs via headless Playwright (opt-in; install Playwright separately) |
 | `DEEPSEEK_API_KEY` | Enables AI reports (else local summaries) |
+| `ENCRYPTION_KEY` | 32-byte base64 AES-256-GCM key. Required to store a user's personal DeepSeek key (Settings → bring your own key), which is sealed at rest. Without it that feature returns 503; everything else is unaffected. Generate: `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"` |
 | `RESEND_API_KEY` / `EMAIL_FROM` | Sends magic-link emails (else console) |
 | `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` | Enables credit purchases |
 

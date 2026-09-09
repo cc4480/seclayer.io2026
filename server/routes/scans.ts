@@ -121,9 +121,9 @@ export function registerScanRoutes(app: express.Express, ctx: RouteContext) {
     //
     // EXCEPT when the request carries credentials. bolaIdentities and
     // loginCredentials are real secrets for a target the caller owns, and
-    // queueing them would mean writing them to the database — which this
-    // codebase has no facility to do safely (dbCrypto hashes and masks; there
-    // is no encryption at rest). So a credentialed scan runs here, in the
+    // queueing them would mean writing them to the database. dbCrypto can seal
+    // a secret at rest now, but the stronger guarantee is simply never storing
+    // these at all. So a credentialed scan runs here, in the
     // process that already holds those secrets in memory, and they are never
     // persisted. processScanJob takes the lease immediately, so no other worker
     // will touch it.

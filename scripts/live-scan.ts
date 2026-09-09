@@ -42,33 +42,74 @@ async function maybeInstallProxy(): Promise<void> {
 
 const SEV_ORDER = ['critical', 'high', 'medium', 'low', 'info'] as const;
 
-async function scanOne(url: string): Promise<{ url: string; score: number; nonInfo: number; findings: any[] } | null> {
+async function scanOne(url: string): Promise<{ url: string; score: number; nonInfo: number; findings: any[]; diag?: any } | null> {
   try {
+    const started = Date.now();
     const diag = await runDiagnostics(url, undefined, { allowActiveProbes: false });
     const { score, findings } = compileStaticFindings(diag);
     const sorted = [...findings].sort((a, b) => SEV_ORDER.indexOf(a.severity) - SEV_ORDER.indexOf(b.severity));
-    return { url, score, nonInfo: findings.filter((f) => f.severity !== 'info').length, findings: sorted };
+    return {
+      url,
+      score,
+      nonInfo: findings.filter((f) => f.severity !== 'info').length,
+      findings: sorted,
+      diag: {
+        finalUrl: diag.url,
+        responseStatus: diag.responseStatus,
+        elapsedMs: Date.now() - started,
+      },
+    };
   } catch (err: any) {
     console.log(`\n=== ${url} ===\n  ERROR: ${err?.message || err}`);
-    return null;
+    return { url, score: 0, nonInfo: 0, findings: [], diag: { failed: String(err?.message || err) } } as any;
   }
 }
 
 async function main() {
   await maybeInstallProxy();
-  const targets = process.argv.slice(2).length ? process.argv.slice(2) : DEFAULT_TARGETS;
-  console.log(`[live-scan] Passive scan of ${targets.length} target(s). Review non-info findings for false positives.\n`);
+  const argv = process.argv.slice(2);
+  // `--json <path>` also writes the full result per target, so a run can be
+  // aggregated and verified rather than only eyeballed. Passive output unchanged.
+  const ji = argv.indexOf('--json');
+  const jsonDest = ji !== -1 ? argv[ji + 1] : null;
+  if (jsonDest && !jsonDest.trim()) throw new Error('--json needs a destination path');
+  const targets = argv.filter((a, i) => a !== '--json' && argv[i - 1] !== '--json');
+  const list = targets.length ? targets : DEFAULT_TARGETS;
+  console.log(`[live-scan] Passive scan of ${list.length} target(s). Review non-info findings for false positives.\n`);
 
   const results = [];
-  for (const url of targets) {
+  const collected: any[] = [];
+  for (const url of list) {
     const r = await scanOne(url);
     if (!r) continue;
+    collected.push({
+      url,
+      ...(r.diag ?? {}),
+      score: r.score,
+      findings: r.findings.map((f: any) => ({
+        title: f.title,
+        severity: f.severity,
+        category: f.category,
+        owasp: f.owasp ?? null,
+        confidence: f.confidence ?? null,
+        endpoint: f.endpoint ?? null,
+        verification: f.verification ?? null,
+        description: f.description ? String(f.description).slice(0, 600) : null,
+      })),
+    });
+    if (r.diag?.failed) continue;
     results.push(r);
     console.log(`\n=== ${r.url} ===  score ${r.score}/100  ·  ${r.nonInfo} actionable finding(s)`);
     for (const f of r.findings) {
       console.log(`  [${f.severity.toUpperCase()}] ${f.title}`);
       if (f.verification) console.log(`      how verified: ${f.verification}`);
     }
+  }
+
+  if (jsonDest) {
+    const { writeFileSync } = await import('node:fs');
+    writeFileSync(jsonDest, JSON.stringify({ scannedAt: new Date().toISOString(), results: collected }, null, 1));
+    console.log(`\n[live-scan] Wrote ${jsonDest} — ${collected.length} result(s).`);
   }
 
   console.log('\n----------------------------------------');
