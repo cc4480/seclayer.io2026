@@ -13,14 +13,32 @@
 //   SCAN_DEV_ALLOW_HOSTS=127.0.0.1 node --import tsx scripts/detection-check.ts
 //
 // Exit code is non-zero when something planted was missed, so it can gate CI.
+import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import { runDiagnostics } from "../server/scanner.js";
 import { compileStaticFindings } from "../server/findings.js";
 
+// Generated per run rather than written into the file.
+//
+// The fixture has to look like a live credential: isLikelyPlaceholderSecret()
+// in server/fpFilters.ts correctly ignores sk_live_0000…, anything under 2.5
+// bits/char of entropy, and monotonic runs — so a visibly fake stand-in would
+// be suppressed by our own scanner and this check would measure nothing.
+//
+// But a realistic literal in source is exactly what GitHub push protection
+// blocks, and Stripe keys carry no checksum, so no shape-only detector can
+// tell a fixture from the real thing. The previous hardcoded value blocked a
+// push to main on 2026-09-08 and had to be allowlisted by hand.
+//
+// Generating it dissolves the conflict: nothing secret-shaped is stored, and
+// the fixture is stronger for varying each run. 36 hex chars clears the
+// /sk_live_[0-9a-zA-Z]{24,}/ minimum; hex entropy is 4.0, well over the floor.
+const STRIPE_FIXTURE = `sk_live_${randomBytes(18).toString("hex")}`;
+
 const INLINE_SECRETS = `
   const AWS_KEY = "AKIA3XKWQZJ7NRVB4TMD";
   const gh = "gho_16C7e42F292c6912E7710c838347Ae178B4a";
-  const stripe = "sk_live_51H8xQ2eZvKYlo2CqL8xRtNmPfGhJkLwXyZ";
+  const stripe = "${STRIPE_FIXTURE}";
 `;
 
 const HOME = `<!doctype html>
