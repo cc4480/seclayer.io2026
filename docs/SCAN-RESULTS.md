@@ -3,8 +3,17 @@
 What Seclayer returned when pointed at thirty real sites, with the score and
 grade each produced.
 
-**30 runs, 30 hosts, passive, 2026-09-08.** Same corpus as SecScan's round 1,
-scanned independently by this engine — the two products share targets, not code.
+**68 runs, 38 hosts, passive.** Two rounds, both scanned independently of
+SecScan — the two products share targets, not code.
+
+The most recent round is the one to read:
+**[`scan-results/2026-09-10-rerun/`](scan-results/2026-09-10-rerun/SCAN-RESULTS.md)**
+— 38 targets, a page per site with every finding and how it was verified.
+SecScan scanned the same 38 the same night, so the two engines are directly
+comparable for the first time.
+
+**33 sites graded:** A 10 · B 6 · C 8 · D 7 · F 2 — mean 79.0, against 79.9 in
+round 1. `letsencrypt.org` was unreachable (`fetch failed`), transient.
 
 Raw output is committed at `scan-results/2026-09-08-corpus-30.json`, so each
 row can be checked rather than taken on trust. Cookie values were already
@@ -87,6 +96,34 @@ ads/analytics cookies from being read as session cookies.
 **Seclayer grades harder than SecScan on the same sites.** github.com is C here
 and B there; gov.uk is A in both. Different weighting, different scale, and no
 conclusion should be drawn from the gap in either direction.
+
+## What the 2026-09-10 round found
+
+**A scan that was blocked scores 100 — the top of the scale.**
+
+`compileStaticFindings` withholds every finding read from a challenge page,
+which is right, and `interceptedFinding` tells the reader plainly:
+
+> THIS IS NOT A CLEAN RESULT: it is an incomplete one, and the score reflects
+> only what could still be observed.
+
+Then `scoreFindings(withheld)` runs over a set that is entirely info notices,
+nothing deducts, and the result is **100/A** — for `stackoverflow.com`,
+`ebay.com`, `etsy.com` and `reuters.com`, none of whose pages were ever seen.
+Indistinguishable, on the page, from the genuine 100s that `mozilla.org` and
+`gov.uk` earned.
+
+SecScan has the identical defect from the opposite end of its inverted scale:
+`computeRiskScore` returns **0**, its best score, for the six sites it was
+blocked on.
+
+The suppression itself is careful and the comment above it is right about why.
+What was missed is that the score is also a claim about the target, and it was
+left to fall out of an empty finding list rather than being decided.
+
+The tables in `scan-results/2026-09-10-rerun/` mark these sites and exclude them
+from the mean, so the report is honest — but the product still shows 100/A.
+Not yet fixed: it is a scoring-semantics decision, not a patch.
 
 ## Caveats
 
