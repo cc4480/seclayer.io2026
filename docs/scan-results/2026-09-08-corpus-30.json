@@ -1,0 +1,1825 @@
+{
+ "scannedAt": "2026-09-08T16:49:56.911Z",
+ "results": [
+  {
+   "url": "https://github.com",
+   "finalUrl": "https://github.com",
+   "responseStatus": 200,
+   "elapsedMs": 8449,
+   "score": 73,
+   "findings": [
+    {
+     "title": "Cookie \"_octo\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://github.com in this response header (cookie value redacted): \"Set-Cookie: _octo=<redacted>; expires=Wed, 08 Sep 2027 16:38:55 GMT; domain=.github.com; path=/; secure; SameSite=Lax\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"_octo\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "phpMyAdmin Panel Exposed",
+     "severity": "medium",
+     "category": "DAST",
+     "owasp": "A01:2021 – Broken Access Control",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Confirmed by fetching the path and matching the file's signature in the response body — not a status code alone.",
+     "description": "A phpMyAdmin login panel is publicly reachable, providing a brute-force surface directly onto the database. (Confirmed at /phpmyadmin/.)"
+    },
+    {
+     "title": "GraphiQL / GraphQL Playground Exposed",
+     "severity": "low",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Confirmed by fetching the path and matching the file's signature in the response body — not a status code alone.",
+     "description": "An interactive GraphQL IDE is publicly reachable, easing schema exploration and query crafting against the API. (Confirmed at /graphiql.)"
+    },
+    {
+     "title": "Application Surface Mapped (10 pages, 47 endpoints)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The crawler mapped 10 same-origin page(s) and discovered 47 parameterized endpoint(s); 0 parameter(s) were actively fuzzed. Examples: /signup?source&user_email, /resources/articles?topic, /signup?ref_cta&amp;ref_loc&amp;ref_page&amp;source, /customer-stories?type, /session?authenticity_token&add_account&login&password&webauthn-conditional&javascript-support&webauthn-support&webauthn-iuvpaa-support&return_to&allow_signup&client_id&integration&required_field_dfa6&timestamp&timestamp_secret&commit, /signup?source, /login?return_to, /copilot?locale."
+    },
+    {
+     "title": "Active Exploit Probing Skipped (Unverified Target)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "SQL injection, XSS, command-injection, SSRF, GraphQL and BOLA exploit attempts were not run against this target because domain ownership has not been verified. Passive recon (headers, TLS, DNS, exposed files, tech/library detection, and surface mapping) still ran in full."
+    },
+    {
+     "title": "Verbose Server Framework Signature Leaked",
+     "severity": "info",
+     "category": "EASM",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The attack surface assessment detected visible framework signatures leaked in response headers: Server: github.com. This is a fingerprinting/hardening note, not an exploitable weakness — automated bots use these patterns to locate systems, but the banner itself grants no access."
+    }
+   ]
+  },
+  {
+   "url": "https://gitlab.com",
+   "finalUrl": "https://gitlab.com",
+   "responseStatus": 200,
+   "elapsedMs": 14533,
+   "score": 80,
+   "findings": [
+    {
+     "title": "Missing Content-Security-Policy (CSP)",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed directly from the response headers and cookie attributes on the scanned URL.",
+     "description": "No Content-Security-Policy header was observed on the scanned response. CSP is a defense-in-depth control that constrains where scripts and other resources may load from, reducing the blast radius of any cross-site scripting (XSS) flaw. Its absence is not itself an exploitable vulnerability."
+    },
+    {
+     "title": "Missing X-Frame-Options / Clickjacking Immunity",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed directly from the response headers and cookie attributes on the scanned URL.",
+     "description": "No anti-framing instruction (X-Frame-Options or CSP frame-ancestors) was observed on the scanned response. Without it, an attacker can frame the page inside a transparent overlay to hijack clicks. Some sites rely on CSP frame-ancestors instead, so confirm before treating this as absent."
+    },
+    {
+     "title": "GraphiQL / GraphQL Playground Exposed",
+     "severity": "low",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Confirmed by fetching the path and matching the file's signature in the response body — not a status code alone.",
+     "description": "An interactive GraphQL IDE is publicly reachable, easing schema exploration and query crafting against the API. (Confirmed at /graphiql.)"
+    },
+    {
+     "title": "Application Surface Mapped (10 pages, 3 endpoints)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The crawler mapped 10 same-origin page(s) and discovered 3 parameterized endpoint(s); 0 parameter(s) were actively fuzzed. Examples: /sales/?contact-topic, /-/trial_registrations/new?glm_source&amp;glm_content, /-/trial_registrations/new?glm_content&amp;glm_source."
+    },
+    {
+     "title": "Active Exploit Probing Skipped (Unverified Target)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "SQL injection, XSS, command-injection, SSRF, GraphQL and BOLA exploit attempts were not run against this target because domain ownership has not been verified. Passive recon (headers, TLS, DNS, exposed files, tech/library detection, and surface mapping) still ran in full."
+    }
+   ]
+  },
+  {
+   "url": "https://www.npmjs.com",
+   "finalUrl": "https://www.npmjs.com",
+   "responseStatus": 403,
+   "elapsedMs": 7455,
+   "score": 100,
+   "findings": [
+    {
+     "title": "Active Exploit Probing Skipped (Unverified Target)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "SQL injection, XSS, command-injection, SSRF, GraphQL and BOLA exploit attempts were not run against this target because domain ownership has not been verified. Passive recon (headers, TLS, DNS, exposed files, tech/library detection, and surface mapping) still ran in full."
+    }
+   ]
+  },
+  {
+   "url": "https://stackoverflow.com",
+   "finalUrl": "https://stackoverflow.com",
+   "responseStatus": 403,
+   "elapsedMs": 5735,
+   "score": 93,
+   "findings": [
+    {
+     "title": "Missing Strict-Transport-Security (HSTS) Policy",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A02:2021 – Cryptographic Failures",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed directly from the response headers and cookie attributes on the scanned URL.",
+     "description": "No HTTP Strict-Transport-Security (HSTS) header was observed on the scanned response. HSTS instructs browsers to only ever connect over HTTPS, mitigating protocol-downgrade and SSL-stripping attacks. Note that large sites sometimes serve this header only on specific routes, so confirm against a browser before treating it as absent."
+    },
+    {
+     "title": "Active Exploit Probing Skipped (Unverified Target)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "SQL injection, XSS, command-injection, SSRF, GraphQL and BOLA exploit attempts were not run against this target because domain ownership has not been verified. Passive recon (headers, TLS, DNS, exposed files, tech/library detection, and surface mapping) still ran in full."
+    }
+   ]
+  },
+  {
+   "url": "https://vercel.com",
+   "finalUrl": "https://vercel.com",
+   "responseStatus": 200,
+   "elapsedMs": 24396,
+   "score": 75,
+   "findings": [
+    {
+     "title": "Cookie \"_v-anonymous-id\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://vercel.com in this response header (cookie value redacted): \"Set-Cookie: _v-anonymous-id=<redacted>; Path=/; Expires=Mon, 07 Dec 2026 16:39:35 GMT; Max-Age=7776000; Domain=.vercel.com; Secure; SameSite=lax\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"_v-anonymous-id\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Cookie \"_v-anonymous-id-renewed\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://vercel.com in this response header (cookie value redacted): \"Set-Cookie: _v-anonymous-id-renewed=<redacted>; Path=/; Expires=Wed, 09 Sep 2026 16:39:35 GMT; Max-Age=86400; Domain=.vercel.com; Secure; SameSite=lax\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"_v-anonymous-id-renewed\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "OpenAPI/Swagger Spec Exposed",
+     "severity": "low",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Confirmed by fetching the path and matching the file's signature in the response body — not a status code alone.",
+     "description": "A machine-readable OpenAPI/Swagger specification is publicly reachable, fully documenting the API surface for attackers. (Confirmed at /openapi.json.)"
+    },
+    {
+     "title": "GraphiQL / GraphQL Playground Exposed",
+     "severity": "low",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Confirmed by fetching the path and matching the file's signature in the response body — not a status code alone.",
+     "description": "An interactive GraphQL IDE is publicly reachable, easing schema exploration and query crafting against the API. (Confirmed at /graphiql.)"
+    },
+    {
+     "title": "Application Surface Mapped (10 pages, 3 endpoints)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The crawler mapped 10 same-origin page(s) and discovered 3 parameterized endpoint(s); 0 parameter(s) were actively fuzzed. Examples: /api/www/avatar/?u&s, /signup?next, /d?to&amp;title."
+    },
+    {
+     "title": "Active Exploit Probing Skipped (Unverified Target)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "SQL injection, XSS, command-injection, SSRF, GraphQL and BOLA exploit attempts were not run against this target because domain ownership has not been verified. Passive recon (headers, TLS, DNS, exposed files, tech/library detection, and surface mapping) still ran in full."
+    },
+    {
+     "title": "Verbose Server Framework Signature Leaked",
+     "severity": "info",
+     "category": "EASM",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The attack surface assessment detected visible framework signatures leaked in response headers: Server: Vercel, X-Powered-By: Next.js, Payload. This is a fingerprinting/hardening note, not an exploitable weakness — automated bots use these patterns to locate systems, but the banner itself grants no access."
+    }
+   ]
+  },
+  {
+   "url": "https://www.cloudflare.com",
+   "finalUrl": "https://www.cloudflare.com",
+   "responseStatus": 200,
+   "elapsedMs": 14355,
+   "score": 65,
+   "findings": [
+    {
+     "title": "Cookie \"kndctr_8AD56F28618A50850A495FB6_AdobeOrg_identity\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Observed on https://www.cloudflare.com in this response header (cookie value redacted): \"Set-Cookie: kndctr_8AD56F28618A50850A495FB6_AdobeOrg_identity=<redacted>; Expires=Fri, 08 Oct 2027 16:40:01 GMT; Path=/; Secure; SameSite=Lax\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"kndctr_8AD56F28618A50850A495FB6_AdobeOrg_identity\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Exposed JavaScript source map (/_connect/page.V2R8AmkL.js.map)",
+     "severity": "low",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Confirmed by fetching the path and matching the file's signature in the response body — not a status code alone.",
+     "description": "A JavaScript source map (/_connect/page.V2R8AmkL.js.map) is publicly served. Source maps reconstruct the ORIGINAL, un-minified source of the bundle — including comments, internal structure, file/route names, and logic the minified bundle obscured — which hands a reverse engineer your real code with no effort."
+    },
+    {
+     "title": "Exposed JavaScript source map (/_connect/Globe.astro_astro_type_script_index_0_lang.C9vJTI-3.js.map)",
+     "severity": "low",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Confirmed by fetching the path and matching the file's signature in the response body — not a status code alone.",
+     "description": "A JavaScript source map (/_connect/Globe.astro_astro_type_script_index_0_lang.C9vJTI-3.js.map) is publicly served. Source maps reconstruct the ORIGINAL, un-minified source of the bundle — including comments, internal structure, file/route names, and logic the minified bundle obscured — which hands a reverse engineer your real code with no effort."
+    },
+    {
+     "title": "Exposed JavaScript source map (/_connect/Hero.astro_astro_type_script_index_0_lang.BBNztvks.js.map)",
+     "severity": "low",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Confirmed by fetching the path and matching the file's signature in the response body — not a status code alone.",
+     "description": "A JavaScript source map (/_connect/Hero.astro_astro_type_script_index_0_lang.BBNztvks.js.map) is publicly served. Source maps reconstruct the ORIGINAL, un-minified source of the bundle — including comments, internal structure, file/route names, and logic the minified bundle obscured — which hands a reverse engineer your real code with no effort."
+    },
+    {
+     "title": "OpenAPI/Swagger Spec Exposed",
+     "severity": "low",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Confirmed by fetching the path and matching the file's signature in the response body — not a status code alone.",
+     "description": "A machine-readable OpenAPI/Swagger specification is publicly reachable, fully documenting the API surface for attackers. (Confirmed at /openapi.json.)"
+    },
+    {
+     "title": "Application Surface Mapped (10 pages, 0 endpoints)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The crawler mapped 10 same-origin page(s) and discovered 0 parameterized endpoint(s); 0 parameter(s) were actively fuzzed."
+    },
+    {
+     "title": "Active Exploit Probing Skipped (Unverified Target)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "SQL injection, XSS, command-injection, SSRF, GraphQL and BOLA exploit attempts were not run against this target because domain ownership has not been verified. Passive recon (headers, TLS, DNS, exposed files, tech/library detection, and surface mapping) still ran in full."
+    }
+   ]
+  },
+  {
+   "url": "https://www.mozilla.org",
+   "finalUrl": "https://www.mozilla.org",
+   "responseStatus": 200,
+   "elapsedMs": 11899,
+   "score": 100,
+   "findings": [
+    {
+     "title": "Application Surface Mapped (10 pages, 11 endpoints)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The crawler mapped 10 same-origin page(s) and discovered 11 parameterized endpoint(s); 0 parameter(s) were actively fuzzed. Examples: /?lang, /en-US/privacy/websites/cookie-settings/?cookie-radio-preference&cookie-radio-analytics, /en-US/privacy/websites/cookie-settings/?lang, /en-US/?lang, /en-US/products/?lang, /en-US/products/monitor/?lang, /en-US/products/vpn/?lang, /en-US/about/?lang."
+    },
+    {
+     "title": "Active Exploit Probing Skipped (Unverified Target)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "SQL injection, XSS, command-injection, SSRF, GraphQL and BOLA exploit attempts were not run against this target because domain ownership has not been verified. Passive recon (headers, TLS, DNS, exposed files, tech/library detection, and surface mapping) still ran in full."
+    },
+    {
+     "title": "Verbose Server Framework Signature Leaked",
+     "severity": "info",
+     "category": "EASM",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The attack surface assessment detected visible framework signatures leaked in response headers: Server: granian. This is a fingerprinting/hardening note, not an exploitable weakness — automated bots use these patterns to locate systems, but the banner itself grants no access."
+    }
+   ]
+  },
+  {
+   "url": "https://www.digitalocean.com",
+   "finalUrl": "https://www.digitalocean.com",
+   "responseStatus": 200,
+   "elapsedMs": 18915,
+   "score": 93,
+   "findings": [
+    {
+     "title": "Missing Strict-Transport-Security (HSTS) Policy",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A02:2021 – Cryptographic Failures",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed directly from the response headers and cookie attributes on the scanned URL.",
+     "description": "No HTTP Strict-Transport-Security (HSTS) header was observed on the scanned response. HSTS instructs browsers to only ever connect over HTTPS, mitigating protocol-downgrade and SSL-stripping attacks. Note that large sites sometimes serve this header only on specific routes, so confirm against a browser before treating it as absent."
+    },
+    {
+     "title": "Application Surface Mapped (10 pages, 2 endpoints)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The crawler mapped 10 same-origin page(s) and discovered 2 parameterized endpoint(s); 0 parameter(s) were actively fuzzed. Examples: /company/contact/sales?referrer, /careers/open-roles?query."
+    },
+    {
+     "title": "Active Exploit Probing Skipped (Unverified Target)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "SQL injection, XSS, command-injection, SSRF, GraphQL and BOLA exploit attempts were not run against this target because domain ownership has not been verified. Passive recon (headers, TLS, DNS, exposed files, tech/library detection, and surface mapping) still ran in full."
+    },
+    {
+     "title": "Verbose Server Framework Signature Leaked",
+     "severity": "info",
+     "category": "EASM",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The attack surface assessment detected visible framework signatures leaked in response headers: X-Powered-By: Next.js. This is a fingerprinting/hardening note, not an exploitable weakness — automated bots use these patterns to locate systems, but the banner itself grants no access."
+    }
+   ]
+  },
+  {
+   "url": "https://www.fastly.com",
+   "finalUrl": "https://www.fastly.com",
+   "responseStatus": 200,
+   "elapsedMs": 16825,
+   "score": 73,
+   "findings": [
+    {
+     "title": "Missing Content-Security-Policy (CSP)",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed directly from the response headers and cookie attributes on the scanned URL.",
+     "description": "No Content-Security-Policy header was observed on the scanned response. CSP is a defense-in-depth control that constrains where scripts and other resources may load from, reducing the blast radius of any cross-site scripting (XSS) flaw. Its absence is not itself an exploitable vulnerability."
+    },
+    {
+     "title": "Cookie \"ff_revamp\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://www.fastly.com in this response header (cookie value redacted): \"Set-Cookie: ff_revamp=<redacted>; domain=.fastly.com; path=/; max-age=2592000; SameSite=Lax; Secure\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"ff_revamp\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Cookie \"_fs_ch_st_FSBmUei20MqUiJb9\" is set without the Secure attribute over HTTPS",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://www.fastly.com in this response header (cookie value redacted): \"Set-Cookie: _fs_ch_st_FSBmUei20MqUiJb9=<redacted>; Max-Age=10; HttpOnly; Path=/\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"_fs_ch_st_FSBmUei20MqUiJb9\" is set without the Secure attribute over HTTPS. A cookie without the Secure attribute can be transmitted over an unencrypted connection, where a network attacker could intercept it. If this cookie carries session or authentication state, that exposes the session to hijacking."
+    },
+    {
+     "title": "Exposed JavaScript source map (/_astro/page.QVzRky5T.js.map)",
+     "severity": "low",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Confirmed by fetching the path and matching the file's signature in the response body — not a status code alone.",
+     "description": "A JavaScript source map (/_astro/page.QVzRky5T.js.map) is publicly served. Source maps reconstruct the ORIGINAL, un-minified source of the bundle — including comments, internal structure, file/route names, and logic the minified bundle obscured — which hands a reverse engineer your real code with no effort."
+    },
+    {
+     "title": "Application Surface Mapped (10 pages, 5 endpoints)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The crawler mapped 10 same-origin page(s) and discovered 5 parameterized endpoint(s); 0 parameter(s) were actively fuzzed. Examples: /under-attack?firstName&lastName&email&company&phone&misctextareafield1&message&marketingOptIn, /signup/?signup_source, /request-custom-pricing?tier, /request-a-demo?firstName&lastName&email&company&phone&message&marketingOptIn, /resources/report/gartner-voice-of-customer-edge-distribution-platforms-2026?firstName&lastName&title&email&company&phone&country&marketingOptIn."
+    },
+    {
+     "title": "Active Exploit Probing Skipped (Unverified Target)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "SQL injection, XSS, command-injection, SSRF, GraphQL and BOLA exploit attempts were not run against this target because domain ownership has not been verified. Passive recon (headers, TLS, DNS, exposed files, tech/library detection, and surface mapping) still ran in full."
+    },
+    {
+     "title": "Verbose Server Framework Signature Leaked",
+     "severity": "info",
+     "category": "EASM",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The attack surface assessment detected visible framework signatures leaked in response headers: Server: Artisanal bits. This is a fingerprinting/hardening note, not an exploitable weakness — automated bots use these patterns to locate systems, but the banner itself grants no access."
+    }
+   ]
+  },
+  {
+   "url": "https://letsencrypt.org",
+   "finalUrl": "https://letsencrypt.org",
+   "responseStatus": 200,
+   "elapsedMs": 6052,
+   "score": 100,
+   "findings": [
+    {
+     "title": "Application Surface Mapped (10 pages, 0 endpoints)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The crawler mapped 10 same-origin page(s) and discovered 0 parameterized endpoint(s); 0 parameter(s) were actively fuzzed."
+    },
+    {
+     "title": "Active Exploit Probing Skipped (Unverified Target)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "SQL injection, XSS, command-injection, SSRF, GraphQL and BOLA exploit attempts were not run against this target because domain ownership has not been verified. Passive recon (headers, TLS, DNS, exposed files, tech/library detection, and surface mapping) still ran in full."
+    },
+    {
+     "title": "Verbose Server Framework Signature Leaked",
+     "severity": "info",
+     "category": "EASM",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The attack surface assessment detected visible framework signatures leaked in response headers: Server: Netlify. This is a fingerprinting/hardening note, not an exploitable weakness — automated bots use these patterns to locate systems, but the banner itself grants no access."
+    }
+   ]
+  },
+  {
+   "url": "https://www.bbc.co.uk",
+   "finalUrl": "https://www.bbc.co.uk",
+   "responseStatus": 200,
+   "elapsedMs": 9475,
+   "score": 100,
+   "findings": [
+    {
+     "title": "Application Surface Mapped (10 pages, 33 endpoints)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The crawler mapped 10 same-origin page(s) and discovered 33 parameterized endpoint(s); 0 parameter(s) were actively fuzzed. Examples: /iplayer/episode/p0bhvspb/inside-cinema-shorts-86-star-trek?at_mid&amp;at_campaign&amp;at_medium&amp;at_campaign_type&amp;at_nation&amp;at_audience_id&amp;at_product&amp;at_brand&amp;at_ptr_name&amp;at_ptr_type&amp;at_format&amp;at_objective&amp;at_link_title&amp;at_bbc_team, /sounds/play/m0031b0t?at_mid&amp;at_campaign&amp;at_medium&amp;at_campaign_type&amp;at_nation&amp;at_audience_id&amp;at_product&amp;at_brand&amp;at_ptr_name&amp;at_ptr_type&amp;at_format&am"
+    },
+    {
+     "title": "Active Exploit Probing Skipped (Unverified Target)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "SQL injection, XSS, command-injection, SSRF, GraphQL and BOLA exploit attempts were not run against this target because domain ownership has not been verified. Passive recon (headers, TLS, DNS, exposed files, tech/library detection, and surface mapping) still ran in full."
+    },
+    {
+     "title": "Verbose Server Framework Signature Leaked",
+     "severity": "info",
+     "category": "EASM",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The attack surface assessment detected visible framework signatures leaked in response headers: Server: BBC-GTM. This is a fingerprinting/hardening note, not an exploitable weakness — automated bots use these patterns to locate systems, but the banner itself grants no access."
+    }
+   ]
+  },
+  {
+   "url": "https://www.nytimes.com",
+   "finalUrl": "https://www.nytimes.com",
+   "responseStatus": 200,
+   "elapsedMs": 15892,
+   "score": 45,
+   "findings": [
+    {
+     "title": "Cookie \"nyt-a\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://www.nytimes.com in this response header (cookie value redacted): \"Set-Cookie: nyt-a=<redacted>; Expires=Wed, 08 Sep 2027 16:41:25 GMT; Path=/; Domain=.nytimes.com; SameSite=none; Secure\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"nyt-a\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Cookie \"datadome\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://www.nytimes.com in this response header (cookie value redacted): \"Set-Cookie: datadome=<redacted>; Max-Age=31536000; Domain=www.nytimes.com; Path=/; Secure; SameSite=Lax\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"datadome\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Cookie \"nyt-gdpr\" is set without the Secure attribute over HTTPS",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://www.nytimes.com in this response header (cookie value redacted): \"Set-Cookie: nyt-gdpr=<redacted>; Expires=Tue, 08 Sep 2026 22:41:25 GMT; Path=/; Domain=.nytimes.com\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"nyt-gdpr\" is set without the Secure attribute over HTTPS. A cookie without the Secure attribute can be transmitted over an unencrypted connection, where a network attacker could intercept it. If this cookie carries session or authentication state, that exposes the session to hijacking."
+    },
+    {
+     "title": "Cookie \"nyt-gdpr\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://www.nytimes.com in this response header (cookie value redacted): \"Set-Cookie: nyt-gdpr=<redacted>; Expires=Tue, 08 Sep 2026 22:41:25 GMT; Path=/; Domain=.nytimes.com\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"nyt-gdpr\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Cookie \"nyt-purr\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://www.nytimes.com in this response header (cookie value redacted): \"Set-Cookie: nyt-purr=<redacted>; Expires=Wed, 08 Sep 2027 16:41:25 GMT; Path=/; Domain=.nytimes.com; SameSite=Lax; Secure\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"nyt-purr\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Cookie \"nyt-geo\" is set without the Secure attribute over HTTPS",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://www.nytimes.com in this response header (cookie value redacted): \"Set-Cookie: nyt-geo=<redacted>; Expires=Tue, 08 Sep 2026 22:41:25 GMT; Path=/; Domain=.nytimes.com\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"nyt-geo\" is set without the Secure attribute over HTTPS. A cookie without the Secure attribute can be transmitted over an unencrypted connection, where a network attacker could intercept it. If this cookie carries session or authentication state, that exposes the session to hijacking."
+    },
+    {
+     "title": "Kibana Instance Exposed",
+     "severity": "medium",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Confirmed by fetching the path and matching the file's signature in the response body — not a status code alone.",
+     "description": "A Kibana interface is publicly reachable, exposing dashboards over the underlying Elasticsearch data. (Confirmed at /app/kibana.)"
+    },
+    {
+     "title": "Application Surface Mapped (10 pages, 4 endpoints)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The crawler mapped 10 same-origin page(s) and discovered 4 parameterized endpoint(s); 0 parameter(s) were actively fuzzed. Examples: /search?query, /games/connections?GAMES_connectionsRollout_1130, /subscription/groups?Pardot_Campaign_Code_Form_Input, /subscription?campaignId."
+    },
+    {
+     "title": "Active Exploit Probing Skipped (Unverified Target)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "SQL injection, XSS, command-injection, SSRF, GraphQL and BOLA exploit attempts were not run against this target because domain ownership has not been verified. Passive recon (headers, TLS, DNS, exposed files, tech/library detection, and surface mapping) still ran in full."
+    },
+    {
+     "title": "Verbose Server Framework Signature Leaked",
+     "severity": "info",
+     "category": "EASM",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The attack surface assessment detected visible framework signatures leaked in response headers: Server: envoy. This is a fingerprinting/hardening note, not an exploitable weakness — automated bots use these patterns to locate systems, but the banner itself grants no access."
+    }
+   ]
+  },
+  {
+   "url": "https://www.theguardian.com",
+   "finalUrl": "https://www.theguardian.com",
+   "responseStatus": 200,
+   "elapsedMs": 9190,
+   "score": 70,
+   "findings": [
+    {
+     "title": "Cookie \"gu_client_ab_tests\" is set without the Secure attribute over HTTPS",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://www.theguardian.com in this response header (cookie value redacted): \"Set-Cookie: gu_client_ab_tests=<redacted>; path=/; max-age=0\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"gu_client_ab_tests\" is set without the Secure attribute over HTTPS. A cookie without the Secure attribute can be transmitted over an unencrypted connection, where a network attacker could intercept it. If this cookie carries session or authentication state, that exposes the session to hijacking."
+    },
+    {
+     "title": "Cookie \"gu_client_ab_tests\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://www.theguardian.com in this response header (cookie value redacted): \"Set-Cookie: gu_client_ab_tests=<redacted>; path=/; max-age=2592000; domain=.theguardian.com; Secure\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"gu_client_ab_tests\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Cookie \"gu_v2_mvt_id\" is set without the Secure attribute over HTTPS",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://www.theguardian.com in this response header (cookie value redacted): \"Set-Cookie: gu_v2_mvt_id=<redacted>; path=/; max-age=0\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"gu_v2_mvt_id\" is set without the Secure attribute over HTTPS. A cookie without the Secure attribute can be transmitted over an unencrypted connection, where a network attacker could intercept it. If this cookie carries session or authentication state, that exposes the session to hijacking."
+    },
+    {
+     "title": "Cookie \"gu_v2_mvt_id\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://www.theguardian.com in this response header (cookie value redacted): \"Set-Cookie: gu_v2_mvt_id=<redacted>; path=/; max-age=7776000; domain=.theguardian.com; Secure\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"gu_v2_mvt_id\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Application Surface Mapped (10 pages, 6 endpoints)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The crawler mapped 10 same-origin page(s) and discovered 6 parameterized endpoint(s); 0 parameter(s) were actively fuzzed. Examples: /guardian-live-events?INTCMP, /weekly?INTCMP, /email-newsletters?INTCMP, /film/2026/sep/03/star-trek-iv-the-voyage-home-review-kirk-spock-and-co-on-semi-intentionally-hilarious-save-the-whale-mission?CMP, /sport/live/2026/sep/08/us-open-tennis-2026-quarter-finals-sabalenka-noskova-tiafoe-michelsen-live?page, /sport/2026/sep/08/wnba-stalkers-basketball?email."
+    },
+    {
+     "title": "Active Exploit Probing Skipped (Unverified Target)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "SQL injection, XSS, command-injection, SSRF, GraphQL and BOLA exploit attempts were not run against this target because domain ownership has not been verified. Passive recon (headers, TLS, DNS, exposed files, tech/library detection, and surface mapping) still ran in full."
+    }
+   ]
+  },
+  {
+   "url": "https://www.reuters.com",
+   "finalUrl": "https://www.reuters.com",
+   "responseStatus": 401,
+   "elapsedMs": 3751,
+   "score": 85,
+   "findings": [
+    {
+     "title": "Missing Strict-Transport-Security (HSTS) Policy",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A02:2021 – Cryptographic Failures",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed directly from the response headers and cookie attributes on the scanned URL.",
+     "description": "No HTTP Strict-Transport-Security (HSTS) header was observed on the scanned response. HSTS instructs browsers to only ever connect over HTTPS, mitigating protocol-downgrade and SSL-stripping attacks. Note that large sites sometimes serve this header only on specific routes, so confirm against a browser before treating it as absent."
+    },
+    {
+     "title": "Cookie \"datadome\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://www.reuters.com in this response header (cookie value redacted): \"Set-Cookie: datadome=<redacted>; Max-Age=31536000; Domain=.reuters.com; Path=/; Secure; SameSite=Lax\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"datadome\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Active Exploit Probing Skipped (Unverified Target)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "SQL injection, XSS, command-injection, SSRF, GraphQL and BOLA exploit attempts were not run against this target because domain ownership has not been verified. Passive recon (headers, TLS, DNS, exposed files, tech/library detection, and surface mapping) still ran in full."
+    },
+    {
+     "title": "Verbose Server Framework Signature Leaked",
+     "severity": "info",
+     "category": "EASM",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The attack surface assessment detected visible framework signatures leaked in response headers: Server: CloudFront. This is a fingerprinting/hardening note, not an exploitable weakness — automated bots use these patterns to locate systems, but the banner itself grants no access."
+    }
+   ]
+  },
+  {
+   "url": "https://apnews.com",
+   "finalUrl": "https://apnews.com",
+   "responseStatus": 200,
+   "elapsedMs": 10643,
+   "score": 85,
+   "findings": [
+    {
+     "title": "Cookie \"kameleoonVisitorCode\" is set without the Secure attribute over HTTPS",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://apnews.com in this response header (cookie value redacted): \"Set-Cookie: kameleoonVisitorCode=<redacted>; Max-Age=31536000; Path=/\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"kameleoonVisitorCode\" is set without the Secure attribute over HTTPS. A cookie without the Secure attribute can be transmitted over an unencrypted connection, where a network attacker could intercept it. If this cookie carries session or authentication state, that exposes the session to hijacking."
+    },
+    {
+     "title": "Cookie \"kameleoonVisitorCode\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://apnews.com in this response header (cookie value redacted): \"Set-Cookie: kameleoonVisitorCode=<redacted>; Max-Age=31536000; Path=/\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"kameleoonVisitorCode\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Application Surface Mapped (10 pages, 8 endpoints)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The crawler mapped 10 same-origin page(s) and discovered 8 parameterized endpoint(s); 0 parameter(s) were actively fuzzed. Examples: /search?q, /newsletters?id, /games?puzzmoPath, /world-news?p, /hub/iran?_cb&amp;p, /hub/noticias?p, /hub/russia-ukraine?p, /hub/latin-america?p."
+    },
+    {
+     "title": "Active Exploit Probing Skipped (Unverified Target)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "SQL injection, XSS, command-injection, SSRF, GraphQL and BOLA exploit attempts were not run against this target because domain ownership has not been verified. Passive recon (headers, TLS, DNS, exposed files, tech/library detection, and surface mapping) still ran in full."
+    },
+    {
+     "title": "Verbose Server Framework Signature Leaked",
+     "severity": "info",
+     "category": "EASM",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The attack surface assessment detected visible framework signatures leaked in response headers: X-Powered-By: Brightspot. This is a fingerprinting/hardening note, not an exploitable weakness — automated bots use these patterns to locate systems, but the banner itself grants no access."
+    }
+   ]
+  },
+  {
+   "url": "https://www.shopify.com",
+   "finalUrl": "https://www.shopify.com",
+   "responseStatus": 200,
+   "elapsedMs": 8628,
+   "score": 63,
+   "findings": [
+    {
+     "title": "Missing Content-Security-Policy (CSP)",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed directly from the response headers and cookie attributes on the scanned URL.",
+     "description": "No Content-Security-Policy header was observed on the scanned response. CSP is a defense-in-depth control that constrains where scripts and other resources may load from, reducing the blast radius of any cross-site scripting (XSS) flaw. Its absence is not itself an exploitable vulnerability."
+    },
+    {
+     "title": "Missing X-Frame-Options / Clickjacking Immunity",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed directly from the response headers and cookie attributes on the scanned URL.",
+     "description": "No anti-framing instruction (X-Frame-Options or CSP frame-ancestors) was observed on the scanned response. Without it, an attacker can frame the page inside a transparent overlay to hijack clicks. Some sites rely on CSP frame-ancestors instead, so confirm before treating this as absent."
+    },
+    {
+     "title": "Cookie \"_shopify_essential_\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://www.shopify.com in this response header (cookie value redacted): \"Set-Cookie: _shopify_essential_=<redacted>; Domain=shopify.com; Path=/; Expires=Wed, 08 Sep 2027 16:42:12 GMT; Secure; SameSite=Lax\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"_shopify_essential_\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Cookie \"_shopify_s\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://www.shopify.com in this response header (cookie value redacted): \"Set-Cookie: _shopify_s=<redacted>; Domain=shopify.com; Path=/; Expires=Tue, 08 Sep 2026 17:12:12 GMT; Secure; SameSite=Lax\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"_shopify_s\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Cookie \"_shopify_y\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://www.shopify.com in this response header (cookie value redacted): \"Set-Cookie: _shopify_y=<redacted>; Domain=shopify.com; Path=/; Expires=Wed, 08 Sep 2027 16:42:12 GMT; Secure; SameSite=Lax\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"_shopify_y\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Application Surface Mapped (10 pages, 633 endpoints)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The crawler mapped 10 same-origin page(s) and discovered 633 parameterized endpoint(s); 0 parameter(s) were actively fuzzed. Examples: /editions/spring2026?utm_source&amp;utm_medium&amp;utm_campaign&amp;utm_content, /login?ui_locales, /ar?country&amp;lang, /au?country&amp;lang, /at?country&amp;lang, /by?country&amp;lang, /be?country&amp;lang, /be-de?country&amp;lang."
+    },
+    {
+     "title": "Active Exploit Probing Skipped (Unverified Target)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "SQL injection, XSS, command-injection, SSRF, GraphQL and BOLA exploit attempts were not run against this target because domain ownership has not been verified. Passive recon (headers, TLS, DNS, exposed files, tech/library detection, and surface mapping) still ran in full."
+    }
+   ]
+  },
+  {
+   "url": "https://stripe.com",
+   "finalUrl": "https://stripe.com",
+   "responseStatus": 200,
+   "elapsedMs": 10380,
+   "score": 93,
+   "findings": [
+    {
+     "title": "Cookie \"cid\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://stripe.com in this response header (cookie value redacted): \"Set-Cookie: cid=<redacted>; Path=/; Domain=stripe.com; Max-Age=7776000; Secure; SameSite=Lax\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"cid\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Application Surface Mapped (10 pages, 5 endpoints)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The crawler mapped 10 same-origin page(s) and discovered 5 parameterized endpoint(s); 0 parameter(s) were actively fuzzed. Examples: /sessions/2026?utm_medium&amp;utm_source&amp;utm_campaign&amp;utm_content&amp;utm_term, /lp/vertical-saas-benchmark-2025?utm_medium&amp;utm_source&amp;utm_campaign&amp;utm_content&amp;utm_term, /?query, /contact/sales?email, /sessions/2026?utm_medium&utm_source&utm_campaign&utm_content&utm_term."
+    },
+    {
+     "title": "Active Exploit Probing Skipped (Unverified Target)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "SQL injection, XSS, command-injection, SSRF, GraphQL and BOLA exploit attempts were not run against this target because domain ownership has not been verified. Passive recon (headers, TLS, DNS, exposed files, tech/library detection, and surface mapping) still ran in full."
+    },
+    {
+     "title": "Verbose Server Framework Signature Leaked",
+     "severity": "info",
+     "category": "EASM",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The attack surface assessment detected visible framework signatures leaked in response headers: Server: nginx. This is a fingerprinting/hardening note, not an exploitable weakness — automated bots use these patterns to locate systems, but the banner itself grants no access."
+    }
+   ]
+  },
+  {
+   "url": "https://www.etsy.com",
+   "finalUrl": "https://www.etsy.com",
+   "responseStatus": 403,
+   "elapsedMs": 10629,
+   "score": 63,
+   "findings": [
+    {
+     "title": "Missing Content-Security-Policy (CSP)",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed directly from the response headers and cookie attributes on the scanned URL.",
+     "description": "No Content-Security-Policy header was observed on the scanned response. CSP is a defense-in-depth control that constrains where scripts and other resources may load from, reducing the blast radius of any cross-site scripting (XSS) flaw. Its absence is not itself an exploitable vulnerability."
+    },
+    {
+     "title": "Missing Strict-Transport-Security (HSTS) Policy",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A02:2021 – Cryptographic Failures",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed directly from the response headers and cookie attributes on the scanned URL.",
+     "description": "No HTTP Strict-Transport-Security (HSTS) header was observed on the scanned response. HSTS instructs browsers to only ever connect over HTTPS, mitigating protocol-downgrade and SSL-stripping attacks. Note that large sites sometimes serve this header only on specific routes, so confirm against a browser before treating it as absent."
+    },
+    {
+     "title": "Missing X-Frame-Options / Clickjacking Immunity",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed directly from the response headers and cookie attributes on the scanned URL.",
+     "description": "No anti-framing instruction (X-Frame-Options or CSP frame-ancestors) was observed on the scanned response. Without it, an attacker can frame the page inside a transparent overlay to hijack clicks. Some sites rely on CSP frame-ancestors instead, so confirm before treating this as absent."
+    },
+    {
+     "title": "Cookie \"datadome\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://www.etsy.com in this response header (cookie value redacted): \"Set-Cookie: datadome=<redacted>; Max-Age=31536000; Domain=.etsy.com; Path=/; Secure; SameSite=Lax\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"datadome\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Cookie \"exp_ebid\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://www.etsy.com in this response header (cookie value redacted): \"Set-Cookie: exp_ebid=<redacted>; domain=.etsy.com; path=/; Secure; max-age=5184000\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"exp_ebid\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Active Exploit Probing Skipped (Unverified Target)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "SQL injection, XSS, command-injection, SSRF, GraphQL and BOLA exploit attempts were not run against this target because domain ownership has not been verified. Passive recon (headers, TLS, DNS, exposed files, tech/library detection, and surface mapping) still ran in full."
+    },
+    {
+     "title": "Verbose Server Framework Signature Leaked",
+     "severity": "info",
+     "category": "EASM",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The attack surface assessment detected visible framework signatures leaked in response headers: Server: DataDome. This is a fingerprinting/hardening note, not an exploitable weakness — automated bots use these patterns to locate systems, but the banner itself grants no access."
+    }
+   ]
+  },
+  {
+   "url": "https://www.ebay.com",
+   "finalUrl": "https://www.ebay.com",
+   "responseStatus": 403,
+   "elapsedMs": 10097,
+   "score": 70,
+   "findings": [
+    {
+     "title": "Missing Content-Security-Policy (CSP)",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed directly from the response headers and cookie attributes on the scanned URL.",
+     "description": "No Content-Security-Policy header was observed on the scanned response. CSP is a defense-in-depth control that constrains where scripts and other resources may load from, reducing the blast radius of any cross-site scripting (XSS) flaw. Its absence is not itself an exploitable vulnerability."
+    },
+    {
+     "title": "Missing Strict-Transport-Security (HSTS) Policy",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A02:2021 – Cryptographic Failures",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed directly from the response headers and cookie attributes on the scanned URL.",
+     "description": "No HTTP Strict-Transport-Security (HSTS) header was observed on the scanned response. HSTS instructs browsers to only ever connect over HTTPS, mitigating protocol-downgrade and SSL-stripping attacks. Note that large sites sometimes serve this header only on specific routes, so confirm against a browser before treating it as absent."
+    },
+    {
+     "title": "Missing X-Frame-Options / Clickjacking Immunity",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed directly from the response headers and cookie attributes on the scanned URL.",
+     "description": "No anti-framing instruction (X-Frame-Options or CSP frame-ancestors) was observed on the scanned response. Without it, an attacker can frame the page inside a transparent overlay to hijack clicks. Some sites rely on CSP frame-ancestors instead, so confirm before treating this as absent."
+    },
+    {
+     "title": "Cookie \"bm_so\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://www.ebay.com in this response header (cookie value redacted): \"Set-Cookie: bm_so=<redacted>; Domain=.ebay.com; Path=/; Expires=Wed, 09 Sep 2026 16:42:46 GMT; Max-Age=86400; Secure\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"bm_so\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Application Surface Mapped (2 pages, 0 endpoints)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The crawler mapped 2 same-origin page(s) and discovered 0 parameterized endpoint(s); 0 parameter(s) were actively fuzzed."
+    },
+    {
+     "title": "Active Exploit Probing Skipped (Unverified Target)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "SQL injection, XSS, command-injection, SSRF, GraphQL and BOLA exploit attempts were not run against this target because domain ownership has not been verified. Passive recon (headers, TLS, DNS, exposed files, tech/library detection, and surface mapping) still ran in full."
+    },
+    {
+     "title": "Verbose Server Framework Signature Leaked",
+     "severity": "info",
+     "category": "EASM",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The attack surface assessment detected visible framework signatures leaked in response headers: Server: AkamaiGHost. This is a fingerprinting/hardening note, not an exploitable weakness — automated bots use these patterns to locate systems, but the banner itself grants no access."
+    }
+   ]
+  },
+  {
+   "url": "https://www.amazon.co.uk",
+   "finalUrl": "https://www.amazon.co.uk",
+   "responseStatus": 200,
+   "elapsedMs": 15052,
+   "score": 40,
+   "findings": [
+    {
+     "title": "Cookie \"session-id\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Observed on https://www.amazon.co.uk in this response header (cookie value redacted): \"Set-Cookie: session-id=<redacted>; Domain=.amazon.co.uk; Expires=Wed, 08-Sep-2027 16:42:57 GMT; Path=/; Secure\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"session-id\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Cookie \"session-id-time\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Observed on https://www.amazon.co.uk in this response header (cookie value redacted): \"Set-Cookie: session-id-time=<redacted>; Domain=.amazon.co.uk; Expires=Wed, 08-Sep-2027 16:42:57 GMT; Path=/; Secure\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"session-id-time\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Cookie \"i18n-prefs\" is set without the Secure attribute over HTTPS",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://www.amazon.co.uk in this response header (cookie value redacted): \"Set-Cookie: i18n-prefs=<redacted>; Domain=.amazon.co.uk; Expires=Wed, 08-Sep-2027 16:42:57 GMT; Path=/\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"i18n-prefs\" is set without the Secure attribute over HTTPS. A cookie without the Secure attribute can be transmitted over an unencrypted connection, where a network attacker could intercept it. If this cookie carries session or authentication state, that exposes the session to hijacking."
+    },
+    {
+     "title": "Cookie \"i18n-prefs\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://www.amazon.co.uk in this response header (cookie value redacted): \"Set-Cookie: i18n-prefs=<redacted>; Domain=.amazon.co.uk; Expires=Wed, 08-Sep-2027 16:42:57 GMT; Path=/\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"i18n-prefs\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Cookie \"lc-acbuk\" is set without the Secure attribute over HTTPS",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://www.amazon.co.uk in this response header (cookie value redacted): \"Set-Cookie: lc-acbuk=<redacted>; Domain=.amazon.co.uk; Expires=Wed, 08-Sep-2027 16:42:57 GMT; Path=/\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"lc-acbuk\" is set without the Secure attribute over HTTPS. A cookie without the Secure attribute can be transmitted over an unencrypted connection, where a network attacker could intercept it. If this cookie carries session or authentication state, that exposes the session to hijacking."
+    },
+    {
+     "title": "Cookie \"lc-acbuk\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://www.amazon.co.uk in this response header (cookie value redacted): \"Set-Cookie: lc-acbuk=<redacted>; Domain=.amazon.co.uk; Expires=Wed, 08-Sep-2027 16:42:57 GMT; Path=/\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"lc-acbuk\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Application Surface Mapped (10 pages, 295 endpoints)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The crawler mapped 10 same-origin page(s) and discovered 295 parameterized endpoint(s); 0 parameter(s) were actively fuzzed. Examples: /s/ref=nb_sb_noss?url&field-keywords, /get?ue_back, /customer-preferences/edit?ie&preferencesReturnUrl&ref_, /ap/signin?openid.return_to&openid.identity&openid.assoc_handle&openid.mode&openid.claimed_id&openid.ns, /gp/css/order-history?ref_, /gp/cart/view.html?ref_, /gp/site-directory?ref_, /haul/store?ref_."
+    },
+    {
+     "title": "Active Exploit Probing Skipped (Unverified Target)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "SQL injection, XSS, command-injection, SSRF, GraphQL and BOLA exploit attempts were not run against this target because domain ownership has not been verified. Passive recon (headers, TLS, DNS, exposed files, tech/library detection, and surface mapping) still ran in full."
+    },
+    {
+     "title": "Verbose Server Framework Signature Leaked",
+     "severity": "info",
+     "category": "EASM",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The attack surface assessment detected visible framework signatures leaked in response headers: Server: Server. This is a fingerprinting/hardening note, not an exploitable weakness — automated bots use these patterns to locate systems, but the banner itself grants no access."
+    }
+   ]
+  },
+  {
+   "url": "https://www.gov.uk",
+   "finalUrl": "https://www.gov.uk",
+   "responseStatus": 200,
+   "elapsedMs": 24099,
+   "score": 100,
+   "findings": [
+    {
+     "title": "Application Surface Mapped (10 pages, 3 endpoints)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The crawler mapped 10 same-origin page(s) and discovered 3 parameterized endpoint(s); 0 parameter(s) were actively fuzzed. Examples: /search/all?keywords, /contact/govuk/problem_reports?url&giraffe&what_doing&what_wrong, /help/cookies?cookies-usage&cookies-campaigns&cookies-settings."
+    },
+    {
+     "title": "Active Exploit Probing Skipped (Unverified Target)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "SQL injection, XSS, command-injection, SSRF, GraphQL and BOLA exploit attempts were not run against this target because domain ownership has not been verified. Passive recon (headers, TLS, DNS, exposed files, tech/library detection, and surface mapping) still ran in full."
+    },
+    {
+     "title": "Verbose Server Framework Signature Leaked",
+     "severity": "info",
+     "category": "EASM",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The attack surface assessment detected visible framework signatures leaked in response headers: Server: nginx. This is a fingerprinting/hardening note, not an exploitable weakness — automated bots use these patterns to locate systems, but the banner itself grants no access."
+    }
+   ]
+  },
+  {
+   "url": "https://www.wikipedia.org",
+   "finalUrl": "https://www.wikipedia.org",
+   "responseStatus": 200,
+   "elapsedMs": 4905,
+   "score": 70,
+   "findings": [
+    {
+     "title": "Missing Content-Security-Policy (CSP)",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed directly from the response headers and cookie attributes on the scanned URL.",
+     "description": "No Content-Security-Policy header was observed on the scanned response. CSP is a defense-in-depth control that constrains where scripts and other resources may load from, reducing the blast radius of any cross-site scripting (XSS) flaw. Its absence is not itself an exploitable vulnerability."
+    },
+    {
+     "title": "Missing X-Frame-Options / Clickjacking Immunity",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed directly from the response headers and cookie attributes on the scanned URL.",
+     "description": "No anti-framing instruction (X-Frame-Options or CSP frame-ancestors) was observed on the scanned response. Without it, an attacker can frame the page inside a transparent overlay to hijack clicks. Some sites rely on CSP frame-ancestors instead, so confirm before treating this as absent."
+    },
+    {
+     "title": "Cookie \"GeoIP\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://www.wikipedia.org in this response header (cookie value redacted): \"Set-Cookie: GeoIP=<redacted>; Path=/; secure; Domain=.wikipedia.org\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"GeoIP\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Cookie \"NetworkProbeLimit\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://www.wikipedia.org in this response header (cookie value redacted): \"Set-Cookie: NetworkProbeLimit=<redacted>;Path=/;Secure;SameSite=None;Max-Age=3600\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"NetworkProbeLimit\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Application Surface Mapped (1 pages, 1 endpoints)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The crawler mapped 1 same-origin page(s) and discovered 1 parameterized endpoint(s); 0 parameter(s) were actively fuzzed. Examples: /search-redirect.php?family&search&language&go."
+    },
+    {
+     "title": "Active Exploit Probing Skipped (Unverified Target)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "SQL injection, XSS, command-injection, SSRF, GraphQL and BOLA exploit attempts were not run against this target because domain ownership has not been verified. Passive recon (headers, TLS, DNS, exposed files, tech/library detection, and surface mapping) still ran in full."
+    },
+    {
+     "title": "Verbose Server Framework Signature Leaked",
+     "severity": "info",
+     "category": "EASM",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The attack surface assessment detected visible framework signatures leaked in response headers: Server: ATS/9.2.15. This is a fingerprinting/hardening note, not an exploitable weakness — automated bots use these patterns to locate systems, but the banner itself grants no access."
+    }
+   ]
+  },
+  {
+   "url": "https://archive.org",
+   "finalUrl": "https://archive.org",
+   "responseStatus": 200,
+   "elapsedMs": 7034,
+   "score": 88,
+   "findings": [
+    {
+     "title": "Missing X-Frame-Options / Clickjacking Immunity",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed directly from the response headers and cookie attributes on the scanned URL.",
+     "description": "No anti-framing instruction (X-Frame-Options or CSP frame-ancestors) was observed on the scanned response. Without it, an attacker can frame the page inside a transparent overlay to hijack clicks. Some sites rely on CSP frame-ancestors instead, so confirm before treating this as absent."
+    },
+    {
+     "title": "Exposed JavaScript source map (/offshoot_assets/vendor/lit/polyfill-support.js.map)",
+     "severity": "low",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Confirmed by fetching the path and matching the file's signature in the response body — not a status code alone.",
+     "description": "A JavaScript source map (/offshoot_assets/vendor/lit/polyfill-support.js.map) is publicly served. Source maps reconstruct the ORIGINAL, un-minified source of the bundle — including comments, internal structure, file/route names, and logic the minified bundle obscured — which hands a reverse engineer your real code with no effort."
+    },
+    {
+     "title": "Active Exploit Probing Skipped (Unverified Target)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "SQL injection, XSS, command-injection, SSRF, GraphQL and BOLA exploit attempts were not run against this target because domain ownership has not been verified. Passive recon (headers, TLS, DNS, exposed files, tech/library detection, and surface mapping) still ran in full."
+    },
+    {
+     "title": "Verbose Server Framework Signature Leaked",
+     "severity": "info",
+     "category": "EASM",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The attack surface assessment detected visible framework signatures leaked in response headers: Server: nginx/1.31.3. This is a fingerprinting/hardening note, not an exploitable weakness — automated bots use these patterns to locate systems, but the banner itself grants no access."
+    }
+   ]
+  },
+  {
+   "url": "https://european-union.europa.eu",
+   "finalUrl": "https://european-union.europa.eu",
+   "responseStatus": 200,
+   "elapsedMs": 16164,
+   "score": 93,
+   "findings": [
+    {
+     "title": "Missing Content-Security-Policy (CSP)",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed directly from the response headers and cookie attributes on the scanned URL.",
+     "description": "No Content-Security-Policy header was observed on the scanned response. CSP is a defense-in-depth control that constrains where scripts and other resources may load from, reducing the blast radius of any cross-site scripting (XSS) flaw. Its absence is not itself an exploitable vulnerability."
+    },
+    {
+     "title": "Application Surface Mapped (10 pages, 9 endpoints)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The crawler mapped 10 same-origin page(s) and discovered 9 parameterized endpoint(s); 0 parameter(s) were actively fuzzed. Examples: /index_bg?keys&form_build_id&form_id, /index_es?keys&form_build_id&form_id, /index_cs?keys&form_build_id&form_id, /index_de?keys&form_build_id&form_id, /index_da?keys&form_build_id&form_id, /index_et?keys&form_build_id&form_id, /index_en?keys&form_build_id&form_id, /index_el?keys&form_build_id&form_id."
+    },
+    {
+     "title": "Active Exploit Probing Skipped (Unverified Target)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "SQL injection, XSS, command-injection, SSRF, GraphQL and BOLA exploit attempts were not run against this target because domain ownership has not been verified. Passive recon (headers, TLS, DNS, exposed files, tech/library detection, and surface mapping) still ran in full."
+    }
+   ]
+  },
+  {
+   "url": "https://www.nasa.gov",
+   "finalUrl": "https://www.nasa.gov",
+   "responseStatus": 200,
+   "elapsedMs": 14539,
+   "score": 93,
+   "findings": [
+    {
+     "title": "Missing Content-Security-Policy (CSP)",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed directly from the response headers and cookie attributes on the scanned URL.",
+     "description": "No Content-Security-Policy header was observed on the scanned response. CSP is a defense-in-depth control that constrains where scripts and other resources may load from, reducing the blast radius of any cross-site scripting (XSS) flaw. Its absence is not itself an exploitable vulnerability."
+    },
+    {
+     "title": "Application Surface Mapped (10 pages, 12 endpoints)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The crawler mapped 10 same-origin page(s) and discovered 12 parameterized endpoint(s); 0 parameter(s) were actively fuzzed. Examples: /?search, /?ak_hp_textarea&ak_js&input_1&gform_ajax&gform_submission_method&gform_theme&gform_style_settings&is_submit_117&gform_submit&gform_currency&gform_unique_id&state_117&gform_target_page_number_117&gform_source_page_number_117&gform_field_values, /learning-resources/search/?terms, /2026-news-releases/?ak_hp_textarea&ak_js&input_1&gform_ajax&gform_submission_method&gform_theme&gform_style_settings&is_submit_117&gform_submit&gform_currency&gform_unique_id&"
+    },
+    {
+     "title": "Active Exploit Probing Skipped (Unverified Target)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "SQL injection, XSS, command-injection, SSRF, GraphQL and BOLA exploit attempts were not run against this target because domain ownership has not been verified. Passive recon (headers, TLS, DNS, exposed files, tech/library detection, and surface mapping) still ran in full."
+    },
+    {
+     "title": "Verbose Server Framework Signature Leaked",
+     "severity": "info",
+     "category": "EASM",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The attack surface assessment detected visible framework signatures leaked in response headers: Server: nginx. This is a fingerprinting/hardening note, not an exploitable weakness — automated bots use these patterns to locate systems, but the banner itself grants no access."
+    }
+   ]
+  },
+  {
+   "url": "https://www.notion.so",
+   "finalUrl": "https://www.notion.so",
+   "responseStatus": 200,
+   "elapsedMs": 12263,
+   "score": 70,
+   "findings": [
+    {
+     "title": "Cookie \"notion_browser_id\" is set without the Secure attribute over HTTPS",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://www.notion.so in this response header (cookie value redacted): \"Set-Cookie: notion_browser_id=<redacted>; Path=/; Expires=Wed, 08 Sep 2027 16:44:30 GMT; Domain=.notion.com\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"notion_browser_id\" is set without the Secure attribute over HTTPS. A cookie without the Secure attribute can be transmitted over an unencrypted connection, where a network attacker could intercept it. If this cookie carries session or authentication state, that exposes the session to hijacking."
+    },
+    {
+     "title": "Cookie \"notion_browser_id\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://www.notion.so in this response header (cookie value redacted): \"Set-Cookie: notion_browser_id=<redacted>; Path=/; Expires=Wed, 08 Sep 2027 16:44:30 GMT; Domain=.notion.com\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"notion_browser_id\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Cookie \"notion_check_cookie_consent\" is set without the Secure attribute over HTTPS",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://www.notion.so in this response header (cookie value redacted): \"Set-Cookie: notion_check_cookie_consent=<redacted>; Path=/; Expires=Wed, 09 Sep 2026 16:44:30 GMT; Domain=.notion.com\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"notion_check_cookie_consent\" is set without the Secure attribute over HTTPS. A cookie without the Secure attribute can be transmitted over an unencrypted connection, where a network attacker could intercept it. If this cookie carries session or authentication state, that exposes the session to hijacking."
+    },
+    {
+     "title": "Cookie \"notion_check_cookie_consent\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://www.notion.so in this response header (cookie value redacted): \"Set-Cookie: notion_check_cookie_consent=<redacted>; Path=/; Expires=Wed, 09 Sep 2026 16:44:30 GMT; Domain=.notion.com\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"notion_check_cookie_consent\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Application Surface Mapped (10 pages, 6 endpoints)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The crawler mapped 10 same-origin page(s) and discovered 6 parameterized endpoint(s); 0 parameter(s) were actively fuzzed. Examples: /product/ai/use-cases?type, /signup?target, /help/notion-ai-security-practices?_gl, /signup?from&amp;pathname&amp;tid, /connections?query, /connections?page."
+    },
+    {
+     "title": "Active Exploit Probing Skipped (Unverified Target)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "SQL injection, XSS, command-injection, SSRF, GraphQL and BOLA exploit attempts were not run against this target because domain ownership has not been verified. Passive recon (headers, TLS, DNS, exposed files, tech/library detection, and surface mapping) still ran in full."
+    },
+    {
+     "title": "Verbose Server Framework Signature Leaked",
+     "severity": "info",
+     "category": "EASM",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The attack surface assessment detected visible framework signatures leaked in response headers: X-Powered-By: Next.js. This is a fingerprinting/hardening note, not an exploitable weakness — automated bots use these patterns to locate systems, but the banner itself grants no access."
+    }
+   ]
+  },
+  {
+   "url": "https://www.figma.com",
+   "finalUrl": "https://www.figma.com",
+   "responseStatus": 200,
+   "elapsedMs": 19782,
+   "score": 100,
+   "findings": [
+    {
+     "title": "Application Surface Mapped (10 pages, 2 endpoints)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The crawler mapped 10 same-origin page(s) and discovered 2 parameterized endpoint(s); 0 parameter(s) were actively fuzzed. Examples: /?toMakePrompt, /community/file/1650930561067592795/climate-dashboard?q_id."
+    },
+    {
+     "title": "Active Exploit Probing Skipped (Unverified Target)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "SQL injection, XSS, command-injection, SSRF, GraphQL and BOLA exploit attempts were not run against this target because domain ownership has not been verified. Passive recon (headers, TLS, DNS, exposed files, tech/library detection, and surface mapping) still ran in full."
+    }
+   ]
+  },
+  {
+   "url": "https://slack.com",
+   "finalUrl": "https://slack.com",
+   "responseStatus": 200,
+   "elapsedMs": 6941,
+   "score": 70,
+   "findings": [
+    {
+     "title": "Missing Content-Security-Policy (CSP)",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed directly from the response headers and cookie attributes on the scanned URL.",
+     "description": "No Content-Security-Policy header was observed on the scanned response. CSP is a defense-in-depth control that constrains where scripts and other resources may load from, reducing the blast radius of any cross-site scripting (XSS) flaw. Its absence is not itself an exploitable vulnerability."
+    },
+    {
+     "title": "Cookie \"utm\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://slack.com in this response header (cookie value redacted): \"Set-Cookie: utm=<redacted>; expires=Tue, 22-Sep-2026 16:45:05 GMT; Max-Age=1209600; path=/; domain=.slack.com; secure; SameSite=None\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"utm\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Cookie \"b\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://slack.com in this response header (cookie value redacted): \"Set-Cookie: b=<redacted>; expires=Mon, 08-Sep-2036 16:45:05 GMT; Max-Age=315619200; path=/; domain=.slack.com; secure; SameSite=None\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"b\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Cookie \"x\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://slack.com in this response header (cookie value redacted): \"Set-Cookie: x=<redacted>; expires=Tue, 08-Sep-2026 17:00:05 GMT; Max-Age=900; path=/; domain=.slack.com; secure; SameSite=None\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"x\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Application Surface Mapped (10 pages, 28 endpoints)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The crawler mapped 10 same-origin page(s) and discovered 28 parameterized endpoint(s); 0 parameter(s) were actively fuzzed. Examples: /get-started?entry_point, /mweb-signin-start?dest, /contact-sales?id, /mweb-signin-start?id&amp;dest, /blog/news/salesforce-channels-new-innovations-from-slack?from, /blog/productivity/stay-informed-aligned-slack?from, /blog/collaboration/slack-essentials-organize-your-work-and-conversations?from, /blog/productivity/4-simple-slack-tips-to-have-a-more-productive-workday?from."
+    },
+    {
+     "title": "Active Exploit Probing Skipped (Unverified Target)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "SQL injection, XSS, command-injection, SSRF, GraphQL and BOLA exploit attempts were not run against this target because domain ownership has not been verified. Passive recon (headers, TLS, DNS, exposed files, tech/library detection, and surface mapping) still ran in full."
+    },
+    {
+     "title": "Verbose Server Framework Signature Leaked",
+     "severity": "info",
+     "category": "EASM",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The attack surface assessment detected visible framework signatures leaked in response headers: Server: Apache. This is a fingerprinting/hardening note, not an exploitable weakness — automated bots use these patterns to locate systems, but the banner itself grants no access."
+    }
+   ]
+  },
+  {
+   "url": "https://www.dropbox.com",
+   "finalUrl": "https://www.dropbox.com",
+   "responseStatus": 200,
+   "elapsedMs": 8803,
+   "score": 85,
+   "findings": [
+    {
+     "title": "Cookie \"__Host-js_csrf\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Observed on https://www.dropbox.com in this response header (cookie value redacted): \"Set-Cookie: __Host-js_csrf=<redacted>; Path=/; Expires=Wed, 08 Sep 2027 16:45:13 GMT; Secure; SameSite=None\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"__Host-js_csrf\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Application Surface Mapped (10 pages, 2 endpoints)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The crawler mapped 10 same-origin page(s) and discovered 2 parameterized endpoint(s); 0 parameter(s) were actively fuzzed. Examples: /mobile?trigger, /plans?trigger."
+    },
+    {
+     "title": "Active Exploit Probing Skipped (Unverified Target)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "SQL injection, XSS, command-injection, SSRF, GraphQL and BOLA exploit attempts were not run against this target because domain ownership has not been verified. Passive recon (headers, TLS, DNS, exposed files, tech/library detection, and surface mapping) still ran in full."
+    },
+    {
+     "title": "Verbose Server Framework Signature Leaked",
+     "severity": "info",
+     "category": "EASM",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The attack surface assessment detected visible framework signatures leaked in response headers: Server: envoy. This is a fingerprinting/hardening note, not an exploitable weakness — automated bots use these patterns to locate systems, but the banner itself grants no access."
+    }
+   ]
+  },
+  {
+   "url": "https://zoom.us",
+   "finalUrl": "https://zoom.us",
+   "responseStatus": 200,
+   "elapsedMs": 9404,
+   "score": 63,
+   "findings": [
+    {
+     "title": "Missing Content-Security-Policy (CSP)",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed directly from the response headers and cookie attributes on the scanned URL.",
+     "description": "No Content-Security-Policy header was observed on the scanned response. CSP is a defense-in-depth control that constrains where scripts and other resources may load from, reducing the blast radius of any cross-site scripting (XSS) flaw. Its absence is not itself an exploitable vulnerability."
+    },
+    {
+     "title": "Missing X-Frame-Options / Clickjacking Immunity",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed directly from the response headers and cookie attributes on the scanned URL.",
+     "description": "No anti-framing instruction (X-Frame-Options or CSP frame-ancestors) was observed on the scanned response. Without it, an attacker can frame the page inside a transparent overlay to hijack clicks. Some sites rely on CSP frame-ancestors instead, so confirm before treating this as absent."
+    },
+    {
+     "title": "Cookie \"_zm_mtk_guid\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://zoom.us in this response header (cookie value redacted): \"Set-Cookie: _zm_mtk_guid=<redacted>; Expires=Thu, 07 Sep 2028 16:45:28 GMT; Max-Age=63072000; Domain=zoom.us; Path=/; Secure\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"_zm_mtk_guid\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Cookie \"_zm_billing_visitor_guid\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://zoom.us in this response header (cookie value redacted): \"Set-Cookie: _zm_billing_visitor_guid=<redacted>; Domain=zoom.us; Path=/; Secure\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"_zm_billing_visitor_guid\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Cookie \"_zm_visitor_guid\" is set without the HttpOnly attribute",
+     "severity": "medium",
+     "category": "IAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "medium",
+     "endpoint": null,
+     "verification": "Observed on https://zoom.us in this response header (cookie value redacted): \"Set-Cookie: _zm_visitor_guid=<redacted>; Expires=Wed, 08 Sep 2027 16:45:28 GMT; Max-Age=31536000; Domain=zoom.us; Path=/; Secure\". A site may serve different cookie attributes to different clients, so a browser can show otherwise.",
+     "description": "Cookie \"_zm_visitor_guid\" is set without the HttpOnly attribute. A cookie without HttpOnly is readable by client-side JavaScript, so a cross-site scripting flaw elsewhere on the site could exfiltrate it. If this cookie carries session or authentication state, that raises the impact of any XSS to full session theft."
+    },
+    {
+     "title": "Application Surface Mapped (10 pages, 1 endpoints)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "The crawler mapped 10 same-origin page(s) and discovered 1 parameterized endpoint(s); 0 parameter(s) were actively fuzzed. Examples: /signup?signUpFrom."
+    },
+    {
+     "title": "Active Exploit Probing Skipped (Unverified Target)",
+     "severity": "info",
+     "category": "DAST",
+     "owasp": "A05:2021 – Security Misconfiguration",
+     "confidence": "high",
+     "endpoint": null,
+     "verification": "Informational scan-coverage context — not a detected vulnerability.",
+     "description": "SQL injection, XSS, command-injection, SSRF, GraphQL and BOLA exploit attempts were not run against this target because domain ownership has not been verified. Passive recon (headers, TLS, DNS, exposed files, tech/library detection, and surface mapping) still ran in full."
+    }
+   ]
+  }
+ ]
+}
