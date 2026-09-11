@@ -42,8 +42,13 @@ export function buildScanLogs(scan: Scan | null): string[] {
 
 // Maps a log line's channel prefix to its Tailwind text color.
 export function logLineClass(log: string): string {
-  // A proven exploit stands out regardless of channel — it's the headline event.
-  if (log.includes('✓ CONFIRMED')) return 'text-[#f87171] font-bold';
+  // A proven/confirmed exploit stands out regardless of channel — the headline
+  // event. A needs-verification result is amber (a real signal, not proven); a
+  // pass is green and unremarkable. Kept in step with resultMarker() in
+  // server/scoring.ts.
+  if (log.includes('✓ PROVEN') || log.includes('✓ CONFIRMED')) return 'text-[#f87171] font-bold';
+  if (log.includes('⚠ NEEDS VERIFICATION')) return 'text-amber-400 font-semibold';
+  if (log.includes('✓ PASS')) return 'text-[#22c55e]';
   if (log.includes('[SYSTEM]')) return 'text-[#22c55e] font-semibold';
   if (log.includes('[RECON]')) return 'text-sky-400';
   if (log.includes('[PROBE]')) return 'text-amber-400';

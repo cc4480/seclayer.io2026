@@ -6,6 +6,7 @@
 // also what keeps the ticker fully explanatory when DeepSeek Flash is
 // unavailable — the AI prose is layered on top of these, never required.
 import type { EmitFn } from "./scanEvents.js";
+import { resultTier, resultMarker } from "./scoring.js";
 import type { RedTeamFinding } from "./scanTypes.js";
 
 export interface ProbeDescriptor {
@@ -99,9 +100,11 @@ export function emitProbeResult(
 ): void {
   if (!emit) return;
   if (finding) {
+    // Respect the probe's own confidence: an observational red-team finding
+    // (confidence "medium"/"low") is NEEDS VERIFICATION, not CONFIRMED.
     emit(
       "result",
-      `✓ CONFIRMED: ${finding.testName} [${finding.severity.toUpperCase()}] — payload: ${finding.payload}`,
+      `${resultMarker(resultTier(finding))}: ${finding.testName} [${finding.severity.toUpperCase()}] — payload: ${finding.payload}`,
     );
   } else if (desc) {
     emit("probe", `· ${desc.label}: no signal — target resisted`);

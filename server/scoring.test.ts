@@ -4,7 +4,7 @@ import {
   scoreFindings, SEVERITY_WEIGHTS, SCORE_FLOOR,
   deriveSecurityPosture, riskLabelForSeverity, bannerForPosture,
   isProven, isConfirmed, HEURISTIC_CONFIDENCE_FACTOR, HEURISTIC_DEDUCTION_CAP,
-  CONFIRMED_SEVERITY_CEILING, gradeForScore,
+  CONFIRMED_SEVERITY_CEILING, gradeForScore, resultTier, resultMarker,
 } from './scoring.js';
 
 function evidence(response: string, quote: string): any {
@@ -241,4 +241,24 @@ test('an inconclusive cross-tenant finding counts as needs-verification', () => 
   ]);
   assert.equal(p.confirmedCount, 0);
   assert.equal(p.needsVerificationCount, 1);
+});
+
+test('resultTier / resultMarker label a finding by what was actually determined', () => {
+  // The live feed and the report both run through this, so the contradiction
+  // the user saw — "needs verification ... ✓ CONFIRMED" — cannot recur.
+  const proven: any = {
+    severity: 'critical',
+    evidence: { attack: { response: 'X id=42 Y' }, signal: { quote: 'id=42' } },
+  };
+  assert.equal(resultTier(proven), 'PROVEN');
+  assert.equal(resultMarker(resultTier(proven)), '✓ PROVEN');
+
+  assert.equal(resultTier({ severity: 'high', confidence: 'high' } as any), 'CONFIRMED');
+
+  const inconclusive: any = { severity: 'medium', confidence: 'low' };
+  assert.equal(resultTier(inconclusive), 'NEEDS VERIFICATION');
+  assert.equal(resultMarker(resultTier(inconclusive)), '⚠ NEEDS VERIFICATION');
+
+  // The cross-tenant "Enforced" pass is info — a passing control, not a vuln.
+  assert.equal(resultTier({ severity: 'info', confidence: 'high' } as any), 'PASS');
 });

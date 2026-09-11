@@ -94,6 +94,37 @@ export function isConfirmed(finding: Pick<Finding, "confidence" | "evidence">): 
   return isProven(finding) || finding.confidence === undefined || finding.confidence === "high";
 }
 
+// The one vocabulary for a probe result's confidence, shared by the report
+// panel and the live scan feed so they can never disagree — the cross-tenant
+// finding once showed "needs verification" in its title and "✓ CONFIRMED" in
+// the feed at the same time, because the feed stamped CONFIRMED on every
+// result unconditionally.
+//
+//   PASS             — an informational result / passing control, not a vuln
+//   PROVEN           — carries a replayable receipt (isProven)
+//   CONFIRMED        — high-confidence, no receipt (isConfirmed, not proven)
+//   NEEDS VERIFICATION — a heuristic/inconclusive claim (medium/low confidence)
+export type ResultTier = "PASS" | "PROVEN" | "CONFIRMED" | "NEEDS VERIFICATION";
+
+export function resultTier(
+  f: Pick<Finding, "confidence" | "evidence" | "severity">,
+): ResultTier {
+  if (normalizeSeverity(f.severity) === "info") return "PASS";
+  if (isProven(f)) return "PROVEN";
+  if (isConfirmed(f)) return "CONFIRMED";
+  return "NEEDS VERIFICATION";
+}
+
+/** The live-feed marker for a tier: "✓ PROVEN", "⚠ NEEDS VERIFICATION", … */
+export function resultMarker(tier: ResultTier): string {
+  switch (tier) {
+    case "PROVEN": return "✓ PROVEN";
+    case "CONFIRMED": return "✓ CONFIRMED";
+    case "PASS": return "✓ PASS";
+    case "NEEDS VERIFICATION": return "⚠ NEEDS VERIFICATION";
+  }
+}
+
 // Letter grade derived from the numeric score. One mapping, used everywhere a
 // grade is shown, so the letter can never disagree with the number beside it.
 // "N/A" is not a band on the scale — it is the refusal to place a scan on it.

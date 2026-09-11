@@ -31,6 +31,7 @@ import { runPassiveScan, cookieFlagIssues } from "./passiveScan.js";
 import { analyzeSecrets, analyzeDataDumpExposure } from "./staticAnalysis.js";
 import { buildScanCoverage } from "./coverage.js";
 import type { DiagnosticResult, ScanOptions } from "./scanTypes.js";
+import { resultTier, resultMarker } from "./scoring.js";
 
 // Re-export the SSRF, evidence, and findings-compilation entry points so
 // existing importers of scanner.js keep working after these moved to dedicated
@@ -131,7 +132,10 @@ export async function runDiagnostics(
     : [];
   if (allowActiveProbes && emit) {
     for (const f of result.apiSecFindings || []) {
-      emit("result", `✓ CONFIRMED: ${f.testName} [${f.severity.toUpperCase()}] — ${f.endpoint}`);
+      // Label by the finding's actual tier, not a blanket "CONFIRMED". An
+      // inconclusive cross-tenant result is NEEDS VERIFICATION; the "Enforced"
+      // pass is PASS; only a real, high-confidence finding is CONFIRMED/PROVEN.
+      emit("result", `${resultMarker(resultTier(f))}: ${f.testName} [${f.severity.toUpperCase()}] — ${f.endpoint}`);
     }
   }
 
