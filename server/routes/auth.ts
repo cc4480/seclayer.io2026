@@ -1,59 +1,16 @@
 // Public entry routes: health check, the out-of-band collaborator listener, and
-// the passwordless magic-link auth flow.
+// the passwordless one-time-code auth flow.
 import express from "express";
 import { db } from "../db.js";
 import { config } from "../config.js";
 import { deepseekKeyStatus } from "./deepseekKeyStatus.js";
 import { rateLimit } from "../rateLimit.js";
-import { sendEmail, buildMagicLinkEmail, isEmailConfigured } from "../email.js";
+import { sendEmail, buildLoginCodeEmail, isEmailConfigured } from "../email.js";
+import { LOGIN_CODE_TTL_MS, normalizeLoginCode, normalizeLoginEmail } from "../loginCode.js";
 import crypto from "node:crypto";
 import { INSTANCE_ID } from "../instance.js";
 import { verifyGoogleIdToken } from "../googleAuth.js";
 import type { RouteContext } from "./context.js";
-
-// Minimal server-rendered pages for the magic-link confirmation step. Plain
-// HTML on purpose: this runs before any session exists, so it must not depend
-// on the SPA bundle loading or on client-side routing.
-const PAGE_STYLE =
-  "font-family:system-ui,-apple-system,sans-serif;background:#0c0c0e;color:#e4e4e7;" +
-  "display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0";
-
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
-}
-
-function expiredLinkPage(): string {
-  return (
-    '<!doctype html><html lang="en"><head><meta charset="utf-8">' +
-    '<meta name="viewport" content="width=device-width,initial-scale=1">' +
-    '<meta name="robots" content="noindex"><title>Sign-in link invalid or expired</title></head>' +
-    `<body style="${PAGE_STYLE}"><main style="text-align:center;padding:2rem;max-width:26rem">` +
-    '<h1 style="font-size:1.25rem;margin:0 0 .5rem">Sign-in link invalid or expired</h1>' +
-    '<p style="color:#a1a1aa;font-size:.875rem;margin:0 0 1.25rem">Sign-in links can be used once and expire after 15 minutes. Please request a new one.</p>' +
-    '<a href="/" style="color:#22c55e;font-size:.875rem">Back to Seclayer</a>' +
-    "</main></body></html>"
-  );
-}
-
-// The token rides in a hidden field and is spent only when this form is
-// submitted, so a scanner's GET leaves it unused.
-function confirmSignInPage(token: string, email: string): string {
-  return (
-    '<!doctype html><html lang="en"><head><meta charset="utf-8">' +
-    '<meta name="viewport" content="width=device-width,initial-scale=1">' +
-    '<meta name="robots" content="noindex"><title>Confirm sign-in</title></head>' +
-    `<body style="${PAGE_STYLE}"><main style="text-align:center;padding:2rem;max-width:26rem">` +
-    '<h1 style="font-size:1.25rem;margin:0 0 .5rem">Confirm sign-in</h1>' +
-    `<p style="color:#a1a1aa;font-size:.875rem;margin:0 0 1.5rem">Continue as <strong style="color:#e4e4e7">${escapeHtml(email)}</strong>.</p>` +
-    '<form method="POST" action="/api/auth/verify">' +
-    `<input type="hidden" name="token" value="${escapeHtml(token)}">` +
-    '<button type="submit" style="background:#22c55e;color:#000;border:0;border-radius:.375rem;' +
-    'padding:.75rem 1.75rem;font-size:.875rem;font-weight:600;cursor:pointer">Sign in to Seclayer</button>' +
-    "</form>" +
-    '<p style="color:#52525b;font-size:.75rem;margin:1.5rem 0 0">This link can be used once and expires 15 minutes after it was sent.</p>' +
-    "</main></body></html>"
-  );
-}
 
 export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
   const { requireAuth, getUserId, cookieOptions, sessionCookie, nmapAvailable } = ctx;
@@ -101,7 +58,21 @@ export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
     res.status(200).type("text/plain").send("ok");
   });
 
-  // --- Auth (passwordless magic link) ---
+  // --- Auth (one-time emailed code) ---
+  //
+  // This replaced the magic link outright rather than running alongside it. Two
+  // live sign-in paths is twice the surface to keep correct, and the link had
+  // two problems codes do not: mail security scanners and prefetchers follow
+  // every URL in a message (which forced the check/spend split this file used
+  // to carry), and a link only works if the mail is opened on the same device
+  // as the browser waiting to sign in.
+  //
+  // A code is a much weaker secret than the 32-byte token a link carried — a
+  // million values, not 2^256. What makes it safe is enforced in
+  // server/loginCode.ts and db.verifyLoginCode: lookup scoped to the address,
+  // five attempts per code, one live code per address. The limiters below are
+  // the outer bound on how fast an attacker can cycle fresh codes to get more
+  // guesses.
   const requestLinkLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 5,
@@ -113,13 +84,12 @@ export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
   // or mobile egresses from several addresses and gets a fresh allowance from
   // each, so mailbombing one inbox only costs them a few extra source IPs.
   // Bucketing on the normalised address caps how often ANY sender can have a
-  // link sent to a given mailbox.
+  // code sent to a given mailbox.
   //
-  // Normalisation matches the handler's (lowercase + trim), or the same address
-  // in different casing would be a different bucket and walk straight past this.
-  // An hour rather than the IP limiter's 15 minutes: nobody legitimately needs
-  // several sign-in links to one inbox within an hour, and the link itself is
-  // valid for 15 minutes.
+  // It is also what bounds brute force. Each code dies after five wrong
+  // guesses, so the only way to get more is to request another one: five codes
+  // an hour x five attempts = at most 25 guesses per hour against a
+  // million-value keyspace, no matter how many source IPs an attacker has.
   const requestLinkEmailLimiter = rateLimit({
     windowMs: 60 * 60 * 1000,
     max: 5,
@@ -128,66 +98,65 @@ export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
       const raw = (req.body || {}).email;
       return typeof raw === "string" && raw.trim() ? raw.toLowerCase().trim() : undefined;
     },
-    message: "Too many sign-in links have been requested for that address. Please wait a while and try again.",
+    message: "Too many sign-in codes have been requested for that address. Please wait a while and try again.",
   });
-  app.post("/api/auth/request-link", requestLinkLimiter, requestLinkEmailLimiter, async (req, res) => {
+  // Guess limiter. The per-code attempt cap is the real defence; this stops an
+  // attacker spending someone else's five attempts as fast as the network
+  // allows, and keeps a scripted client from hammering the endpoint.
+  const verifyCodeLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    keyPrefix: "auth-verify",
+    message: "Too many code attempts. Please wait a few minutes and try again.",
+  });
+
+  app.post("/api/auth/request-code", requestLinkLimiter, requestLinkEmailLimiter, async (req, res) => {
     const { email } = req.body || {};
     if (!email || typeof email !== "string" || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
       return res.status(400).json({ status: "error", message: "A valid email address is required." });
     }
-    const normEmail = email.toLowerCase().trim();
-    const token = (await db.createLoginToken(normEmail));
-    // Build the link from a TRUSTED base only. In production APP_URL is required
-    // (enforced at boot), so the attacker-controllable Host header is never used
-    // for auth links. The request-host fallback is dev-only.
-    const base = config.appUrl || `${req.protocol}://${req.get("host")}`;
-    const link = `${base}/api/auth/verify?token=${token}`;
+    const normEmail = normalizeLoginEmail(email);
+    const code = (await db.createLoginCode(normEmail));
     try {
-      const mail = buildMagicLinkEmail(link);
+      const mail = buildLoginCodeEmail(code, Math.round(LOGIN_CODE_TTL_MS / 60000));
       await sendEmail({ to: normEmail, subject: mail.subject, html: mail.html, text: mail.text });
     } catch (err: any) {
-      console.error("Failed to send magic link email:", err?.message || err);
+      console.error("Failed to send sign-in code email:", err?.message || err);
       return res.status(502).json({ status: "error", message: "Could not send the sign-in email. Please try again shortly." });
     }
-    // The login link contains a live session-granting token, so it is ONLY ever
-    // returned in the response when there's no real email provider configured
-    // AND either we're not in production, or the operator has explicitly opted
-    // into running without one (ALLOW_MISSING_EMAIL_PROVIDER — private,
-    // single-operator instances only, e.g. local Docker testing; see
-    // config.ts). Any real deployment with an email provider configured never
-    // exposes it — it is delivered by email exclusively.
-    const devLink = !isEmailConfigured() && (!config.isProd || config.allowMissingEmailProvider) ? link : undefined;
-    res.json({ status: "ok", message: "If that email is valid, a sign-in link is on its way.", devLink });
+    // The code is a live credential, so it is ONLY ever returned in the response
+    // when there is no real email provider configured AND either we are not in
+    // production, or the operator has explicitly opted into running without one
+    // (ALLOW_MISSING_EMAIL_PROVIDER — private, single-operator instances only;
+    // see config.ts). Any real deployment never exposes it.
+    const devCode = !isEmailConfigured() && (!config.isProd || config.allowMissingEmailProvider) ? code : undefined;
+    res.json({ status: "ok", message: "If that email is valid, a sign-in code is on its way.", devCode });
   });
 
-  // Opening the emailed link only CHECKS the token — it never spends it. Mail
-  // security scanners and link prefetchers fetch every URL in a message
-  // automatically (production logs showed ~8 datacenter IPs hitting this within
-  // milliseconds of delivery), so burning the single use here meant a scanner
-  // always redeemed the token first and the human's click failed as "invalid or
-  // expired". The redemption is the POST below, which automated fetchers don't
-  // issue. Same token, same 15-minute single-use guarantee — only the step that
-  // spends it moved.
-  app.get("/api/auth/verify", async (req, res) => {
-    const token = req.query.token as string | undefined;
-    const email = token ? (await db.peekLoginToken(token)) : null;
-    if (!email) {
-      return res.status(400).send(expiredLinkPage());
+  app.post("/api/auth/verify-code", verifyCodeLimiter, async (req, res) => {
+    const rawEmail = (req.body || {}).email;
+    const code = normalizeLoginCode((req.body || {}).code);
+    if (!rawEmail || typeof rawEmail !== "string" || !code) {
+      return res.status(400).json({ status: "error", message: "Enter the email address and the 6-digit code." });
     }
-    res.type("html").send(confirmSignInPage(token!, email));
-  });
-
-  // Redeems the token. Only reached by submitting the confirmation form above.
-  app.post("/api/auth/verify", async (req, res) => {
-    const token = (req.body?.token ?? req.query.token) as string | undefined;
-    const email = token ? (await db.consumeLoginToken(token)) : null;
-    if (!email) {
-      return res.status(400).send(expiredLinkPage());
+    const result = (await db.verifyLoginCode(rawEmail, code));
+    if (!result.ok) {
+      // ONE message for every failure. Separating "wrong code" from "no code was
+      // issued for that address" would turn this into an account-existence
+      // oracle, and separating "expired" from "wrong" would tell an attacker
+      // whether a guessed value was ever real. The reason is logged, not sent.
+      if (result.reason === "too_many_attempts") {
+        console.warn("[auth] Sign-in code exhausted its attempts — possible brute force.");
+      }
+      return res.status(401).json({
+        status: "error",
+        message: "That code is not valid. Request a new one and try again.",
+      });
     }
-    const user = (await db.getOrCreateUser(email));
+    const user = (await db.getOrCreateUser(result.email));
     const session = (await db.createSession(user.id));
     res.cookie(sessionCookie, session, cookieOptions);
-    res.redirect("/");
+    res.json({ status: "ok" });
   });
 
   // Public, pre-auth: the login form has no session yet, so it can't learn the

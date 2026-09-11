@@ -19,7 +19,15 @@ const CAMEL_COLUMNS = [
   "scheduleString", "lastScannedAt", "nextScanAt", "scanHour", "scanMinute",
   "scanWeekday", "lastError", "tokenHash", "expiresAt", "consumedAt", "scanId",
   "sourceIp", "userAgent", "receivedAt", "resolvedIp", "nmapVersion", "rawXml",
-  "startedAt", "findingCategory", "updatedAt",
+  "startedAt", "findingCategory", "updatedAt", "codeHash",
+  // These five are not currently read through normalizeRow — they appear only
+  // in write predicates (SET claimedAt = …, WHERE bucketKey = …) or in raw
+  // pool.query results with explicitly named columns. They are listed anyway so
+  // the map is COMPLETE against schema.sql rather than complete-for-today:
+  // adding a `SELECT *` on one of these tables later would otherwise reintroduce
+  // the silent-undefined bug, and the test that pins this cannot tell an
+  // intentional omission from a forgotten one.
+  "bucketKey", "claimedAt", "heartbeatAt", "hitAt", "jobParams",
 ] as const;
 
 const LOWER_TO_CAMEL: Record<string, string> = Object.fromEntries(

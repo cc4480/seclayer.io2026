@@ -122,6 +122,25 @@ CREATE TABLE IF NOT EXISTS monitored_targets (
 );
 CREATE INDEX IF NOT EXISTS idx_mon_user ON monitored_targets(userId);
 
+-- One-time sign-in codes. See server/loginCode.ts for why a six-digit secret
+-- needs a different shape from the 32-byte tokens elsewhere.
+--
+-- codeHash is deliberately NOT the primary key and NOT unique, unlike
+-- login_tokens.tokenHash: two people can legitimately hold the same six-digit
+-- code at the same time, and a uniqueness constraint would make the second
+-- person's sign-in fail at random. It is also why lookup is by (email,
+-- codeHash) and never by codeHash alone.
+CREATE TABLE IF NOT EXISTS login_codes (
+  id         text PRIMARY KEY,
+  email      text NOT NULL,
+  codeHash   text NOT NULL,
+  attempts   integer NOT NULL DEFAULT 0,
+  expiresAt  text NOT NULL,
+  consumedAt text,
+  createdAt  text NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_login_codes_email ON login_codes(email, createdAt);
+
 CREATE TABLE IF NOT EXISTS login_tokens (
   tokenHash  text PRIMARY KEY,
   email      text NOT NULL,

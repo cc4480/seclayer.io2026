@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Shield, Mail, Check, RefreshCw, X, ArrowRight, AlertTriangle } from 'lucide-react';
+import { Shield, Mail, RefreshCw, X, ArrowRight, AlertTriangle, KeyRound } from 'lucide-react';
 
 // Google Identity Services attaches itself to window.google once its script
 // loads. Declared loosely rather than pulling in @types/google.one-tap for the
@@ -12,18 +12,28 @@ declare global {
 
 const GSI_SRC = 'https://accounts.google.com/gsi/client';
 
+// Long enough that a second request is a considered act rather than an
+// impatient double-click. The server allows five codes per address per hour and
+// each new code kills the previous one, so a user who taps resend four times
+// while the first email is still in flight would lock themselves out of the
+// address for an hour and be holding a code that no longer works.
+const RESEND_COOLDOWN_SECONDS = 30;
+
 interface LoginModalProps {
   onClose: () => void;
 }
 
 export default function LoginModal({ onClose }: LoginModalProps) {
   const [email, setEmail] = useState('');
+  const [code, setCode] = useState('');
+  const [step, setStep] = useState<'email' | 'code'>('email');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isMagicLinkSent, setIsMagicLinkSent] = useState(false);
-  const [devLink, setDevLink] = useState<string | null>(null);
+  const [devCode, setDevCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [cooldown, setCooldown] = useState(0);
   const [googleClientId, setGoogleClientId] = useState<string | null>(null);
   const googleButtonRef = useRef<HTMLDivElement | null>(null);
+  const codeInputRef = useRef<HTMLInputElement | null>(null);
 
   // Ask the server whether Google sign-in is configured. When it isn't, the
   // whole block below never renders and this modal is exactly as it was.
@@ -32,9 +42,23 @@ export default function LoginModal({ onClose }: LoginModalProps) {
     fetch('/api/auth/providers')
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => { if (!cancelled && d?.googleClientId) setGoogleClientId(d.googleClientId); })
-      .catch(() => { /* Google sign-in stays hidden; magic link is unaffected */ });
+      .catch(() => { /* Google sign-in stays hidden; the code flow is unaffected */ });
     return () => { cancelled = true; };
   }, []);
+
+  // Tick the resend cooldown down to zero.
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
+
+  // Put the cursor in the code field the moment that step appears — the user
+  // has just come back from their mail client and the only thing left to do is
+  // type six digits.
+  useEffect(() => {
+    if (step === 'code') codeInputRef.current?.focus();
+  }, [step]);
 
   // Load the GIS script once the client id is known, then render Google's own
   // button into the div below. The button must be rendered by GIS itself — a
@@ -90,31 +114,72 @@ export default function LoginModal({ onClose }: LoginModalProps) {
     return () => { cancelled = true; script?.removeEventListener('load', init); };
   }, [googleClientId]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email || !email.includes('@')) return;
-
+  const requestCode = async () => {
     setIsSubmitting(true);
     setError(null);
     try {
-      const res = await fetch('/api/auth/request-link', {
+      const res = await fetch('/api/auth/request-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data.message || 'Could not send the sign-in link. Please try again.');
+        setError(data.message || 'Could not send the sign-in code. Please try again.');
         return;
       }
-      // devLink is only returned when no email provider is configured (dev/demo).
-      setDevLink(data.devLink || null);
-      setIsMagicLinkSent(true);
+      // devCode is only returned when no email provider is configured (dev/demo).
+      setDevCode(data.devCode || null);
+      setCode('');
+      setStep('code');
+      setCooldown(RESEND_COOLDOWN_SECONDS);
     } catch {
       setError('Network error. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleEmailSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email || !email.includes('@')) return;
+    await requestCode();
+  };
+
+  const handleCodeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const digits = code.replace(/[\s-]/g, '');
+    if (digits.length !== 6) return;
+
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/auth/verify-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code: digits })
+      });
+      if (res.ok) {
+        // The session cookie is set; reload so the app boots authenticated.
+        window.location.reload();
+        return;
+      }
+      const data = await res.json().catch(() => ({}));
+      setError(data.message || 'That code is not valid. Request a new one and try again.');
+      setCode('');
+      codeInputRef.current?.focus();
+    } catch {
+      setError('Network error. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const startOver = () => {
+    setStep('email');
+    setCode('');
+    setDevCode(null);
+    setError(null);
   };
 
   return (
@@ -143,28 +208,103 @@ export default function LoginModal({ onClose }: LoginModalProps) {
           </div>
           <h2 className="text-xl font-bold font-mono text-white">Sign in to Seclayer</h2>
           <p className="text-[#a1a1aa] text-xs max-w-xs mx-auto font-mono">
-            Enter your email and we'll send a secure sign-in link. New emails receive <strong className="text-[#22c55e]">5 starting scan credits</strong>.
+            {step === 'email' ? (
+              <>Enter your email and we'll send a 6-digit sign-in code. New emails receive <strong className="text-[#22c55e]">5 starting scan credits</strong>.</>
+            ) : (
+              <>Enter the 6-digit code we sent to <strong className="text-white break-all">{email}</strong>.</>
+            )}
           </p>
         </div>
 
-        {isMagicLinkSent ? (
-          <div className="bg-[#22c55e]/5 border border-[#22c55e]/25 p-5 rounded text-center space-y-3 text-[#22c55e]">
-            <Check className="w-6 h-6 mx-auto bg-[#22c55e] text-black rounded-full p-1" />
-            <span className="text-xs font-mono font-bold block uppercase tracking-wider">Check your email</span>
-            <p className="text-[11px] text-[#a1a1aa] font-mono">
-              We sent a sign-in link to <strong className="text-white">{email}</strong>. It is valid for 15 minutes and can be used once.
-            </p>
-            {devLink && (
-              <a
-                href={devLink}
-                className="inline-flex items-center justify-center space-x-2 w-full py-2.5 bg-[#22c55e] hover:bg-[#4ade80] text-black text-[11px] font-mono tracking-widest uppercase font-bold rounded transition-all cursor-pointer"
-                id="login-modal-devlink"
-              >
-                <span>Dev mode: open sign-in link</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </a>
+        {step === 'code' ? (
+          <form onSubmit={handleCodeSubmit} className="space-y-4">
+            <div>
+              <label htmlFor="login-modal-code" className="text-[10px] font-mono text-[#52525b] uppercase block mb-1.5 ml-1">
+                Sign-in code
+              </label>
+              <div className="flex bg-black border border-[#27272a] rounded p-2.5 focus-within:border-[#22c55e] transition-colors">
+                <KeyRound className="w-4 h-4 text-[#52525b] mr-2 shrink-0 self-center" aria-hidden="true" />
+                <input
+                  id="login-modal-code"
+                  ref={codeInputRef}
+                  // `one-time-code` is what lets a browser and phone keyboard
+                  // offer the code straight from the notification, and
+                  // inputMode="numeric" brings up the digit pad rather than a
+                  // full keyboard. Not type="number": that renders spinners,
+                  // silently strips leading zeros on some browsers, and a code
+                  // is a string of digits, not a quantity.
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  // Room for the "123 456" spacing the email uses; the server
+                  // strips separators so pasting it verbatim works.
+                  maxLength={7}
+                  required
+                  placeholder="123456"
+                  aria-describedby="login-modal-code-help"
+                  className="bg-transparent text-white text-lg font-mono tracking-[0.35em] w-full focus:outline-none placeholder:text-[#3f3f46] placeholder:tracking-[0.35em]"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  disabled={isSubmitting}
+                />
+              </div>
+              <p id="login-modal-code-help" className="text-[10px] font-mono text-[#52525b] mt-1.5 ml-1">
+                Expires in 10 minutes. Spaces don't matter.
+              </p>
+            </div>
+
+            {devCode && (
+              <div className="text-center text-[11px] font-mono text-[#22c55e] bg-[#22c55e]/5 border border-[#22c55e]/25 rounded p-2.5" id="login-modal-devcode">
+                Dev mode — no email provider configured. Your code is <strong className="tracking-widest">{devCode}</strong>
+              </div>
             )}
-          </div>
+
+            {error && (
+              <div className="flex items-start space-x-2 text-[11px] font-mono text-red-400 bg-red-500/5 border border-red-500/25 rounded p-2.5" role="alert">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" aria-hidden="true" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={isSubmitting || code.replace(/[\s-]/g, '').length !== 6}
+              className="w-full py-2.5 bg-[#22c55e] hover:bg-[#4ade80] text-black text-xs font-mono tracking-widest uppercase font-bold rounded transition-all flex items-center justify-center space-x-2 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              id="login-modal-verify"
+            >
+              {isSubmitting ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+                  <span>Verifying...</span>
+                </>
+              ) : (
+                <>
+                  <span>Sign in</span>
+                  <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
+                </>
+              )}
+            </button>
+
+            <div className="flex items-center justify-between text-[10px] font-mono">
+              <button
+                type="button"
+                onClick={startOver}
+                className="text-[#52525b] hover:text-[#a1a1aa] transition-colors cursor-pointer"
+                id="login-modal-change-email"
+              >
+                Use a different email
+              </button>
+              <button
+                type="button"
+                onClick={requestCode}
+                disabled={isSubmitting || cooldown > 0}
+                className="text-[#22c55e] hover:text-[#4ade80] transition-colors disabled:text-[#3f3f46] disabled:cursor-not-allowed cursor-pointer"
+                id="login-modal-resend"
+              >
+                {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend code'}
+              </button>
+            </div>
+          </form>
         ) : (
           <>
             {/* Rendered by Google Identity Services itself; absent entirely when
@@ -180,13 +320,15 @@ export default function LoginModal({ onClose }: LoginModalProps) {
               </div>
             )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleEmailSubmit} className="space-y-4">
             <div>
-              <label className="text-[10px] font-mono text-[#52525b] uppercase block mb-1.5 ml-1">Email address</label>
+              <label htmlFor="login-modal-email" className="text-[10px] font-mono text-[#52525b] uppercase block mb-1.5 ml-1">Email address</label>
               <div className="flex bg-black border border-[#27272a] rounded p-2.5 focus-within:border-[#22c55e] transition-colors">
-                <Mail className="w-4 h-4 text-[#52525b] mr-2 shrink-0 self-center" />
+                <Mail className="w-4 h-4 text-[#52525b] mr-2 shrink-0 self-center" aria-hidden="true" />
                 <input
+                  id="login-modal-email"
                   type="email"
+                  autoComplete="email"
                   required
                   placeholder="name@company.com"
                   className="bg-transparent text-white text-xs font-mono w-full focus:outline-none"
@@ -198,8 +340,8 @@ export default function LoginModal({ onClose }: LoginModalProps) {
             </div>
 
             {error && (
-              <div className="flex items-start space-x-2 text-[11px] font-mono text-red-400 bg-red-500/5 border border-red-500/25 rounded p-2.5">
-                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <div className="flex items-start space-x-2 text-[11px] font-mono text-red-400 bg-red-500/5 border border-red-500/25 rounded p-2.5" role="alert">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" aria-hidden="true" />
                 <span>{error}</span>
               </div>
             )}
@@ -212,13 +354,13 @@ export default function LoginModal({ onClose }: LoginModalProps) {
             >
               {isSubmitting ? (
                 <>
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  <span>Sending link...</span>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+                  <span>Sending code...</span>
                 </>
               ) : (
                 <>
-                  <span>Send sign-in link</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
+                  <span>Send sign-in code</span>
+                  <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
                 </>
               )}
             </button>

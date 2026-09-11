@@ -1,5 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import { normalizeRow, normalizeRows, _camelColumns, _lowerToCamel } from "./pgRowCase.js";
 import { rowToUser, rowToScan } from "../dbMappers.js";
 
@@ -60,5 +62,33 @@ test("normalizeRows maps a result set", () => {
   assert.deepEqual(
     normalizeRows([{ userid: "a" }, { userid: "b" }]),
     [{ userId: "a" }, { userId: "b" }],
+  );
+});
+
+test("CAMEL_COLUMNS covers every camelCase column in schema.sql", () => {
+  // CAMEL_COLUMNS is hand-maintained against the schema, and the cost of
+  // forgetting an entry is invisible: the column comes back lower-cased, the
+  // mapper reads undefined, and the feature fails as though the DATA were
+  // wrong. Adding login_codes.codeHash without this list entry made every
+  // Postgres sign-in reject a correct code — nothing threw, nothing logged.
+  //
+  // So the schema is the source of truth and this asserts the list matches it,
+  // rather than trusting the "keep in sync" comment to be obeyed.
+  const sql = fs.readFileSync(path.join(process.cwd(), "server", "pg", "schema.sql"), "utf-8");
+  // Column definitions only: an identifier followed by one of the types the
+  // schema actually uses. This deliberately does not match CREATE TABLE /
+  // CREATE INDEX / PRIMARY KEY lines, which carry no column declaration.
+  const declared = new Set<string>();
+  for (const m of sql.matchAll(/^[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+(?:text|integer|bigint)\b/gm)) {
+    if (/[A-Z]/.test(m[1])) declared.add(m[1]);
+  }
+  assert.ok(declared.size > 20, `expected to parse many camelCase columns, found ${declared.size}`);
+
+  const known = new Set<string>(_camelColumns as readonly string[]);
+  const missing = [...declared].filter((c) => !known.has(c)).sort();
+  assert.deepEqual(
+    missing,
+    [],
+    `these schema.sql columns are missing from CAMEL_COLUMNS and would read as undefined: ${missing.join(", ")}`,
   );
 });

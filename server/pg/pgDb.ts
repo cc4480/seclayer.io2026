@@ -14,6 +14,14 @@ import type {
 } from "../../src/types.js";
 import { hashToken, maskKey, sealSecret, openSecret } from "../dbCrypto.js";
 import {
+  LOGIN_CODE_MAX_ATTEMPTS,
+  LOGIN_CODE_TTL_MS,
+  LoginCodeResult,
+  generateLoginCode,
+  hashesEqual,
+  normalizeLoginEmail,
+} from "../loginCode.js";
+import {
   rowToUser, rowToScan, rowToApiKey, rowToDomainVerification, rowToMonitoredTarget,
   rowToNmapScan, rowToAutofixSession,
 } from "../dbMappers.js";
@@ -118,30 +126,59 @@ export class PostgresDb implements Db {
     );
   }
 
-  // --- Magic-link auth + sessions -------------------------------------------
-  async createLoginToken(email: string, ttlMs = 15 * 60 * 1000): Promise<string> {
-    const raw = crypto.randomBytes(32).toString("hex");
+  // --- One-time sign-in codes -----------------------------------------------
+  // Mirrors SqliteDb.createLoginCode; see there and server/loginCode.ts for why
+  // earlier live codes for the address are retired first.
+  async createLoginCode(email: string, ttlMs = LOGIN_CODE_TTL_MS): Promise<string> {
+    const normEmail = normalizeLoginEmail(email);
     const now = Date.now();
-    await this.run("INSERT INTO login_tokens (tokenHash, email, expiresAt, createdAt) VALUES (?, ?, ?, ?)",
-      [hashToken(raw), email.toLowerCase().trim(), new Date(now + ttlMs).toISOString(), new Date(now).toISOString()]);
-    return raw;
+    return this.tx(async (q) => {
+      await this.run("UPDATE login_codes SET consumedAt = ? WHERE email = ? AND consumedAt IS NULL",
+        [new Date(now).toISOString(), normEmail], q);
+      const code = generateLoginCode();
+      await this.run(
+        "INSERT INTO login_codes (id, email, codeHash, attempts, expiresAt, createdAt) VALUES (?, ?, ?, 0, ?, ?)",
+        [crypto.randomUUID(), normEmail, hashToken(code), new Date(now + ttlMs).toISOString(), new Date(now).toISOString()],
+        q,
+      );
+      return code;
+    });
   }
-  // Validates a magic-link token without burning it — see db.ts's peekLoginToken
-  // for why the single use must not be spent on the GET.
-  async peekLoginToken(raw: string): Promise<string | null> {
-    const row = await this.get("SELECT * FROM login_tokens WHERE tokenHash = ?", [hashToken(raw)]);
-    if (!row || row.consumedAt) return null;
-    if (new Date(row.expiresAt).getTime() < Date.now()) return null;
-    return row.email;
+
+  // Mirrors SqliteDb.verifyLoginCode, with one addition SQLite does not need:
+  // FOR UPDATE.
+  //
+  // Three replicas serve this app, so two guesses at the same address's code
+  // can be in flight on different machines at the same instant. Without the row
+  // lock, both would read the same `attempts` value, both would write
+  // attempts+1, and one of the five tries would be given away for free — the
+  // attempt cap is the whole reason a six-digit secret is safe (loginCode.ts,
+  // property 2), so losing count of it matters. FOR UPDATE serialises them onto
+  // the row; the second waits and reads the first one's result.
+  async verifyLoginCode(email: string, code: string): Promise<LoginCodeResult> {
+    const normEmail = normalizeLoginEmail(email);
+    return this.tx(async (q) => {
+      const row = await this.get(
+        "SELECT * FROM login_codes WHERE email = ? AND consumedAt IS NULL ORDER BY createdAt DESC LIMIT 1 FOR UPDATE",
+        [normEmail], q);
+      if (!row) return { ok: false, reason: "invalid" } as const;
+      if (new Date(row.expiresAt).getTime() < Date.now()) return { ok: false, reason: "expired" } as const;
+      const attempts = Number(row.attempts);
+      if (attempts >= LOGIN_CODE_MAX_ATTEMPTS) return { ok: false, reason: "too_many_attempts" } as const;
+
+      if (!hashesEqual(hashToken(code), String(row.codeHash))) {
+        await this.run("UPDATE login_codes SET attempts = attempts + 1 WHERE id = ?", [row.id], q);
+        return { ok: false, reason: "invalid" } as const;
+      }
+
+      const claimed = await this.run("UPDATE login_codes SET consumedAt = ? WHERE id = ? AND consumedAt IS NULL",
+        [new Date().toISOString(), row.id], q);
+      if (claimed === 0) return { ok: false, reason: "invalid" } as const;
+      return { ok: true, email: normEmail } as const;
+    });
   }
-  async consumeLoginToken(raw: string): Promise<string | null> {
-    const hash = hashToken(raw);
-    const row = await this.get("SELECT * FROM login_tokens WHERE tokenHash = ?", [hash]);
-    if (!row || row.consumedAt) return null;
-    if (new Date(row.expiresAt).getTime() < Date.now()) return null;
-    await this.run("UPDATE login_tokens SET consumedAt = ? WHERE tokenHash = ?", [new Date().toISOString(), hash]);
-    return row.email;
-  }
+
+  // --- Sessions -------------------------------------------------------------
   async createSession(userId: string, ttlMs = 30 * 24 * 60 * 60 * 1000): Promise<string> {
     const raw = crypto.randomBytes(32).toString("hex");
     const now = Date.now();

@@ -39,33 +39,64 @@ test('deductCredits respects the balance', async () => {
   assert.equal((await db.getUser(u.id))!.credits, 0);
 });
 
-test('a magic-link token is single-use and validates ownership', async () => {
-  const raw = (await db.createLoginToken('t3@test.io'));
-  assert.equal((await db.consumeLoginToken(raw)), 't3@test.io');
-  assert.equal((await db.consumeLoginToken(raw)), null, 'token cannot be reused');
-  assert.equal((await db.consumeLoginToken('not-a-real-token')), null);
+test('a sign-in code is single-use and validates ownership', async () => {
+  const code = (await db.createLoginCode('t3@test.io'));
+  assert.deepEqual((await db.verifyLoginCode('t3@test.io', code)), { ok: true, email: 't3@test.io' });
+  assert.equal((await db.verifyLoginCode('t3@test.io', code)).ok, false, 'a code cannot be reused');
 });
 
-test('an expired magic-link token is rejected', async () => {
-  const raw = (await db.createLoginToken('t3b@test.io', -1)); // already expired
-  assert.equal((await db.consumeLoginToken(raw)), null);
+test('an expired sign-in code is rejected', async () => {
+  const code = (await db.createLoginCode('t3b@test.io', -1)); // already expired
+  const r = (await db.verifyLoginCode('t3b@test.io', code));
+  assert.equal(r.ok, false);
+  assert.equal(r.ok === false && r.reason, 'expired');
 });
 
-// Regression: mail scanners and link prefetchers GET every URL in a delivered
-// message, so merely opening the link must not spend its single use — that made
-// every real sign-in fail as "invalid or expired" in production.
-test('peeking a magic-link token validates it without burning it', async () => {
-  const raw = (await db.createLoginToken('t3c@test.io'));
-  assert.equal((await db.peekLoginToken(raw)), 't3c@test.io');
-  assert.equal((await db.peekLoginToken(raw)), 't3c@test.io', 'peek must be repeatable');
-  // Still redeemable afterwards — exactly once.
-  assert.equal((await db.consumeLoginToken(raw)), 't3c@test.io');
-  assert.equal((await db.peekLoginToken(raw)), null, 'a consumed token no longer peeks');
+// THE property that makes a six-digit secret safe. If a code could be matched
+// without naming the address it was issued to, one guess would be tested
+// against every live code in the table at once instead of against one account.
+test('a code issued to one address does not work for another', async () => {
+  const code = (await db.createLoginCode('victim@test.io'));
+  assert.equal((await db.verifyLoginCode('attacker@test.io', code)).ok, false);
+  // Still valid for its real owner — the rejection above was about scope, not
+  // about the code having been spent.
+  assert.equal((await db.verifyLoginCode('victim@test.io', code)).ok, true);
 });
 
-test('peek rejects expired and unknown magic-link tokens', async () => {
-  assert.equal((await db.peekLoginToken((await db.createLoginToken('t3d@test.io', -1)))), null);
-  assert.equal((await db.peekLoginToken('not-a-real-token')), null);
+test('five wrong guesses kill the code, even if the sixth guess is correct', async () => {
+  const code = (await db.createLoginCode('t3e@test.io'));
+  const wrong = code === '000000' ? '111111' : '000000';
+  for (let i = 0; i < 5; i++) {
+    const r = (await db.verifyLoginCode('t3e@test.io', wrong));
+    assert.equal(r.ok, false);
+    assert.equal(r.ok === false && r.reason, 'invalid', `attempt ${i + 1} should read as invalid`);
+  }
+  const r = (await db.verifyLoginCode('t3e@test.io', code));
+  assert.equal(r.ok, false, 'the correct code must not work once the attempts are spent');
+  assert.equal(r.ok === false && r.reason, 'too_many_attempts');
+});
+
+// Property 3 in server/loginCode.ts: N live codes for one mailbox would divide
+// the odds of a blind guess by N. It also means the newest email is the one
+// that works, which is what someone who requested a second code expects.
+test('issuing a new code retires the previous one for that address', async () => {
+  const first = (await db.createLoginCode('t3f@test.io'));
+  const second = (await db.createLoginCode('t3f@test.io'));
+  assert.notEqual(first, second, 'a fresh code is issued, not the same one returned');
+  assert.equal((await db.verifyLoginCode('t3f@test.io', first)).ok, false, 'the superseded code is dead');
+  assert.equal((await db.verifyLoginCode('t3f@test.io', second)).ok, true);
+});
+
+test('a code is matched case- and whitespace-insensitively on the address', async () => {
+  const code = (await db.createLoginCode('  T3G@Test.IO '));
+  const r = (await db.verifyLoginCode('t3g@test.io', code));
+  assert.deepEqual(r, { ok: true, email: 't3g@test.io' });
+});
+
+test('verifying an address that was never sent a code fails like any wrong guess', async () => {
+  const r = (await db.verifyLoginCode('nobody@test.io', '123456'));
+  assert.equal(r.ok, false);
+  assert.equal(r.ok === false && r.reason, 'invalid', 'must not be distinguishable from a wrong code');
 });
 
 test('sessions resolve to a user and can be revoked', async () => {

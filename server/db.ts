@@ -8,6 +8,14 @@ import { MonitorSchedule, computeNextRun, describeSchedule } from './schedule.js
 import { runMigrations } from './dbSchema.js';
 import { rowToUser, rowToScan, rowToApiKey, rowToDomainVerification, rowToMonitoredTarget, rowToNmapScan, rowToAutofixSession } from './dbMappers.js';
 import { hashToken, maskKey, sealSecret, openSecret } from './dbCrypto.js';
+import {
+  LOGIN_CODE_MAX_ATTEMPTS,
+  LOGIN_CODE_TTL_MS,
+  LoginCodeResult,
+  generateLoginCode,
+  hashesEqual,
+  normalizeLoginEmail,
+} from './loginCode.js';
 import { PostgresDb } from './pg/pgDb.js';
 import type { PgPool } from './pg/pgClient.js';
 
@@ -43,42 +51,63 @@ class SqliteDb {
     runMigrations(this.db);
   }
 
-  // --- Magic-link auth + sessions ---
-  // Tokens are random secrets; only their SHA-256 hash is persisted (see
-  // dbCrypto.hashToken) so a DB read cannot reveal a usable login/session token.
+  // --- Sign-in codes + sessions ---
+  // Secrets are never stored raw; only their SHA-256 hash is persisted (see
+  // dbCrypto.hashToken) so a DB read cannot reveal a usable code or session.
+  // The login_tokens table is left in the schema deliberately: it holds no live
+  // credential now that nothing issues magic links, and dropping a table is not
+  // something a boot migration should ever do.
 
-  // Issues a single-use magic-link token (default 15 min TTL). Returns the raw
-  // token to embed in the emailed link; only its hash is stored.
-  async createLoginToken(email: string, ttlMs = 15 * 60 * 1000): Promise<string> {
-    const raw = crypto.randomBytes(32).toString('hex');
+  // Issues a one-time sign-in code and returns the raw six digits to email.
+  // Only the hash is stored, so a dumped table cannot be used to sign in.
+  //
+  // Retiring the address's earlier live codes is part of the security model,
+  // not tidiness: N live codes for one mailbox divide the odds of a blind guess
+  // by N (server/loginCode.ts, property 3). It also means the code in the most
+  // recent email is always the one that works, which is what a user who
+  // requested a second code because the first was slow to arrive expects.
+  async createLoginCode(email: string, ttlMs = LOGIN_CODE_TTL_MS): Promise<string> {
+    const normEmail = normalizeLoginEmail(email);
     const now = Date.now();
-    this.db.prepare('INSERT INTO login_tokens (tokenHash, email, expiresAt, createdAt) VALUES (?, ?, ?, ?)')
-      .run(hashToken(raw), email.toLowerCase().trim(), new Date(now + ttlMs).toISOString(), new Date(now).toISOString());
-    return raw;
+    this.db.prepare('UPDATE login_codes SET consumedAt = ? WHERE email = ? AND consumedAt IS NULL')
+      .run(new Date(now).toISOString(), normEmail);
+    const code = generateLoginCode();
+    this.db.prepare(
+      'INSERT INTO login_codes (id, email, codeHash, attempts, expiresAt, createdAt) VALUES (?, ?, ?, 0, ?, ?)')
+      .run(crypto.randomUUID(), normEmail, hashToken(code), new Date(now + ttlMs).toISOString(), new Date(now).toISOString());
+    return code;
   }
 
-  // Validates a magic-link token WITHOUT burning it, so the sign-in link can be
-  // opened (GET) without spending the single use. Email security scanners and
-  // link prefetchers follow links in messages automatically — several hit this
-  // endpoint within milliseconds of delivery — so consuming on GET meant a
-  // scanner redeemed the token and the human's click always failed as "invalid
-  // or expired". The burn now happens on the POST from the confirmation page
-  // (see routes/auth.ts); automated fetchers don't POST.
-  async peekLoginToken(raw: string): Promise<string | null> {
-    const row: any = this.db.prepare('SELECT * FROM login_tokens WHERE tokenHash = ?').get(hashToken(raw));
-    if (!row || row.consumedAt) return null;
-    if (new Date(row.expiresAt).getTime() < Date.now()) return null;
-    return row.email;
-  }
+  // Checks a code against ONE address and burns it on success.
+  //
+  // The email argument is not a convenience — it is the scope that keeps a
+  // six-digit secret a secret. A lookup by code hash alone would let a guess
+  // match any live code in the table rather than one named account's. See
+  // server/loginCode.ts.
+  //
+  // A wrong guess costs an attempt; five kill the code. Note the attempt is
+  // charged BEFORE the result is returned, so a caller that crashes or a client
+  // that disconnects mid-request cannot be used to test codes for free.
+  async verifyLoginCode(email: string, code: string): Promise<LoginCodeResult> {
+    const normEmail = normalizeLoginEmail(email);
+    const row: any = this.db.prepare(
+      'SELECT * FROM login_codes WHERE email = ? AND consumedAt IS NULL ORDER BY createdAt DESC LIMIT 1')
+      .get(normEmail);
+    if (!row) return { ok: false, reason: 'invalid' };
+    if (new Date(row.expiresAt).getTime() < Date.now()) return { ok: false, reason: 'expired' };
+    if (row.attempts >= LOGIN_CODE_MAX_ATTEMPTS) return { ok: false, reason: 'too_many_attempts' };
 
-  // Validates and burns a magic-link token, returning the associated email.
-  async consumeLoginToken(raw: string): Promise<string | null> {
-    const hash = hashToken(raw);
-    const row: any = this.db.prepare('SELECT * FROM login_tokens WHERE tokenHash = ?').get(hash);
-    if (!row || row.consumedAt) return null;
-    if (new Date(row.expiresAt).getTime() < Date.now()) return null;
-    this.db.prepare('UPDATE login_tokens SET consumedAt = ? WHERE tokenHash = ?').run(new Date().toISOString(), hash);
-    return row.email;
+    if (!hashesEqual(hashToken(code), String(row.codeHash))) {
+      this.db.prepare('UPDATE login_codes SET attempts = attempts + 1 WHERE id = ?').run(row.id);
+      return { ok: false, reason: 'invalid' };
+    }
+
+    // Conditional on still being unconsumed, so two requests racing the same
+    // code cannot both be told they succeeded.
+    const claimed = this.db.prepare('UPDATE login_codes SET consumedAt = ? WHERE id = ? AND consumedAt IS NULL')
+      .run(new Date().toISOString(), row.id);
+    if (claimed.changes === 0) return { ok: false, reason: 'invalid' };
+    return { ok: true, email: normEmail };
   }
 
   // Creates a server-side session (default 30 day TTL). Returns the raw token

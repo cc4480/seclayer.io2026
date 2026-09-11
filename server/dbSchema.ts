@@ -98,6 +98,24 @@ export function runMigrations(db: Database.Database): void {
       createdAt TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_mon_user ON monitored_targets(userId);
+    -- One-time sign-in codes. See server/loginCode.ts for why a six-digit
+    -- secret needs a different shape from the 32-byte tokens elsewhere.
+    --
+    -- codeHash is deliberately NOT the primary key and NOT unique, unlike
+    -- login_tokens.tokenHash: two people can legitimately hold the same
+    -- six-digit code at the same time, and a uniqueness constraint would make
+    -- the second person's sign-in fail at random. It is also why lookup is by
+    -- (email, codeHash) and never by codeHash alone.
+    CREATE TABLE IF NOT EXISTS login_codes (
+      id         TEXT PRIMARY KEY,
+      email      TEXT NOT NULL,
+      codeHash   TEXT NOT NULL,
+      attempts   INTEGER NOT NULL DEFAULT 0,
+      expiresAt  TEXT NOT NULL,
+      consumedAt TEXT,
+      createdAt  TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_login_codes_email ON login_codes(email, createdAt);
     CREATE TABLE IF NOT EXISTS login_tokens (
       tokenHash TEXT PRIMARY KEY,
       email TEXT NOT NULL,
