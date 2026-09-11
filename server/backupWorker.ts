@@ -32,7 +32,14 @@ export interface BackupConfig {
 export function backupConfig(): BackupConfig {
   const dbPath = process.env.DB_PATH || path.join(process.cwd(), 'data.sqlite');
   const inMemory = dbPath === ':memory:' || dbPath.startsWith('file::memory:');
-  const disabled = process.env.BACKUP_ENABLED === 'false' || inMemory;
+  // This worker snapshots the SQLite FILE. When DATABASE_URL is set the live
+  // database is Postgres and that file is not the data — it is a stale or
+  // absent artifact, usually on ephemeral container storage. Snapshotting it
+  // produced backups of nothing while logging as though the database were
+  // protected, which is worse than not running: it reads as a working backup.
+  // Postgres backups belong to the provider (Railway PITR) or to pg_dump.
+  const postgres = !!process.env.DATABASE_URL;
+  const disabled = process.env.BACKUP_ENABLED === 'false' || inMemory || postgres;
   const dir = process.env.BACKUP_DIR || path.join(path.dirname(dbPath), 'backups');
   const intervalHours = Number(process.env.BACKUP_INTERVAL_HOURS) || DEFAULT_INTERVAL_HOURS;
   const retention = Math.max(1, Number(process.env.BACKUP_RETENTION) || DEFAULT_RETENTION);
@@ -83,7 +90,13 @@ export function startBackupWorker(): NodeJS.Timeout | undefined {
   const cfg = backupConfig();
   if (cfg.disabled) {
     if (cfg.inMemory) return undefined; // silent: tests / ephemeral runs
-    console.log('[backup] BACKUP_ENABLED=false — automated database snapshots are off.');
+    // Say WHICH reason. An operator scanning logs for "are my backups running"
+    // must not read a Postgres deployment as a switched-off one, or vice versa.
+    console.log(
+      process.env.DATABASE_URL
+        ? '[backup] Postgres is the live database — this SQLite-file snapshotter is off. Backups are the provider\'s (e.g. Railway PITR) or pg_dump\'s.'
+        : '[backup] BACKUP_ENABLED=false — automated database snapshots are off.',
+    );
     return undefined;
   }
   const interval = setInterval(async () => {

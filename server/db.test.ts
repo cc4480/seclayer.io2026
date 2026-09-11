@@ -275,3 +275,27 @@ test('healthy() returns true against a live database handle', async () => {
   // datastore that must succeed while the handle is open.
   assert.equal((await db.healthy()), true);
 });
+
+// A redeploy restarts every replica at once, so several can read the same
+// genuinely stale scan before any of them writes. The sweep therefore has to be
+// a CLAIM: only the instance whose UPDATE actually moves the row out of an
+// in-flight status may refund it. Without the status guard each replica refunded
+// a credit for the same scan.
+test('recoverStuckScans refunds exactly once even when swept repeatedly', async () => {
+  const u = (await db.getOrCreateUser('sweep-race@test.io'));
+  const scan = (await db.updateScan((await db.createScan(u.id, 'https://race.test')).id, { status: 'scanning' }));
+  const creditsBeforeSweep = (await db.getUser(u.id))!.credits;
+
+  // Three replicas booting together. NOTE: single-process SQLite serialises
+  // these, so this cannot reproduce the interleaved SELECT the guard actually
+  // defends against on Postgres — it pins the invariant (one scan, one refund,
+  // however many sweepers) rather than the race itself.
+  await Promise.all([db.recoverStuckScans(), db.recoverStuckScans(), db.recoverStuckScans()]);
+
+  assert.equal(
+    (await db.getUser(u.id))!.credits,
+    creditsBeforeSweep + 1,
+    'one interrupted scan refunds exactly one credit, no matter how many replicas sweep',
+  );
+  assert.equal((await db.getScan(scan!.id))!.status, 'failed');
+});

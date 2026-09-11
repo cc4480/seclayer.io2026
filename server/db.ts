@@ -468,11 +468,18 @@ class SqliteDb {
     const now = new Date().toISOString();
     const tx = this.db.transaction(() => {
       for (const s of stuck) {
-        this.db.prepare("UPDATE scans SET status = 'failed', error = ?, completedAt = ? WHERE id = ?").run(
+        // Status-guarded so the sweep is a CLAIM, matching the Postgres path
+        // (see PostgresDb.recoverStuckScans for the concurrent-boot race this
+        // prevents). Single-process SQLite cannot hit that race, but keeping the
+        // two implementations identical means the refund rule has one meaning.
+        const claimed = this.db.prepare(
+          "UPDATE scans SET status = 'failed', error = ?, completedAt = ? WHERE id = ? AND status IN ('queued', 'scanning', 'analyzing')"
+        ).run(
           'This scan was interrupted by a server restart and could not be resumed. Your credit has been refunded — please launch a new scan.',
           now,
           s.id
         );
+        if (claimed.changes === 0) continue;
         this._addCreditsSync(s.userId, 1, 'purchase');
       }
     });

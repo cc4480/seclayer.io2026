@@ -315,14 +315,27 @@ export class PostgresDb implements Db {
       [cutoff]);
     if (stuck.length === 0) return 0;
     const now = new Date().toISOString();
+    let recovered = 0;
     await this.tx(async (q) => {
       for (const s of stuck) {
-        await this.run("UPDATE scans SET status = 'failed', error = ?, completedAt = ? WHERE id = ?",
+        // CLAIM the row, don't just write it. The stale-lease SELECT above stops
+        // a booting replica from touching scans another replica is actively
+        // running, but it does not make SELECT→UPDATE atomic: a redeploy
+        // restarts all replicas at once, so several can read the same genuinely
+        // stale scan before any of them writes. Without the status guard each
+        // would then refund a credit for one scan.
+        //
+        // The guard makes the sweep idempotent — only the replica whose UPDATE
+        // actually transitions the row out of an in-flight status refunds it.
+        const claimed = await this.run(
+          "UPDATE scans SET status = 'failed', error = ?, completedAt = ? WHERE id = ? AND status IN ('queued', 'scanning', 'analyzing')",
           ["This scan was interrupted by a server restart and could not be resumed. Your credit has been refunded — please launch a new scan.", now, s.id], q);
+        if (claimed === 0) continue; // another replica already recovered it
         await this._addCreditsWithin(q, s.userId, 1, "purchase");
+        recovered++;
       }
     });
-    return stuck.length;
+    return recovered;
   }
   async cancelScan(userId: string, scanId: string): Promise<Scan | null> {
     const scan = await this.getScan(scanId);
