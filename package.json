@@ -53,5 +53,8 @@
     "esbuild@0.25.12": true,
     "esbuild@0.28.1": true,
     "core-js@3.49.0": true
+  },
+  "overrides": {
+    "qs": "^6.16.0"
   }
 }
