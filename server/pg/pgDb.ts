@@ -6,6 +6,8 @@
 //
 // Validated against a real Postgres (Supabase) — see server/pg/pgDb.integration.test.ts.
 import crypto from "crypto";
+import fs from "node:fs";
+import path from "node:path";
 import type {
   User, Scan, CreditTransaction, ApiKey, Finding, SuppressionRule, MonitoredTarget,
   DomainVerification, OobEvent, NmapScan, AutofixSession,
@@ -26,6 +28,44 @@ import type { PgPool, PgQueryable } from "./pgClient.js";
 // verify this adapter satisfies the same contract SqliteDb defines.
 import { STALE_LEASE_MS } from "../db.js";
 import type { Db } from "../db.js";
+
+// Every replica must contend on the SAME lock for the boot schema apply, so
+// this is a fixed arbitrary constant rather than anything derived.
+const SCHEMA_ADVISORY_LOCK_KEY = 4_612_099_357_118_441;
+
+/**
+ * Load server/pg/schema.sql.
+ *
+ * Resolved from the WORKING DIRECTORY, not __dirname. This package is
+ * "type": "module", so __dirname does not exist at runtime under tsx in dev —
+ * referencing it would throw a ReferenceError before any path was tried. And in
+ * production the server ships as an esbuild bundle (dist/server.cjs) whose
+ * __dirname is /app/dist, which has no server/pg anyway. cwd is /app in the
+ * image (WORKDIR) and the repo root in dev, so it resolves in both. The
+ * Dockerfile copies this one file into the runtime stage for that reason.
+ *
+ * SCHEMA_SQL_PATH overrides it for any deployment whose layout differs.
+ *
+ * Throws with the paths tried if it is missing — a deploy that cannot find its
+ * schema must fail loudly, not boot against an empty database.
+ */
+function readSchemaSql(): string {
+  const candidates = [
+    process.env.SCHEMA_SQL_PATH,
+    path.join(process.cwd(), "server", "pg", "schema.sql"),
+    path.join(process.cwd(), "pg", "schema.sql"),
+  ].filter((p): p is string => !!p);
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) return fs.readFileSync(p, "utf-8");
+    } catch {
+      /* try the next candidate */
+    }
+  }
+  throw new Error(
+    `Could not find server/pg/schema.sql — the Postgres schema cannot be applied. Tried:\n  ${candidates.join("\n  ")}`,
+  );
+}
 
 export class PostgresDb implements Db {
   constructor(private readonly pool: PgPool) {}
@@ -621,6 +661,39 @@ export class PostgresDb implements Db {
 
   async deleteScanEvents(scanId: string): Promise<void> {
     await this.pool.query('DELETE FROM scan_events WHERE scanId = $1', [scanId]);
+  }
+
+  /**
+   * Apply server/pg/schema.sql, so an environment can be stood up from code.
+   *
+   * schema.sql is idempotent by construction — every CREATE/ALTER is IF NOT
+   * EXISTS, its own header says it is "safe to apply on every boot, like the
+   * SQLite version" — it simply was never wired to a boot. Until now the schema
+   * only existed because scripts/migrate-sqlite-to-pg.ts had been run by hand
+   * once, so a fresh database booted with NO TABLES and every query threw.
+   *
+   * Two things make this safe to run on every boot of every replica:
+   *
+   *  - The whole file goes in ONE transaction (Postgres has transactional DDL,
+   *    and the file contains nothing that forbids it — no CONCURRENTLY), so a
+   *    partial apply cannot happen. It is all or nothing.
+   *  - A transaction-scoped ADVISORY LOCK serialises replicas. Concurrent
+   *    CREATE TABLE IF NOT EXISTS is not actually safe in Postgres: two
+   *    sessions can both pass the existence check and one then fails on a
+   *    duplicate pg_type entry. Three replicas boot together on a redeploy, so
+   *    this is a real collision, not a theoretical one. The lock releases on
+   *    commit; whoever waits finds the tables already there and no-ops.
+   */
+  async applySchema(): Promise<void> {
+    const sql = readSchemaSql();
+    await this.tx(async (q) => {
+      // Arbitrary fixed key — it only has to be the SAME constant in every
+      // replica so they contend on one lock.
+      await q.query("SELECT pg_advisory_xact_lock($1)", [SCHEMA_ADVISORY_LOCK_KEY]);
+      // Raw DDL: deliberately NOT routed through this.run/toPositional, which
+      // rewrites ? into $n and would corrupt the file's own SQL.
+      await q.query(sql);
+    });
   }
 
   // Creates rate_limit_hits if it is missing. Needed because NOTHING applies

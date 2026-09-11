@@ -93,6 +93,14 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./
 
+# The Postgres schema, applied on boot by PostgresDb.applySchema() so a fresh
+# database can be stood up from code alone. It must be a real file in the image:
+# the server ships as an esbuild bundle (dist/server.cjs), which does not carry
+# non-JS assets, and the loader resolves this path from WORKDIR. Without this
+# COPY a Postgres deploy would boot, fail to find its schema, and exit — which
+# is the intended loud failure, but for the wrong reason.
+COPY --from=build /app/server/pg/schema.sql ./server/pg/schema.sql
+
 # The Chromium build fetched in the build stage. PLAYWRIGHT_BROWSERS_PATH must
 # match the path it was installed to there, or playwright looks in a
 # HOME-relative cache that doesn't exist here and reports the browser as missing

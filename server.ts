@@ -43,12 +43,22 @@ async function startServer() {
   // worker-bearing roles do this — a 'web' instance booting must NOT sweep
   // scans a worker instance is actively running and mark them failed. On a
   // single-node deployment (role 'all', the default) this runs exactly as before.
+  // Bring the schema up to date BEFORE anything queries it, on every role —
+  // a 'web' instance needs the tables just as much as a worker does. On
+  // Postgres this applies server/pg/schema.sql (idempotent, one transaction,
+  // advisory-locked so concurrent replicas cannot collide); on SQLite it is a
+  // no-op because runMigrations() already ran when the file was opened.
+  //
+  // Deliberately NOT caught: a process that cannot establish its schema must
+  // fail the deploy rather than boot and throw on every request. Until this
+  // existed, the schema was only present because a migration script had been
+  // run by hand once, so a fresh environment came up with no tables at all.
+  await db.applySchema();
+
   const runsWorkers = config.role !== 'web';
   if (runsWorkers) {
-    // MUST precede recovery: on Postgres nothing applies schema.sql at runtime,
-    // so a deploy shipping only code would find no heartbeatAt column and the
-    // recovery query below would throw on the very first boot. Awaited, not
-    // fire-and-forget, for the same reason.
+    // Additive columns that post-date schema.sql. Still awaited before recovery
+    // so the query below cannot run against a table missing heartbeatAt.
     await db.ensureScanLeaseSchema();
     const recovered = (await db.recoverStuckScans());
     if (recovered > 0) {

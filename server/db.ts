@@ -448,6 +448,11 @@ class SqliteDb {
   // applies schema.sql at runtime. No-op here: dbSchema.ts adds the column.
   async ensureScanLeaseSchema(): Promise<void> {}
 
+  // No-op on SQLite: runMigrations() in dbSchema.ts already builds the whole
+  // schema on open. The Postgres adapter applies server/pg/schema.sql here so a
+  // fresh database can be stood up from code rather than from a hand-run script.
+  async applySchema(): Promise<void> {}
+
   async recoverStuckScans(): Promise<number> {
     // Only scans NOBODY is still working on. The owning process refreshes
     // heartbeatAt while it holds the scan (see touchScan), so a lease older than
