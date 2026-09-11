@@ -56,6 +56,33 @@ export function parseRole(raw: string | undefined = process.env.SECLAYER_ROLE): 
   return r === 'web' || r === 'worker' ? r : 'all';
 }
 
+/**
+ * The exact build running in this process, for OPERATORS ONLY.
+ *
+ * Deliberately separate from config.appVersion, which is public (see there).
+ * This is logged once at boot, so it reaches the platform's log stream — which
+ * requires project access to read — and never an HTTP response body.
+ *
+ * It exists because "is my change actually live?" had no answer from inside the
+ * app: the public health endpoint reported `dev`, and the only way to tell was
+ * to query the deploy platform's API from a developer machine.
+ *
+ * The git SHA is supplied by the platform on a deploy (Railway and Vercel both
+ * inject their own name for it); `local` is the honest answer when none is —
+ * a developer run, or a `docker build` that passed no build metadata.
+ */
+export function buildId(env: NodeJS.ProcessEnv = process.env): string {
+  const sha = clean(env.APP_BUILD_SHA)
+    || clean(env.RAILWAY_GIT_COMMIT_SHA)
+    || clean(env.VERCEL_GIT_COMMIT_SHA)
+    || clean(env.SOURCE_COMMIT)
+    || clean(env.GIT_COMMIT);
+  if (!sha) return 'local';
+  // Short form: enough to identify a commit, and it is what `git log --oneline`
+  // prints, so it can be pasted straight into a git command.
+  return /^[0-9a-f]{40}$/i.test(sha) ? sha.slice(0, 7) : sha;
+}
+
 export const config = {
   port: Number(process.env.PORT) || 3000,
   isProd: process.env.NODE_ENV === 'production',
@@ -68,8 +95,16 @@ export const config = {
   // natural per-worker concurrency cap once scans move to a worker fleet.
   // MAX_CONCURRENT_SCANS overrides; default 4.
   maxConcurrentScans: Math.max(1, Number(process.env.MAX_CONCURRENT_SCANS) || 4),
-  // Surfaced by the health endpoint. Set APP_VERSION at build/deploy time (e.g.
-  // to the git SHA or release tag) so operators can confirm which build is live.
+  // PUBLIC. This string is served by the unauthenticated /api/system/health
+  // probe AND rendered to every visitor in the navbar's engine tooltip
+  // (src/components/Navbar.tsx) — it is product surface, not operator surface.
+  //
+  // So do NOT set APP_VERSION to a git SHA. This repository is public, so a
+  // live commit hash lets anyone diff it against main and read off exactly
+  // which security fixes are not yet deployed. (The comment here used to
+  // recommend precisely that.) Use a release tag people are meant to see, e.g.
+  // "v2.1.0". Operators who need the exact build read buildId() from the boot
+  // log, which only someone with platform access can see.
   appVersion: clean(process.env.APP_VERSION) || 'dev',
   appUrl: clean(process.env.APP_URL, 'MY_APP_URL')?.replace(/\/+$/, ''),
   deepseekConfigured: !!clean(process.env.DEEPSEEK_API_KEY, 'MY_DEEPSEEK_API_KEY'),

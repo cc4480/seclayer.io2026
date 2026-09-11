@@ -5,7 +5,7 @@ import { metaForPath, applyPageMeta } from './server/pageMeta.js';
 import fs from 'fs';
 import cookieParser from 'cookie-parser';
 import { db } from './server/db.js';
-import { config, validateConfigOnBoot } from './server/config.js';
+import { buildId, config, validateConfigOnBoot } from './server/config.js';
 import { parseWebhookEvent } from './server/stripe.js';
 import { createOobCollaborator } from './server/oob.js';
 import { makeProcessScanJob, startScanQueueWorker } from './server/scanWorker.js';
@@ -296,7 +296,12 @@ async function startServer() {
   });
 
   const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[Seclayer Engine] Listening on http://0.0.0.0:${PORT} (${config.isProd ? 'production' : 'development'})`);
+    // The build is named here and NOWHERE in an HTTP response: this log stream
+    // is readable only with platform access, while /api/system/health is
+    // unauthenticated and its `version` is rendered in the public navbar. On a
+    // public repository a live commit hash is a map of which fixes are not yet
+    // deployed, so it stays on this side of the line.
+    console.log(`[Seclayer Engine] Listening on http://0.0.0.0:${PORT} (${config.isProd ? 'production' : 'development'}, build ${buildId()})`);
   });
 
   // Graceful shutdown for containerized deployments.
