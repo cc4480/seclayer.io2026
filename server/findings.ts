@@ -86,16 +86,16 @@ function observationReceiptFor(f: Finding, diag: DiagnosticResult): Finding["evi
     });
   }
 
-  // SAST: the resource the signature was served from. The secret VALUE is never
-  // stored (see staticAnalysis), so the receipt names the source and signature
-  // and shows the response was served, with the value redacted.
+  // SAST fallback. buildSastFindings normally attaches a receipt carrying the
+  // MASKED credential; this covers a finding that reached here without one (an
+  // older stored scan, or a signature that produced no match text).
   if (f.category === "SAST") {
     const src = f.endpoint ?? diag.url;
     return buildObservationEvidence({
       url: src,
       requestHeaders: RECEIPT_REQUEST_HEADERS,
       responseStatus: 200,
-      why: "A string matching a known secret/credential signature was served in this response (the value itself is redacted and never stored).",
+      why: "A string matching a known secret/credential signature was served in this response. No masked excerpt was recorded for this match, so only the source is shown.",
       demonstration: `A secret-shaped string was found in the client-served response from ${src}.`,
     });
   }
@@ -403,16 +403,34 @@ function buildCookieFindings(diag: DiagnosticResult): Finding[] {
 // "Client-served HTML/JavaScript" label for the root document) — surfaced as
 // `endpoint` so a reader can tell WHERE it leaked, not just that it did.
 function buildSastFindings(diag: DiagnosticResult): Finding[] {
-  return diag.sastFindings.map((sf) => ({
-    id: fid(),
-    title: sf.issue,
-    description: sf.description,
-    severity: sf.severity,
-    confidence: sf.confidence,
-    fix: sf.fix,
-    category: "SAST",
-    endpoint: /^https?:\/\//i.test(sf.file) ? sf.file : undefined,
-  }));
+  return diag.sastFindings.map((sf) => {
+    const src = /^https?:\/\//i.test(sf.file) ? sf.file : diag.url;
+    return {
+      id: fid(),
+      title: sf.issue,
+      description: sf.description,
+      severity: sf.severity,
+      confidence: sf.confidence,
+      fix: sf.fix,
+      category: "SAST",
+      endpoint: /^https?:\/\//i.test(sf.file) ? sf.file : undefined,
+      // Receipt carries the MASKED credential — leading token + last four, middle
+      // starred, true length stated — so the reader can tell WHICH secret leaked
+      // and grep for it themselves, without the report becoming a place a usable
+      // credential is stored, shared and exported. The raw value is never kept.
+      evidence: sf.masked
+        ? buildObservationEvidence({
+            url: src,
+            requestHeaders: RECEIPT_REQUEST_HEADERS,
+            responseStatus: 200,
+            bodyExcerpt: `[credential signature matched in the served response]\n${sf.masked}`,
+            quote: sf.masked,
+            why: "This is the matched credential, masked: the leading token identifies the key type, the last four let you find it in your own source, and the middle is never stored.",
+            demonstration: `A credential matching a known format (${sf.masked}) was served to an unauthenticated request for ${src}.`,
+          })
+        : undefined,
+    };
+  });
 }
 
 // 4. SCA (software composition analysis) findings.

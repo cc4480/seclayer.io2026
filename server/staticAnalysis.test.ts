@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { analyzeLibraries, extractResourceRefs, analyzeSecrets, analyzeDataDumpExposure } from './staticAnalysis.js';
+import { analyzeLibraries, extractResourceRefs, analyzeSecrets, analyzeDataDumpExposure, maskSecret } from './staticAnalysis.js';
 
 const scriptTag = (url: string) => `<html><head><script src="${url}"></script></head><body></body></html>`;
 
@@ -96,4 +96,41 @@ test('Private Key Block: a real key embedded in source is still caught', () => {
   const inline = '"-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA7Yn3kQ2mVrJk1pQ0zXcFbN9dLmVpQrStUvWxYzAbCdEf\n"';
   const hit = analyzeSecrets(inline).filter((f) => /Private Key/i.test(f.issue ?? ""));
   assert.equal(hit.length, 1, 'a genuine embedded key must still be reported');
+});
+
+// A report is stored, shared and exported, so a leaked credential must never be
+// one of the things it stores. But "a string matching the AWS format was found"
+// is unactionable when you hold forty keys — so the receipt carries a masked
+// excerpt: leading token + last four, middle starred, true length stated.
+test('maskSecret reveals which credential leaked, never a usable one', () => {
+  const key = 'AKIAIOSFODNN7REALKEY';           // 20 chars
+  const masked = maskSecret(key);
+  assert.match(masked, /^AKIA\*+LKEY \(20 chars\)$/);
+  assert.ok(!masked.includes(key), 'the raw value must never appear');
+  // Enough hidden that the excerpt cannot be used: only 8 of 20 chars shown.
+  assert.equal((masked.match(/\*/g) || []).length, 12);
+});
+
+test('maskSecret hides a short secret almost entirely', () => {
+  // Four-and-four would be most of a short value, so reveal only the length.
+  assert.equal(maskSecret('abc123'), '****** (6 chars)');
+  assert.equal(maskSecret('twelvechars1'), '************ (12 chars)');
+});
+
+test('maskSecret caps the mask so a huge token cannot bloat the report', () => {
+  const long = 'sk_live_' + 'x'.repeat(300);
+  const masked = maskSecret(long);
+  assert.ok(masked.length < 60, 'masked excerpt stays short');
+  assert.match(masked, /^sk_l\*+/);
+  assert.match(masked, /\(308 chars\)$/);
+});
+
+test('analyzeSecrets carries a masked excerpt, not the raw credential', () => {
+  const raw = 'AKIAIOSFODNN7REALKEY';
+  const found = analyzeSecrets(`<script>const k="${raw}";</script>`, 'https://example.com/app.js');
+  const aws = found.find((f) => /AWS/i.test(f.issue));
+  assert.ok(aws, 'expected the AWS key signature to match');
+  assert.ok(aws.masked, 'the finding carries a masked excerpt');
+  assert.ok(!aws.masked!.includes(raw), 'the raw key is never stored on the finding');
+  assert.ok(!JSON.stringify(aws).includes(raw), 'the raw key appears nowhere on the finding');
 });

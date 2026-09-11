@@ -69,6 +69,29 @@ const SECRET_SIGNATURES = [
   ];
 export const SECRET_SIGNATURE_COUNT = SECRET_SIGNATURES.length;
 
+/**
+ * A showable excerpt of a matched secret: enough to identify WHICH credential
+ * leaked, never enough to use it.
+ *
+ * Reports are stored, shared and exported, so the raw value must never be one of
+ * them — but "a string matching the AWS format was found" is hard to act on when
+ * you have forty keys. This is the same compromise Stripe and GitHub make in
+ * their own dashboards: keep the leading token (which identifies the key TYPE
+ * and is not secret) and the last four, mask everything between, and state the
+ * true length so nobody mistakes the excerpt for the whole value.
+ *
+ * Anything 12 characters or shorter reveals nothing but its length — for a short
+ * secret, four-and-four is most of it.
+ */
+export function maskSecret(raw: string): string {
+  const s = String(raw).trim();
+  if (!s) return "";
+  if (s.length <= 12) return `${"*".repeat(s.length)} (${s.length} chars)`;
+  const head = s.slice(0, 4);
+  const tail = s.slice(-4);
+  return `${head}${"*".repeat(Math.min(s.length - 8, 24))}${tail} (${s.length} chars)`;
+}
+
 // `source` labels WHERE the text came from — defaults to the historical
 // root-document label so every existing caller is unaffected. Callers scanning
 // a specific crawled page/endpoint pass its URL, which flows through to the
@@ -93,6 +116,9 @@ export function analyzeSecrets(
         severity: p.severity,
         confidence: p.confidence,
         type: "hardcoded_secrets",
+        // Masked, never raw — see maskSecret. Carried so the finding's receipt
+        // can show WHICH credential leaked without publishing a usable one.
+        masked: maskSecret(m[0]),
         description: `A string matching the ${p.name} format was detected in the client-served response. ${p.note}`,
         fix: `Remove the credential from client code, rotate it immediately, and proxy any required third-party calls through an authenticated backend that holds the secret server-side.`,
       });

@@ -63,6 +63,10 @@ export interface DiagnosticResult {
     type: string;
     fix: string;
     description: string;
+    // A MASKED excerpt of the matched credential (see staticAnalysis.maskSecret):
+    // leading token + last four, middle starred, true length stated. Identifies
+    // which secret leaked without ever storing a usable one. Never the raw value.
+    masked?: string;
   }>;
   scaLibraries: Array<{
     name: string;
