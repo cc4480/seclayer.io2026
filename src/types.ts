@@ -37,7 +37,12 @@ export interface RawExchange {
 // a finding the top "PROVEN" tier (see server/scoring.ts:isProven). Without a
 // valid bundle a finding still ships, just in the DETECTED tier.
 export interface ExploitEvidence {
-  method: 'reflection' | 'error-signature' | 'oracle' | 'differential' | 'introspection' | 'out-of-band';
+  // 'observation' is NOT an exploit: it is the raw request/response a
+  // non-exploit finding (a missing/weak header, a cookie flag, a leaked
+  // signature) was read from, shown so every finding carries a replayable
+  // receipt and none is a bare assertion. isProven() is false for it — an
+  // observation is shown, never badged PROVEN.
+  method: 'reflection' | 'error-signature' | 'oracle' | 'differential' | 'introspection' | 'out-of-band' | 'observation';
   attack: RawExchange;      // the request that demonstrated the flaw
   baseline?: RawExchange;   // authorized/benign control request, when the class uses one
   control?: RawExchange;    // negative control (e.g. unauthenticated → denied)

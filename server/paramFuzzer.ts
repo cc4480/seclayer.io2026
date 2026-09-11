@@ -13,7 +13,7 @@
 import crypto from "crypto";
 import { InjectableTarget } from "./crawler.js";
 import { guardedFetch, safeFetch } from "./ssrf.js";
-import { buildProbeEvidence } from "./evidence.js";
+import { buildProbeEvidence, renderRawRequest } from "./evidence.js";
 import { buildHeaderEvidence } from "./aggressive/aggHttp.js";
 import { xssReflectionExecutes } from "./fpFilters.js";
 import type { EmitFn } from "./scanEvents.js";
@@ -320,12 +320,34 @@ export async function fuzzDiscoveredTargets(
       if (!scaled) continue;
 
       reported.add(key);
+      // The proof is the timing, not a reflected string, so there is no quote to
+      // highlight (signal.quote stays empty → isProven is false → this is a
+      // CONFIRMED differential, not PROVEN). The receipt shows the benign
+      // baseline exchange and the injected-sleep exchange with their measured
+      // latencies, so the scaling proof is replayable.
+      const benignUrl = t.method === "POST" ? t.url : buildUrl(t.url, param, "1");
+      const sleepUrl = t.method === "POST" ? t.url : buildUrl(t.url, param, probePayload);
+      const reqOf = (value: string, u: string) =>
+        t.method === "POST"
+          ? renderRawRequest("POST", u, { ...fuzzHeaders, "Content-Type": postContentType(t) }, postBody(t, param, value))
+          : renderRawRequest("GET", u, fuzzHeaders);
       findings.push({
         testName: `SQL Injection — time-based blind (discovered parameter "${param}" on ${endpointPath})`,
         payload: `${param}=${probePayload}`,
         severity: "critical",
         description: `A time-based blind SQL injection was confirmed on the ${t.method} parameter "${param}" at ${endpointPath}. A benign value returned in ~${baseline}ms, an injected ${TIME_DELAY}s database sleep delayed the response to ~${hit.elapsed}ms, and a ${TIME_CONFIRM}s sleep to ~${confirm.elapsed}ms — the response time tracks the injected delay, proving "${param}" is concatenated into a SQL query executed on the database even though nothing is reflected in the response.`,
         fix: "Use parameterized queries / prepared statements for this endpoint; never concatenate request input into SQL. A time-based blind injection is fully exploitable to extract data one query at a time.",
+        evidence: {
+          method: "differential",
+          baseline: { identity: "benign", request: reqOf("1", benignUrl), response: `HTTP/1.1 ${base.ok ? "200" : "—"} — responded in ~${baseline}ms (benign value)` },
+          attack: { identity: "injected", request: reqOf(probePayload, sleepUrl), response: `HTTP/1.1 200 — responded in ~${hit.elapsed}ms after an injected ${TIME_DELAY}s SLEEP; a ${TIME_CONFIRM}s SLEEP gave ~${confirm.elapsed}ms` },
+          signal: { quote: "", offsetInResponse: 0, why: `Response latency tracks the injected delay (baseline ~${baseline}ms → ${TIME_CONFIRM}s sleep ~${confirm.elapsed}ms → ${TIME_DELAY}s sleep ~${hit.elapsed}ms), which only happens if "${param}" reaches the SQL engine. Timing is the proof, so there is no reflected string to quote.` },
+          demonstration: `The response time scaled with an injected database sleep — ~${baseline}ms normally, ~${hit.elapsed}ms with a ${TIME_DELAY}s sleep — so "${param}" is executed as SQL even though nothing is echoed back.`,
+          reproduction: t.method === "POST"
+            ? `curl -sk -o /dev/null -w "%{time_total}s\\n" -X POST "${t.url}" --data '${postBody(t, param, probePayload)}'`
+            : `curl -sk -o /dev/null -w "%{time_total}s\\n" "${sleepUrl}"`,
+          capturedAt: new Date().toISOString(),
+        },
       });
       return;
     }

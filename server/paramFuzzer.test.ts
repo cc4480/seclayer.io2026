@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { fuzzDiscoveredTargets } from './paramFuzzer.js';
+import { isProven } from './scoring.js';
 import type { InjectableTarget } from './crawler.js';
 
 // The fuzzer reaches targets through safeFetch, which blocks loopback unless the
@@ -168,7 +169,15 @@ test('aggressive tier confirms TIME-BASED BLIND SQLi via a response-time differe
     const timed = findings.find((f) => /time-based blind/i.test(f.testName));
     assert.ok(timed, 'expected a time-based blind SQLi finding on the delaying parameter');
     assert.equal(timed.severity, 'critical');
-    assert.ok(!timed.evidence, 'a time-based finding carries no inline receipt — the proof is the timing');
+    // It now carries a receipt — the benign baseline and the injected-sleep
+    // exchanges with their measured latencies. The proof is the timing, so
+    // there is no reflected quote (signal.quote empty) and it stays CONFIRMED,
+    // never PROVEN (isProven is false without a quote).
+    assert.ok(timed.evidence, 'a time-based finding now carries a differential receipt');
+    assert.equal(timed.evidence.method, 'differential');
+    assert.ok(timed.evidence.baseline, 'the receipt includes the benign baseline exchange');
+    assert.equal(timed.evidence.signal.quote, '', 'timing proof has no reflected quote');
+    assert.equal(isProven(timed), false, 'a timing differential is CONFIRMED, not PROVEN');
   });
 });
 

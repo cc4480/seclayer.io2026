@@ -78,6 +78,10 @@ export function normalizeSeverity(sev: string | undefined): Severity {
 export function isProven(finding: Pick<Finding, "evidence">): boolean {
   const ev = finding.evidence;
   if (!ev || !ev.attack || typeof ev.attack.response !== "string") return false;
+  // An observation receipt is the raw response a non-exploit finding was read
+  // from. It is shown, but it is not proof of an exploit, so it never promotes
+  // to PROVEN — even though its quote (a header value) does appear verbatim.
+  if (ev.method === "observation") return false;
   const quote = ev.signal?.quote;
   if (!quote) return false;
   return ev.attack.response.includes(quote);

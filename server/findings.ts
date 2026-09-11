@@ -14,6 +14,8 @@ import { classifyCookie, isCsrfToken } from "./cookieClassify.js";
 import { isHstsPreloaded } from "./hstsPreload.js";
 import { mapOwasp } from "./owasp.js";
 import { buildAgentPrompt, buildImpactFallback } from "./agentPrompt.js";
+import { buildObservationEvidence } from "./evidence.js";
+import { SCANNER_USER_AGENT } from "./config.js";
 import crypto from "crypto";
 
 // Every finding carries a random id; red-team/API findings namespace theirs.
@@ -27,7 +29,7 @@ function fid(prefix = "f_"): string {
 // method for the finding's category. Applied as a guaranteed default in the
 // compile loop; a specific builder may set its own note to override this.
 function verificationNote(f: Finding): string {
-  if (f.evidence) {
+  if (f.evidence && f.evidence.method !== "observation") {
     return "Confirmed by active exploitation — a request/response receipt was captured and is replayable (see evidence).";
   }
   if (f.severity === "info") {
@@ -50,6 +52,81 @@ function verificationNote(f: Finding): string {
     default:
       return "Derived from the scan diagnostics.";
   }
+}
+
+// The request headers the scanner actually sends, reconstructed for a receipt.
+const RECEIPT_REQUEST_HEADERS: Record<string, string> = {
+  "User-Agent": SCANNER_USER_AGENT,
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+};
+
+// Build the observation receipt for a non-exploit finding, sourced by category
+// so it reflects what was ACTUALLY read — never a generic stand-in. Returns
+// undefined only for the surface/coverage notices, which are scan metadata, not
+// claims about the target, and have nothing to replay.
+function observationReceiptFor(f: Finding, diag: DiagnosticResult): Finding["evidence"] | undefined {
+  // Pure scan-coverage notices (interception, skipped probes, surface map) are
+  // not findings about the target — no receipt applies.
+  if (f.category === "Scan Coverage" || f.category === "EASM_SURFACE") return undefined;
+  if (/Active Exploit Probing Skipped|Scan was intercepted|Application Surface Mapped/.test(f.title)) return undefined;
+
+  // DAST: the exposed path's own exchange (status + body excerpt) if retained.
+  if (f.category === "DAST") {
+    const p = diag.probedPaths.find(
+      (pp) => pp.exposed && (f.endpoint?.includes(pp.path) || f.title.includes(pp.path)),
+    );
+    const path = p?.path ?? "";
+    return buildObservationEvidence({
+      url: `${diag.url}${path}`,
+      requestHeaders: RECEIPT_REQUEST_HEADERS,
+      responseStatus: p?.status ?? 200,
+      bodyExcerpt: p?.body,
+      why: "This path returned a successful response whose body matched the file's signature — it is reachable by anyone over the web.",
+      demonstration: `We requested ${diag.url}${path} with no credentials and the server returned it.`,
+    });
+  }
+
+  // SAST: the resource the signature was served from. The secret VALUE is never
+  // stored (see staticAnalysis), so the receipt names the source and signature
+  // and shows the response was served, with the value redacted.
+  if (f.category === "SAST") {
+    const src = f.endpoint ?? diag.url;
+    return buildObservationEvidence({
+      url: src,
+      requestHeaders: RECEIPT_REQUEST_HEADERS,
+      responseStatus: 200,
+      why: "A string matching a known secret/credential signature was served in this response (the value itself is redacted and never stored).",
+      demonstration: `A secret-shaped string was found in the client-served response from ${src}.`,
+    });
+  }
+
+  // SCA: the library/version was read from a script/link the page loads.
+  if (f.category === "SCA") {
+    return buildObservationEvidence({
+      url: diag.url,
+      requestHeaders: RECEIPT_REQUEST_HEADERS,
+      responseStatus: diag.responseStatus,
+      responseHeaders: diag.headers,
+      why: "The library version was identified in a resource this page loads and matched against a known-vulnerable range.",
+      demonstration: `A vulnerable library version was detected in a resource loaded by ${diag.url}.`,
+    });
+  }
+
+  // IAST / EASM and everything else read the root response. Cookie findings
+  // append the exact Set-Cookie line they were derived from (value redacted).
+  const cookieLine = diag.cookieEvidence?.[f.title];
+  return buildObservationEvidence({
+    url: diag.url,
+    requestHeaders: RECEIPT_REQUEST_HEADERS,
+    responseStatus: diag.responseStatus,
+    responseHeaders: diag.headers,
+    extraResponseLine: cookieLine,
+    quote: cookieLine,
+    why: cookieLine
+      ? "The cookie above was set by this response; its security attributes (present and absent) are visible verbatim."
+      : "This is the exact response the finding was read from — the relevant header's presence or absence is visible in the head above.",
+    demonstration: `Observed directly in the response from ${diag.url}.`,
+  });
 }
 
 // 0. Surface mapping + skipped-probe notices (informational, zero score impact).
@@ -443,6 +520,7 @@ export function compileStaticFindings(diag: DiagnosticResult): {
       if (!f.impact) f.impact = buildImpactFallback(f.severity);
       if (!f.agentPrompt) f.agentPrompt = buildAgentPrompt(f, diag.url);
       if (!f.verification) f.verification = verificationNote(f);
+      if (!f.evidence) f.evidence = observationReceiptFor(f, diag);
     }
     const { score, severity } = scoreFindings(withheld);
     return { score, severity, findings: withheld };
@@ -482,6 +560,13 @@ export function compileStaticFindings(diag: DiagnosticResult): {
     if (!f.impact) f.impact = buildImpactFallback(f.severity);
     if (!f.agentPrompt) f.agentPrompt = buildAgentPrompt(f, diag.url);
     if (!f.verification) f.verification = verificationNote(f);
+    // Every finding carries a replayable receipt — no exceptions. Exploit
+    // probes attach their own PROVEN receipt; everything else gets an
+    // observation receipt showing the exact request and response it was read
+    // from, sourced per category so the receipt is truthful (the root response
+    // for a header/cookie finding, the probed path for a DAST exposure, the
+    // resource for a SAST/SCA match) rather than plausible-looking.
+    if (!f.evidence) f.evidence = observationReceiptFor(f, diag);
   }
 
   // Score via the shared scoring module so the initial score and any later

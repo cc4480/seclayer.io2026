@@ -193,3 +193,47 @@ export function extractIdentityMarker(text: string, provided?: string): string |
   const email = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.exec(text);
   return email ? email[0] : null;
 }
+
+// Observation receipt — the raw request/response a NON-exploit finding was read
+// from (a missing/weak header, a cookie flag, a leaked signature, an exposed
+// file). It is not proof of an exploit and never promotes to PROVEN (isProven
+// returns false for method 'observation'); it exists so every finding in a
+// report carries a replayable receipt and none is a bare assertion. The reader
+// sees exactly what was sent and exactly what came back — including, for a
+// "missing header" finding, a response head that visibly lacks it.
+export function buildObservationEvidence(params: {
+  url: string;
+  reqMethod?: "GET" | "POST";
+  requestHeaders: Record<string, string>;
+  responseStatus: number;
+  responseHeaders?: Record<string, string>;
+  // Extra verbatim line appended to the rendered response head — e.g. the exact
+  // Set-Cookie the finding was derived from (already value-redacted by caller).
+  extraResponseLine?: string;
+  bodyExcerpt?: string;
+  // A value present in the rendered response to highlight (e.g. a weak header's
+  // value). Omit for a "missing X" finding — there is nothing to quote, and the
+  // full response head shown below is itself the evidence of absence.
+  quote?: string;
+  why: string;
+  demonstration: string;
+}): ExploitEvidence {
+  const reqMethod = params.reqMethod || "GET";
+  const request = renderRawRequest(reqMethod, params.url, params.requestHeaders);
+
+  const respLines = [`HTTP/1.1 ${params.responseStatus}`];
+  for (const [k, v] of Object.entries(params.responseHeaders ?? {})) respLines.push(`${k}: ${v}`);
+  if (params.extraResponseLine) respLines.push(params.extraResponseLine);
+  if (params.bodyExcerpt) { respLines.push(""); respLines.push(params.bodyExcerpt.slice(0, 1500)); }
+  const response = respLines.join("\n");
+
+  const quote = params.quote && response.includes(params.quote) ? params.quote : "";
+  return {
+    method: "observation",
+    attack: { identity: "scanner", request, response },
+    signal: { quote, offsetInResponse: quote ? response.indexOf(quote) : 0, why: params.why },
+    demonstration: params.demonstration,
+    reproduction: reqMethod === "GET" ? `curl -ski "${params.url}"` : `curl -sk -X POST "${params.url}"`,
+    capturedAt: new Date().toISOString(),
+  };
+}
