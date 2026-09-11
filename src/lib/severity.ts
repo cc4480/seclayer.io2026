@@ -57,4 +57,6 @@ export const GRADE_ACCENT: Record<Grade, { hex: string; text: string; label: str
   C: { hex: '#fbbf24', text: 'text-amber-400', label: 'Fair' },
   D: { hex: '#fb923c', text: 'text-orange-400', label: 'Poor' },
   F: { hex: '#ef4444', text: 'text-red-400',   label: 'Critical' },
+  // Not a band — a bot-intercepted scan that could not be graded. Neutral grey.
+  'N/A': { hex: '#94a3b8', text: 'text-slate-400', label: 'Incomplete' },
 };

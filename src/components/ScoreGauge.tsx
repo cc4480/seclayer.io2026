@@ -15,7 +15,11 @@ const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
 // draws on mount, and a hero number that counts up to the score. The arc colour
 // comes from the grade band (GRADE_ACCENT) so it always agrees with the letter.
 export default function ScoreGauge({ score, grade, size = 132 }: ScoreGaugeProps) {
-  const clamped = Math.max(0, Math.min(100, score));
+  // A bot-intercepted scan has no grade: its score is near 100 only because the
+  // findings that deduct were withheld, so showing the number would read as a
+  // pass. Render a neutral, near-empty gauge with "—" and "Incomplete" instead.
+  const incomplete = grade === "N/A";
+  const clamped = incomplete ? 0 : Math.max(0, Math.min(100, score));
   const accent = GRADE_ACCENT[grade];
 
   const r = 42;
@@ -51,7 +55,7 @@ export default function ScoreGauge({ score, grade, size = 132 }: ScoreGaugeProps
   }, [clamped, targetOffset, arcLen]);
 
   return (
-    <div className="relative shrink-0" style={{ width: size, height: size }} aria-label={`Score ${clamped} of 100, grade ${grade}`}>
+    <div className="relative shrink-0" style={{ width: size, height: size }} aria-label={incomplete ? "Score unavailable — scan was intercepted by bot protection" : `Score ${clamped} of 100, grade ${grade}`}>
       <svg viewBox="0 0 100 100" width={size} height={size} className="block">
         {/* recessive track (270°) */}
         <circle
@@ -71,13 +75,24 @@ export default function ScoreGauge({ score, grade, size = 132 }: ScoreGaugeProps
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center select-none">
-        <div className="flex items-baseline">
-          <span className={`font-mono font-black leading-none ${accent.text}`} style={{ fontSize: size * 0.3 }}>{display}</span>
-          <span className="font-mono text-[#52525b] text-xs ml-0.5">/100</span>
-        </div>
-        <span className={`font-mono font-bold uppercase tracking-widest mt-1 ${accent.text}`} style={{ fontSize: size * 0.085 }}>
-          Grade {grade}
-        </span>
+        {incomplete ? (
+          <>
+            <span className={`font-mono font-black leading-none ${accent.text}`} style={{ fontSize: size * 0.3 }}>—</span>
+            <span className={`font-mono font-bold uppercase tracking-widest mt-1 ${accent.text}`} style={{ fontSize: size * 0.085 }}>
+              Incomplete
+            </span>
+          </>
+        ) : (
+          <>
+            <div className="flex items-baseline">
+              <span className={`font-mono font-black leading-none ${accent.text}`} style={{ fontSize: size * 0.3 }}>{display}</span>
+              <span className="font-mono text-[#52525b] text-xs ml-0.5">/100</span>
+            </div>
+            <span className={`font-mono font-bold uppercase tracking-widest mt-1 ${accent.text}`} style={{ fontSize: size * 0.085 }}>
+              Grade {grade}
+            </span>
+          </>
+        )}
       </div>
     </div>
   );

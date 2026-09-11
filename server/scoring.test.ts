@@ -186,3 +186,31 @@ test('banner: alarming language is gated behind genuine high/critical severity',
   assert.equal(critical?.level, 'critical');
   assert.match(critical!.message, /SQL injection/); // text derived from the actual worst finding
 });
+
+test('an intercepted scan gets grade N/A, never a passing letter', () => {
+  // A bot-protection layer answered, so compileStaticFindings withheld
+  // everything content-derived and left only info-severity coverage notes.
+  // That set scores near 100, and gradeForScore(100) is "A". The posture must
+  // refuse to grade it — the alternative is an interstitial's silence read as
+  // the site's merit.
+  const withheld: any[] = [
+    { title: 'Scan was intercepted by a bot-protection challenge', severity: 'info', confidence: 'high' },
+    { title: 'Insecure Connection Protocol (HTTP)', severity: 'info', confidence: 'high' },
+  ];
+  const p = deriveSecurityPosture(withheld);
+  assert.equal(p.intercepted, true);
+  assert.equal(p.grade, 'N/A');
+  // The score itself is high (only info survived) — which is exactly why the
+  // grade must not follow it.
+  assert.ok(p.score >= 90);
+  assert.ok(gradeForScore(p.score) === 'A'); // the trap we are avoiding
+});
+
+test('a normal scan is unaffected — still graded by score', () => {
+  const clean: any[] = [
+    { title: 'Missing Referrer-Policy', severity: 'low', confidence: 'high' },
+  ];
+  const p = deriveSecurityPosture(clean);
+  assert.equal(p.intercepted, false);
+  assert.match(p.grade, /^[A-F]$/);
+});

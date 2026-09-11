@@ -96,7 +96,13 @@ export function isConfirmed(finding: Pick<Finding, "confidence" | "evidence">): 
 
 // Letter grade derived from the numeric score. One mapping, used everywhere a
 // grade is shown, so the letter can never disagree with the number beside it.
-export type Grade = "A" | "B" | "C" | "D" | "F";
+// "N/A" is not a band on the scale — it is the refusal to place a scan on it.
+// A bot-protection layer that answered instead of the origin leaves a findings
+// set that is all withheld coverage notes, which scores ~100, so gradeForScore
+// would call it A. That is an interstitial's silence read as the target's
+// merit. deriveSecurityPosture returns "N/A" for such a scan; the gauge renders
+// it as "—/Incomplete".
+export type Grade = "A" | "B" | "C" | "D" | "F" | "N/A";
 export function gradeForScore(score: number): Grade {
   if (score >= 90) return "A";
   if (score >= 80) return "B";
@@ -140,7 +146,12 @@ export interface SecurityPosture {
   activeCount: number;            // total non-suppressed findings
   confirmedCount: number;         // active findings that are probe-confirmed
   needsVerificationCount: number; // active heuristic findings
+  intercepted: boolean;           // a bot-protection layer answered; grade is "N/A"
 }
+
+// The finding title compileStaticFindings emits when a challenge page answered.
+// Matched rather than imported to keep scoring.ts free of a findings.ts cycle.
+const INTERCEPTED_TITLE = /intercepted by a bot-protection/i;
 
 // THE derivation. Given a findings array, returns every risk figure the product
 // displays, computed once and consistently. Suppressed (false-positive)
@@ -182,15 +193,21 @@ export function deriveSecurityPosture(findings: Finding[]): SecurityPosture {
 
   const top = highestSeverity(active);
 
+  // A challenge-answered scan carries no grade. The score is left as computed
+  // (near the floor-to-100 range, since only info coverage notes survived) for
+  // the record, but the grade must not read as a pass — see the Grade type.
+  const intercepted = active.some((f) => INTERCEPTED_TITLE.test(f.title));
+
   return {
     score,
-    grade: gradeForScore(score),
+    grade: intercepted ? "N/A" : gradeForScore(score),
     severity: top ?? "info",
     postureRating: riskLabelForSeverity(top),
     findingsBySeverity,
     activeCount: active.length,
     confirmedCount,
     needsVerificationCount: active.length - confirmedCount,
+    intercepted,
   };
 }
 

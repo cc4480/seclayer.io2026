@@ -40,7 +40,14 @@ export function downloadReportPdf(scan: Scan, posture: Posture, findings: Findin
   doc.text(`Target Assessed: ${scan.url}`, 15, 65);
   // Same shared posture as the on-screen report, so the PDF can never disagree
   // with the UI it was exported from.
-  doc.text(`Security Posture Score: ${posture.score}/100 (Grade ${posture.grade})`, 15, 72);
+  // An intercepted scan has no valid score — show the incomplete state rather
+  // than the ~100 artefact that survives withholding, matching the gauge.
+  doc.text(
+    posture.intercepted
+      ? "Security Posture Score: N/A — scan intercepted by bot protection (coverage incomplete)"
+      : `Security Posture Score: ${posture.score}/100 (Grade ${posture.grade})`,
+    15, 72,
+  );
   doc.text(`Risk Rating: ${posture.postureRating} (${posture.severity.toUpperCase()})`, 15, 79);
   doc.text(`Total Findings: ${posture.activeCount} (${posture.confirmedCount} confirmed, ${posture.needsVerificationCount} need verification)`, 15, 86);
 

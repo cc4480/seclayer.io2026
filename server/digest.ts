@@ -74,7 +74,11 @@ export function buildDigest(inputs: DigestInput[], appUrl = "https://seclayer.ap
       continue;
     }
     const change = r.newCount || r.fixedCount ? ` (${r.newCount} new, ${r.fixedCount} resolved)` : "";
-    textLines.push(`• ${r.url} — score ${r.score}/100 (${r.grade}, ${String(r.severity).toUpperCase()})${change}`);
+    // An intercepted scan has no valid score; "100/100" would misread as a pass.
+    const scoreText = r.grade === "N/A"
+      ? "score N/A — scan intercepted (coverage incomplete)"
+      : `score ${r.score}/100 (${r.grade}, ${String(r.severity).toUpperCase()})`;
+    textLines.push(`• ${r.url} — ${scoreText}${change}`);
   }
   textLines.push("");
   textLines.push(`Manage your monitors: ${appUrl}`);
@@ -90,7 +94,10 @@ export function buildDigest(inputs: DigestInput[], appUrl = "https://seclayer.ap
       const change = r.newCount || r.fixedCount
         ? `<span style="color:#f87171">${r.newCount} new</span> · <span style="color:#22c55e">${r.fixedCount} resolved</span>`
         : `<span style="color:#71717a">no change</span>`;
-      return `<tr><td style="padding:8px;border-bottom:1px solid #27272a;color:#fff">${esc(r.url)}</td><td style="padding:8px;border-bottom:1px solid #27272a;color:#fff"><strong>${r.score}/100</strong> ${r.grade} · ${String(r.severity).toUpperCase()}</td><td style="padding:8px;border-bottom:1px solid #27272a">${change}</td></tr>`;
+      const scoreCell = r.grade === "N/A"
+        ? `<span style="color:#94a3b8">N/A · intercepted</span>`
+        : `<strong>${r.score}/100</strong> ${r.grade} · ${String(r.severity).toUpperCase()}`;
+      return `<tr><td style="padding:8px;border-bottom:1px solid #27272a;color:#fff">${esc(r.url)}</td><td style="padding:8px;border-bottom:1px solid #27272a;color:#fff">${scoreCell}</td><td style="padding:8px;border-bottom:1px solid #27272a">${change}</td></tr>`;
     })
     .join("");
   const html = `<div style="font-family:system-ui,sans-serif;background:#09090b;color:#e4e4e7;padding:24px">
