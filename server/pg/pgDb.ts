@@ -126,6 +126,34 @@ export class PostgresDb implements Db {
     );
   }
 
+  // --- Email suppression -----------------------------------------------------
+  // Mirrors SqliteDb; see there and server/dbSchema.ts for the scope rules.
+  async suppressEmail(email: string, scope: "all" | "bulk", reason: string, detail?: string): Promise<void> {
+    const address = email.trim().toLowerCase();
+    if (!address) return;
+    const now = new Date().toISOString();
+    const existing = await this.get("SELECT scope FROM email_suppressions WHERE email = ?", [address]);
+    const effective = existing?.scope === "all" ? "all" : scope;
+    await this.run(
+      `INSERT INTO email_suppressions (email, scope, reason, detail, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT (email) DO UPDATE SET scope = excluded.scope, reason = excluded.reason,
+         detail = excluded.detail, updatedAt = excluded.updatedAt`,
+      [address, effective, reason, detail ?? null, now, now],
+    );
+  }
+
+  async isEmailSuppressed(email: string, kind: "account" | "bulk"): Promise<boolean> {
+    const row = await this.get("SELECT scope FROM email_suppressions WHERE email = ?", [email.trim().toLowerCase()]);
+    if (!row) return false;
+    if (row.scope === "all") return true;
+    return kind === "bulk";
+  }
+
+  async unsuppressEmail(email: string): Promise<void> {
+    await this.run("DELETE FROM email_suppressions WHERE email = ?", [email.trim().toLowerCase()]);
+  }
+
   // --- One-time sign-in codes -----------------------------------------------
   // Mirrors SqliteDb.createLoginCode; see there and server/loginCode.ts for why
   // earlier live codes for the address are retired first.

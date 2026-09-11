@@ -2,6 +2,8 @@
 // configured (works behind egress policies that block raw SMTP); otherwise logs
 // the message to the console so local/demo sign-in flows still work.
 import { htmlToPlainText } from './htmlToText.js';
+import { db } from './db.js';
+import type { MailKind } from './emailSuppression.js';
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const EMAIL_FROM = process.env.EMAIL_FROM || 'Seclayer <onboarding@resend.dev>';
@@ -22,9 +24,49 @@ export interface SendEmailInput {
   subject: string;
   html: string;
   text?: string;
+  /**
+   * What this message is FOR, which decides whether a spam complaint stops it.
+   *
+   * Defaults to 'account' — the safe direction. A message whose kind nobody
+   * thought about is far more likely to be a sign-in code than a digest, and
+   * wrongly suppressing one locks somebody out of their account, while wrongly
+   * sending one bulk message is an annoyance.
+   */
+  kind?: MailKind;
 }
 
 export async function sendEmail(input: SendEmailInput): Promise<void> {
+  // Bounced and complained-about addresses are skipped before anything is sent.
+  // A hard bounce stops everything; a complaint stops only bulk mail, so a
+  // sign-in code still reaches someone who marked a digest as spam.
+  //
+  // Fails OPEN: if the lookup throws, we send. A database blip that silently
+  // stopped every sign-in code in the system would be far worse than one extra
+  // message to an address that bounced.
+  const kind = input.kind ?? 'account';
+  let suppressed = false;
+  try {
+    suppressed = (await db.isEmailSuppressed(input.to, kind));
+  } catch (err) {
+    console.error('[email] Could not check the suppression list; sending anyway:', err);
+  }
+
+  if (suppressed) {
+    if (kind === 'bulk') {
+      // A digest that is not sent is exactly the intended outcome, and the
+      // caller has nothing useful to do about it.
+      console.warn('[email] Skipping bulk message to a suppressed address.');
+      return;
+    }
+    // ACCOUNT mail throws instead of returning quietly. Only a hard bounce
+    // reaches here (a complaint never blocks account mail), so the mailbox does
+    // not exist and the message has nowhere to go. Returning silently would let
+    // the caller answer "your sign-in code is on its way" and strand the user
+    // at a prompt they can never satisfy — which is precisely what happened in
+    // testing before this branch existed.
+    throw new Error('That address is on the suppression list after a permanent delivery failure.');
+  }
+
   if (!RESEND_API_KEY) {
     // Dev/demo fallback: surface the message (and any link) in server logs.
     console.log(

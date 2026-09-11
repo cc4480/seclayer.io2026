@@ -58,6 +58,42 @@ class SqliteDb {
   // credential now that nothing issues magic links, and dropping a table is not
   // something a boot migration should ever do.
 
+  // --- Email suppression -----------------------------------------------------
+  // See dbSchema.ts for why a hard bounce suppresses everything while a
+  // complaint suppresses only bulk mail, and why soft bounces are not recorded.
+
+  // Upserts on the address, so a repeat webhook updates rather than failing on
+  // the primary key. An existing 'all' is never downgraded to 'bulk': someone
+  // who complained AND whose mailbox was then deleted is both, and the stricter
+  // rule is the true one — widening back would resume mailing a dead address.
+  async suppressEmail(email: string, scope: 'all' | 'bulk', reason: string, detail?: string): Promise<void> {
+    const address = email.trim().toLowerCase();
+    if (!address) return;
+    const now = new Date().toISOString();
+    const existing: any = this.db.prepare('SELECT scope FROM email_suppressions WHERE email = ?').get(address);
+    const effective = existing?.scope === 'all' ? 'all' : scope;
+    this.db.prepare(
+      `INSERT INTO email_suppressions (email, scope, reason, detail, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(email) DO UPDATE SET scope = excluded.scope, reason = excluded.reason,
+         detail = excluded.detail, updatedAt = excluded.updatedAt`,
+    ).run(address, effective, reason, detail ?? null, now, now);
+  }
+
+  // Fails OPEN by contract (see the caller in email.ts): a database blip must
+  // not silently stop every sign-in code in the system.
+  async isEmailSuppressed(email: string, kind: 'account' | 'bulk'): Promise<boolean> {
+    const row: any = this.db.prepare('SELECT scope FROM email_suppressions WHERE email = ?')
+      .get(email.trim().toLowerCase());
+    if (!row) return false;
+    if (row.scope === 'all') return true;
+    return kind === 'bulk';
+  }
+
+  async unsuppressEmail(email: string): Promise<void> {
+    this.db.prepare('DELETE FROM email_suppressions WHERE email = ?').run(email.trim().toLowerCase());
+  }
+
   // Issues a one-time sign-in code and returns the raw six digits to email.
   // Only the hash is stored, so a dumped table cannot be used to sign in.
   //

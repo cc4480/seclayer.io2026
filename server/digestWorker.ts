@@ -42,7 +42,7 @@ export async function runDueDigests(now: Date = new Date()): Promise<void> {
       if (!(await db.claimDigestSend(user.id, new Date(now.getTime() - WEEK_MS).toISOString(), now.toISOString()))) {
         continue; // another instance is sending this one
       }
-      await sendEmail({ to: user.email, subject: digest.subject, text: digest.text, html: digest.html });
+      await sendEmail({ to: user.email, subject: digest.subject, text: digest.text, html: digest.html, kind: 'bulk' });
     } catch (err) {
       // One user's failure must never stop the rest of the run.
       console.warn(`[digest] failed for ${user.email}:`, err);

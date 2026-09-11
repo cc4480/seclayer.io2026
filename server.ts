@@ -6,6 +6,8 @@ import fs from 'fs';
 import cookieParser from 'cookie-parser';
 import { db } from './server/db.js';
 import { buildId, config, validateConfigOnBoot } from './server/config.js';
+import { verifySvixSignature } from './server/svixSignature.js';
+import { suppressionForEvent } from './server/emailSuppression.js';
 import { parseWebhookEvent } from './server/stripe.js';
 import { createOobCollaborator } from './server/oob.js';
 import { makeProcessScanJob, startScanQueueWorker } from './server/scanWorker.js';
@@ -121,6 +123,59 @@ async function startServer() {
       }
     }
     res.json({ received: true });
+  });
+
+  // Resend delivery events (bounces and spam complaints). Registered here, with
+  // the Stripe webhook and before the JSON parser, for the same reason: Svix
+  // signs the bytes as sent, so a re-serialised parse changes key order and
+  // whitespace and never matches.
+  //
+  // This is the feedback loop that was missing entirely — without it every send
+  // to a dead address repeated forever and every "mark as spam" went unseen,
+  // both of which erode the sender reputation that decides whether sign-in
+  // codes reach the inbox.
+  app.post('/api/webhooks/resend', express.raw({ type: 'application/json' }), async (req, res) => {
+    const secret = process.env.RESEND_WEBHOOK_SECRET;
+    if (!secret) {
+      // 503, not 200. Answering OK would make Resend believe events are being
+      // consumed while they are dropped, and show a healthy endpoint.
+      console.error('[resend] RESEND_WEBHOOK_SECRET is not set — delivery events are being discarded.');
+      return res.status(503).json({ error: 'Webhook not configured' });
+    }
+
+    const raw = Buffer.isBuffer(req.body) ? req.body.toString('utf8') : '';
+    const verified = verifySvixSignature(secret, raw, {
+      id: req.headers['svix-id'] as string | undefined,
+      timestamp: req.headers['svix-timestamp'] as string | undefined,
+      signature: req.headers['svix-signature'] as string | undefined,
+    });
+    if (!verified.ok) {
+      // Unverified, anyone who found this URL could forge a bounce for any
+      // address and permanently stop that person receiving sign-in codes.
+      console.warn(`[resend] Rejected an unverified webhook (${verified.reason}).`);
+      return res.status(401).json({ error: 'Invalid signature' });
+    }
+
+    let event: { type?: string; data?: Record<string, unknown> };
+    try {
+      event = JSON.parse(raw);
+    } catch {
+      return res.status(400).json({ error: 'Malformed payload' });
+    }
+
+    const decision = suppressionForEvent(String(event.type ?? ''), event.data ?? {});
+    if (!decision) return res.json({ ok: true, suppressed: false });
+
+    try {
+      (await db.suppressEmail(decision.email, decision.scope, decision.reason, decision.detail));
+      console.log(`[resend] Suppressed an address after a delivery event (${decision.scope}/${decision.reason}).`);
+      res.json({ ok: true, suppressed: true });
+    } catch (err) {
+      // 500 so Resend retries: losing a suppression means continuing to mail an
+      // address that bounced, which is what this exists to stop.
+      console.error('[resend] Could not record an email suppression:', err);
+      res.status(500).json({ error: 'Could not record suppression' });
+    }
   });
 
   // Body parsers + cookies (explicit body size cap)

@@ -106,6 +106,26 @@ export function runMigrations(db: Database.Database): void {
     -- six-digit code at the same time, and a uniqueness constraint would make
     -- the second person's sign-in fail at random. It is also why lookup is by
     -- (email, codeHash) and never by codeHash alone.
+    -- Addresses we must stop mailing, fed by Resend's bounce and complaint
+    -- webhooks. Repeatedly mailing a dead address, or someone who pressed
+    -- "spam", erodes the sender reputation that decides whether the mail people
+    -- DO want reaches the inbox — which now includes sign-in codes.
+    --
+    -- scope is the part that is easy to get wrong:
+    --   'all'  the mailbox does not exist (hard bounce) — everything stops.
+    --   'bulk' the person marked mail as spam — digests stop, but ACCOUNT mail
+    --          does not. A sign-in code is something their own action just
+    --          asked for, and suppressing it would lock them out of their
+    --          account over a complaint about a digest.
+    -- Soft bounces are deliberately not recorded: a full mailbox clears itself.
+    CREATE TABLE IF NOT EXISTS email_suppressions (
+      email     TEXT PRIMARY KEY,
+      scope     TEXT NOT NULL,
+      reason    TEXT NOT NULL,
+      detail    TEXT,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS login_codes (
       id         TEXT PRIMARY KEY,
       email      TEXT NOT NULL,

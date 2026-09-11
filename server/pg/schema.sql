@@ -122,6 +122,19 @@ CREATE TABLE IF NOT EXISTS monitored_targets (
 );
 CREATE INDEX IF NOT EXISTS idx_mon_user ON monitored_targets(userId);
 
+-- Addresses we must stop mailing, fed by Resend's bounce and complaint
+-- webhooks. See server/dbSchema.ts for why `scope` distinguishes a hard bounce
+-- (everything stops) from a complaint (bulk stops, account mail does not), and
+-- why soft bounces are deliberately not recorded.
+CREATE TABLE IF NOT EXISTS email_suppressions (
+  email     text PRIMARY KEY,
+  scope     text NOT NULL,
+  reason    text NOT NULL,
+  detail    text,
+  createdAt text NOT NULL,
+  updatedAt text NOT NULL
+);
+
 -- One-time sign-in codes. See server/loginCode.ts for why a six-digit secret
 -- needs a different shape from the 32-byte tokens elsewhere.
 --
