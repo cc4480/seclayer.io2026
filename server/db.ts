@@ -992,10 +992,56 @@ function createDb(): Db {
       // doesn't. rejectUnauthorized:false accepts the provider's chain without
       // bundling a CA — the connection is still encrypted.
       ssl: isLocal ? undefined : { rejectUnauthorized: false },
+      // Without this a checkout waits FOREVER for a connection: if the database
+      // is unreachable, every request hangs open instead of failing, the pool
+      // fills, and the process stops answering — including the health probe that
+      // is supposed to report the problem. Fail the query fast and let the
+      // health check surface a degraded instance.
+      connectionTimeoutMillis: Math.max(1000, Number(process.env.PGPOOL_CONNECT_TIMEOUT_MS) || 10_000),
+      idleTimeoutMillis: 30_000,
+      // Managed providers and the NAT in front of them drop idle TCP sessions
+      // silently; keepalive makes a dead socket surface as an error we can
+      // recycle rather than a query that hangs on a connection that no longer
+      // exists.
+      keepAlive: true,
+    });
+    // pg emits 'error' on the POOL when an IDLE client dies — a provider
+    // restart, a failover, a network blip, an idle-connection reaper. Node
+    // turns an unhandled 'error' event into a thrown exception, so without this
+    // listener a routine Postgres restart takes the whole process down with it.
+    // The pool has already discarded the dead client and will open a fresh one
+    // on the next checkout, so the correct response is to log and keep serving.
+    pool.on("error", (err: Error) => {
+      console.error("[db] idle Postgres client error — pool will recycle it:", err?.message || err);
     });
     return new PostgresDb(pool as unknown as PgPool);
   }
+
+  assertNotSilentlyFallingBack(process.env.NODE_ENV);
   return new SqliteDb();
+}
+
+/**
+ * Refuse to start a PRODUCTION process on the local SQLite fallback.
+ *
+ * The image points DB_PATH at /data, which is an ephemeral directory inside the
+ * container unless a volume is mounted — so a missing DATABASE_URL would open a
+ * brand-new EMPTY database, pass the health check, and serve as though every
+ * user, scan and credit had vanished, losing anything written on the next
+ * restart. Silent and total. A deploy that cannot reach its database must fail
+ * loudly instead of looking healthy.
+ *
+ * Exported so the rule is unit-testable: it runs at module load, which a normal
+ * test cannot re-trigger once db.ts is cached.
+ */
+export function assertNotSilentlyFallingBack(nodeEnv: string | undefined): void {
+  if (nodeEnv !== "production") return;
+  throw new Error(
+    "DATABASE_URL is not set. Refusing to start in production on the local SQLite fallback — " +
+      "that would serve an empty, ephemeral database and look healthy while doing it. " +
+      "Set DATABASE_URL to the Postgres instance, or set NODE_ENV to something other than " +
+      "'production' if a single-node SQLite deployment is genuinely intended.",
+  );
 }
 
 export const db: Db = createDb();

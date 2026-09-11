@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 // Use an isolated in-memory database. Set before importing the db singleton.
 process.env.DB_PATH = ':memory:';
-const { db } = await import('./db.js');
+const { db, assertNotSilentlyFallingBack } = await import('./db.js');
 const { runMigrations } = await import('./dbSchema.js');
 
 test('a new user receives signup credits; no API key is auto-provisioned', async () => {
@@ -298,4 +298,25 @@ test('recoverStuckScans refunds exactly once even when swept repeatedly', async 
     'one interrupted scan refunds exactly one credit, no matter how many replicas sweep',
   );
   assert.equal((await db.getScan(scan!.id))!.status, 'failed');
+});
+
+// The failure this prevents is silent and total: with DATABASE_URL missing the
+// selector would open the local SQLite file, which in the container is an
+// ephemeral directory, so the app boots on a brand-new EMPTY database, passes
+// its health check, and serves as though every user, scan and credit had
+// vanished — losing anything written on the next restart.
+test('production refuses to start on the SQLite fallback', () => {
+  assert.throws(
+    () => assertNotSilentlyFallingBack('production'),
+    /DATABASE_URL is not set/,
+    'a production process with no DATABASE_URL must fail loudly, not fall back',
+  );
+});
+
+test('dev, test and unset environments still use SQLite freely', () => {
+  // The fallback is the correct, intended path everywhere except production —
+  // this whole test suite runs on it.
+  for (const env of ['development', 'test', undefined]) {
+    assert.doesNotThrow(() => assertNotSilentlyFallingBack(env as string | undefined), `env=${env}`);
+  }
 });
