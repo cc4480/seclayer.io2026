@@ -14,6 +14,7 @@
 // SSRF allow/deny logic unchanged, so a malicious/attacker-planted URL in the
 // page still can't steer requests at internal infrastructure.
 import { safeFetch } from "./ssrf.js";
+import { SCANNER_USER_AGENT } from "./config.js";
 import { renderRawRequest, windowAround } from "./evidence.js";
 import type { ExploitEvidence } from "../src/types.js";
 
@@ -70,7 +71,7 @@ const COMMON_TABLE_GUESSES = ["config", "admin_config", "settings", "app_config"
 
 export async function probeCredentialUrlPairs(pairs: UrlKeyPair[]): Promise<any | null> {
   for (const pair of pairs) {
-    const headers = { apikey: pair.key, Authorization: `Bearer ${pair.key}`, "User-Agent": "Seclayer-Security-Scanner/2.0" };
+    const headers = { apikey: pair.key, Authorization: `Bearer ${pair.key}`, "User-Agent": SCANNER_USER_AGENT };
 
     // Step 1: PostgREST's own root lists every table exposed to this key's
     // role when schema introspection is on (the common case) — real

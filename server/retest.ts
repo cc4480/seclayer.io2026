@@ -6,6 +6,7 @@
 // so costs no credit). Heuristic (non-proven) and blind out-of-band findings
 // can't be replayed inline and are reported as unsupported.
 import type { Finding, Scan } from "../src/types.js";
+import { SCANNER_USER_AGENT } from "./config.js";
 import { guardedFetch, parseAuthHeader } from "./scanner.js";
 
 export interface RetestResult {
@@ -77,7 +78,7 @@ export async function retestFinding(finding: Finding, scan: Scan): Promise<Retes
   }
 
   const headers: Record<string, string> = {
-    "User-Agent": "Seclayer-Security-Scanner/2.0 (fix-verification)",
+    "User-Agent": SCANNER_USER_AGENT,
     ...parseAuthHeader(scan.authHeader),
   };
   if (attack.contentType) headers["Content-Type"] = attack.contentType;

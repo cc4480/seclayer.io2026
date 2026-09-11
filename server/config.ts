@@ -2,6 +2,25 @@
 // handling in one place and surfaces misconfiguration as clear startup warnings
 // instead of silent degradation in production.
 
+/**
+ * The scanner's outbound User-Agent — one string, used by every fetch path.
+ *
+ * The `Mozilla/5.0 (compatible; <bot>; +<url>)` form is the convention every
+ * legitimate crawler uses (Googlebot, Bingbot). It still identifies honestly as
+ * the Seclayer scanner and is NOT browser-spoofing — it does not claim to be
+ * Chrome or any real browser. It replaced a bare `Seclayer-Security-Scanner/2.0`
+ * token that Cloudflare's bot management scored as an obvious non-browser bot
+ * and 403'd from a cloud egress IP, blocking scans of sites (e.g. lovable.dev)
+ * that return 200 to any conventional request. The `SCANNER_USER_AGENT` env var
+ * overrides it for self-hosted operators.
+ *
+ * Eight call sites had drifted to slightly different literals; they now share
+ * this one, so the identity a target sees is consistent everywhere.
+ */
+export const SCANNER_USER_AGENT: string =
+  process.env.SCANNER_USER_AGENT?.trim() ||
+  "Mozilla/5.0 (compatible; Seclayer-Security-Scanner/2.0; +https://seclayer.app/bot)";
+
 function clean(v: string | undefined, placeholder?: string): string | undefined {
   if (!v) return undefined;
   const t = v.trim();

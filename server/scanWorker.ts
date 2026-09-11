@@ -16,7 +16,7 @@ import type { ScanEventStream } from "./scanEvents.js";
 import type { OobCollaborator } from "./oob.js";
 import type { BolaIdentity, LoginCredentials } from "../src/types.js";
 import { Semaphore } from "./semaphore.js";
-import { config } from "./config.js";
+import { config, SCANNER_USER_AGENT } from "./config.js";
 import type { ProcessScanJob } from "./routes/context.js";
 import { INSTANCE_ID } from "./instance.js";
 
@@ -146,7 +146,7 @@ export function makeProcessScanJob(oobCollaborator?: OobCollaborator) {
       // auth headers the diagnostics used.
       const evidence = compileScanEvidence(diagnostics);
       const shot = await captureScreenshot(scan.url, {
-        "User-Agent": "Seclayer-Security-Scanner/2.0 (+https://seclayer.app)",
+        "User-Agent": SCANNER_USER_AGENT,
         ...parseAuthHeader(scan.authHeader),
       });
       if (shot) evidence.screenshot = shot;

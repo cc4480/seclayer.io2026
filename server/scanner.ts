@@ -1,4 +1,5 @@
 import { crawlSite, targetsFromHtml, dedupeTargets, paramsOf, InjectableTarget } from "./crawler.js";
+import { SCANNER_USER_AGENT } from "./config.js";
 import { discoverAndParseApi } from "./openapi.js";
 import { runTemplates, selectTemplates } from "./templateEngine.js";
 import { TEMPLATES } from "./templates.js";
@@ -87,8 +88,7 @@ export async function runDiagnostics(
   };
 
   const headers: Record<string, string> = {
-    "User-Agent":
-      "Seclayer-Security-Scanner/2.0 (seclayer.app; scanner@seclayer.app)",
+    "User-Agent": SCANNER_USER_AGENT,
     Accept:
       "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
   };

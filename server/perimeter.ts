@@ -5,6 +5,7 @@
 // only when the response BODY matches the file's signature, not merely on a 200.
 // Mutates the passed DiagnosticResult in place (easmPerimeter + probedPaths).
 import type { DiagnosticResult } from "./scanner.js";
+import { SCANNER_USER_AGENT } from "./config.js";
 import type { Severity } from "../src/types.js";
 import { safeFetch, resolveIpv4 } from "./ssrf.js";
 import { looksLikeHtml } from "./evidence.js";
@@ -182,7 +183,7 @@ export async function scanPerimeter(host: string, hostname: string, result: Diag
       const probeId = setTimeout(() => probeController.abort(), 2500);
       const probeRes = await safeFetch(`${host}${probe.path}`, {
         method: "GET",
-        headers: { "User-Agent": "Seclayer-Security-Scanner/2.0 (seclayer.app)" },
+        headers: { "User-Agent": SCANNER_USER_AGENT },
         signal: probeController.signal,
       });
       const body = await probeRes.text().catch(() => "");

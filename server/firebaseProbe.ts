@@ -14,6 +14,7 @@
 // safeFetch's SSRF allow/deny logic unchanged — same discipline and trust bar as
 // server/credentialChainProbe.ts, the other cross-origin BaaS probe.
 import { safeFetch } from "./ssrf.js";
+import { SCANNER_USER_AGENT } from "./config.js";
 import { renderRawRequest, windowAround } from "./evidence.js";
 import type { ExploitEvidence } from "../src/types.js";
 
@@ -82,7 +83,7 @@ export async function probeFirebaseOpenDb(
   dbUrls: string[],
   headers: Record<string, string>,
 ): Promise<any | null> {
-  const ua = headers["User-Agent"] || "Seclayer-Security-Scanner/2.0";
+  const ua = headers["User-Agent"] || SCANNER_USER_AGENT;
   for (const base of dbUrls.slice(0, 3)) {
     const probeUrl = `${base}/.json`;
     const r = await timedGet(probeUrl, { "User-Agent": ua });

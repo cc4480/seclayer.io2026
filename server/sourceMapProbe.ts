@@ -10,6 +10,7 @@
 // same-origin only — it just GETs the target's own asset paths, like the
 // sensitive-path probing in server/perimeter.ts.
 import { safeFetch } from "./ssrf.js";
+import { SCANNER_USER_AGENT } from "./config.js";
 import type { Severity } from "../src/types.js";
 
 // True only for a real Source Map v3 document. Cheap regex pre-check guards the
@@ -107,7 +108,7 @@ export async function probeExposedSourceMaps(
     }
   }
 
-  const ua = headers["User-Agent"] || "Seclayer-Security-Scanner/2.0";
+  const ua = headers["User-Agent"] || SCANNER_USER_AGENT;
   const out: ExposedPathEntry[] = [];
   for (const mapUrl of [...candidates].slice(0, max)) {
     const r = await timedGet(mapUrl, { "User-Agent": ua });

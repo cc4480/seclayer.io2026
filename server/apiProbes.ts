@@ -4,6 +4,7 @@
 // user record, or a proven cross-tenant read), not a status code alone. Caller
 // gates invocation on verified domain ownership.
 import type { BolaIdentity } from "../src/types.js";
+import { SCANNER_USER_AGENT } from "./config.js";
 import { safeFetch } from "./ssrf.js";
 import { buildProbeEvidence, renderRawRequest, renderRawResponse, windowAround } from "./evidence.js";
 import { bolaProbe } from "./bola.js";
@@ -310,7 +311,7 @@ export async function runApiSecProbes(
     if (opts.bolaIdentities && opts.bolaIdentities.length === 2) {
       try {
         const bolaBase = {
-          "User-Agent": headers["User-Agent"] || "Seclayer-Security-Scanner/2.0",
+          "User-Agent": headers["User-Agent"] || SCANNER_USER_AGENT,
           "Cache-Control": "no-cache",
         };
         const bolaResults = await bolaProbe(host, opts.bolaIdentities, bolaBase);
