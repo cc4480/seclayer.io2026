@@ -214,3 +214,31 @@ test('a normal scan is unaffected — still graded by score', () => {
   assert.equal(p.intercepted, false);
   assert.match(p.grade, /^[A-F]$/);
 });
+
+// A finding whose own title says "needs verification" must never be reported as
+// CONFIRMED. It did: bola.ts emitted the inconclusive Cross-Tenant Access
+// findings with no confidence, findings.ts defaults a red-team finding to
+// "high", and isConfirmed() treats "high" as confirmed — so a real scan of
+// seclayer.app printed "Cross-Tenant Access (needs verification) — MEDIUM
+// confirmed", which is a contradiction in four words.
+test('a "needs verification" finding is never confirmed', () => {
+  const inconclusive: any = {
+    title: 'Cross-Tenant Access (needs verification)',
+    severity: 'medium',
+    confidence: 'low',
+  };
+  assert.equal(isConfirmed(inconclusive), false);
+
+  // And the trap that caused it: no confidence at all still reads as confirmed,
+  // so any probe emitting an unprovable claim MUST declare its confidence.
+  assert.equal(isConfirmed({ title: 'x', severity: 'medium' } as any), true);
+});
+
+// The posture must count it as needing verification, not as a confirmed medium.
+test('an inconclusive cross-tenant finding counts as needs-verification', () => {
+  const p = deriveSecurityPosture([
+    { title: 'Cross-Tenant Access (needs verification)', severity: 'medium', confidence: 'low' } as any,
+  ]);
+  assert.equal(p.confirmedCount, 0);
+  assert.equal(p.needsVerificationCount, 1);
+});

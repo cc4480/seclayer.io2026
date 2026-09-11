@@ -98,6 +98,12 @@ export interface DiagnosticResult {
     fix: string;
     endpoint: string;
     evidence?: ExploitEvidence; // stored exploit receipt (promotes to PROVEN)
+    // A probe that can only make an INCONCLUSIVE claim — "could neither be
+    // proven nor ruled out" — must say so here. Omitted → "high", so a probe
+    // that stays silent is reported as CONFIRMED. See bola.ts's cross-tenant
+    // branches, which read as "needs verification ... confirmed" until they
+    // declared this.
+    confidence?: "low" | "medium" | "high";
   }>;
   // True when active exploit probing (SQLi/XSS/cmd-injection/SSRF/GraphQL/BOLA
   // fuzzing) was skipped because the target's domain ownership isn't verified.

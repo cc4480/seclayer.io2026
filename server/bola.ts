@@ -57,6 +57,11 @@ export async function bolaProbe(
         testName: "Cross-Tenant Access (needs verification)",
         endpoint: `${A.ownResource} vs ${B.ownResource}`,
         severity: "medium",
+        // Inconclusive BY CONSTRUCTION: nothing was proven or disproven. Without
+        // this, findings.ts defaults a red-team finding to "high" confidence,
+        // and isConfirmed() then reports a finding literally titled "needs
+        // verification" as CONFIRMED — which is what it did on a real scan.
+        confidence: "low",
         description:
           "Two distinct identity markers could not be established from the supplied test accounts, so a cross-tenant read could neither be proven nor ruled out. A PROVEN BOLA check needs a value unique to each account's data.",
         fix: "Supply a distinct ownMarker for each identity (e.g. each test user's email) so the scanner can prove or disprove cross-tenant access.",
@@ -115,6 +120,8 @@ export async function bolaProbe(
         testName: "Cross-Tenant Access (needs verification)",
         endpoint: B.ownResource,
         severity: "medium",
+        // Ambiguous, not proven: the marker was not exclusive to B. See above.
+        confidence: "low",
         description: `${A.label} received ${B.label}'s marker from ${B.ownResource}, but that value also appears in ${A.label}'s own object, so it may be shared data rather than a tenant-boundary break. Use a marker that is unique to ${B.label} to prove or rule this out.`,
         fix: "Re-test with an ownMarker unique to each identity's data to confirm whether object-level authorization is actually broken.",
       });

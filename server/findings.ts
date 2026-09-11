@@ -403,7 +403,9 @@ function buildApiSecFindings(diag: DiagnosticResult): Finding[] {
     title: api.testName,
     description: api.description,
     severity: api.severity,
-    confidence: "high",
+    // Was hardcoded "high", which overrode any probe that tried to report an
+    // unprovable result honestly — the cross-tenant checks included.
+    confidence: api.confidence ?? "high",
     fix: api.fix,
     category: "API_SEC",
     endpoint: api.endpoint,
