@@ -98,3 +98,29 @@ test('an ordinary scan is completely unaffected', () => {
   assert.ok(titles.includes('Missing Content-Security-Policy (CSP)'), 'normal findings still report');
   assert.ok(!titles.some((t) => /intercepted/i.test(t)), 'no interception note on a normal scan');
 });
+
+// Verified against lovable.dev on 2026-09-11: a Cloudflare MANAGED challenge
+// serves headless Chromium the same interactive page it serves undici — HTTP
+// 403, redirected to ?__cf_chl_rt_tk=..., titled "Just a moment...". The
+// browser fallback in runPassiveScan re-judges the rendered response with this
+// function, so if this stopped flagging, a challenge page would be adopted as
+// the real site and every content-derived finding would describe Cloudflare.
+test('a managed challenge served to the BROWSER is still a challenge', () => {
+  const html = '<!DOCTYPE html><html><head><title>Just a moment...</title></head>'
+    + '<body><div class="main-wrapper"><noscript>Enable JavaScript and cookies to continue</noscript></div></body></html>';
+  const v = detectChallengePage(403, html, {
+    'content-security-policy': "default-src 'self'",
+    'x-frame-options': 'SAMEORIGIN',
+  });
+  assert.equal(v.isChallenge, true);
+  assert.equal(v.vendor, 'Cloudflare');
+});
+
+// The other half: a browser that genuinely reached the origin must NOT be
+// judged a challenge, or the fallback could never adopt a recovered page.
+test('a real page recovered by the browser is not a challenge', () => {
+  const html = '<!DOCTYPE html><html><head><title>AI App Builder | Build with AI</title></head>'
+    + '<body><main><h1>Welcome</h1><p>' + 'x'.repeat(3000) + '</p></main></body></html>';
+  const v = detectChallengePage(200, html, { 'content-security-policy': "default-src 'self'" });
+  assert.equal(v.isChallenge, false);
+});

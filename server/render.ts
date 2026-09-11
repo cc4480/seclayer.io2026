@@ -10,6 +10,13 @@ import net from "net";
 export interface RenderResult {
   html: string; // post-JavaScript DOM
   requestedUrls: string[]; // same-origin URLs the page requested (XHR/fetch/nav)
+  // The MAIN navigation response, not the sub-requests. Captured because a
+  // challenge fallback has to re-judge the browser's response and then run the
+  // header checks against it — without these the fallback could only recover
+  // the HTML and every header-derived check would still describe the block.
+  status: number | null;
+  headers: Record<string, string>;
+  finalUrl: string | null;
 }
 
 export function isRenderingEnabled(): boolean {
@@ -90,9 +97,23 @@ export async function renderPage(
       } catch {}
     });
 
-    await page.goto(url, { waitUntil: "networkidle", timeout: timeoutMs }).catch(() => {});
+    const resp = await page
+      .goto(url, { waitUntil: "networkidle", timeout: timeoutMs })
+      .catch(() => null);
     const html = await page.content().catch(() => "");
-    return { html, requestedUrls: [...requested] };
+    let status: number | null = null;
+    let headers: Record<string, string> = {};
+    try {
+      status = resp ? resp.status() : null;
+      const h = resp ? resp.headers() : {};
+      for (const [k, v] of Object.entries(h || {})) headers[k.toLowerCase()] = String(v);
+    } catch {
+      /* best effort — the render is still useful without them */
+    }
+    const finalUrl = (() => {
+      try { return page.url(); } catch { return null; }
+    })();
+    return { html, requestedUrls: [...requested], status, headers, finalUrl };
   } catch (err: any) {
     console.warn(`[render] headless render failed: ${err?.message || err}`);
     return null;

@@ -6,6 +6,7 @@
 // seed the crawler with it. A failure reaching the target throws, so the scan is
 // surfaced as failed rather than a misleading "clean" report.
 import { detectChallengePage } from "./challengePage.js";
+import { renderPage, isRenderingEnabled } from "./render.js";
 import type { DiagnosticResult } from "./scanner.js";
 import type { EmitFn } from "./scanEvents.js";
 import { safeFetch } from "./ssrf.js";
@@ -129,6 +130,48 @@ export async function runPassiveScan(
     // the site? Everything below reads this response, so if it is an
     // interstitial the findings describe Cloudflare rather than the customer.
     result.challenge = detectChallengePage(response.status, htmlText, result.headers);
+
+    // Challenged? Try once more with the real browser before giving up.
+    //
+    // Edges fingerprint the HTTP CLIENT, not just the IP or User-Agent:
+    // lovable.dev answers curl with 200 and Node's undici fetch with 403 from
+    // the very same address. Where that is the whole block, Chromium gets the
+    // real page on its own merits — it IS a browser. This sends no payload,
+    // alters no state, and is the same GET any visitor makes, so it is ordinary
+    // passive reconnaissance and is NOT behind domain-ownership verification;
+    // that gate is for red-team probes and real exploit payloads.
+    //
+    // It deliberately stops short of defeating a real challenge. A Cloudflare
+    // MANAGED challenge serves headless Chromium the same interactive
+    // "Just a moment..." page (verified against lovable.dev: browser also 403,
+    // landing on ?__cf_chl_rt_tk=...). The browser response is therefore
+    // re-judged, and if it is a challenge too the original verdict stands and
+    // findings stay withheld. Getting past that would mean solving the
+    // challenge, which we do not do.
+    //
+    // Best effort in every direction: rendering off, playwright missing, render
+    // failure or a challenged browser all leave the verdict untouched.
+    if (result.challenge.isChallenge && isRenderingEnabled()) {
+      emit?.("recon", "Intercepted on the plain HTTP client — retrying the page with a real browser…");
+      const rendered = await renderPage(url, headers).catch(() => null);
+      if (rendered && rendered.status !== null) {
+        const reJudged = detectChallengePage(rendered.status, rendered.html, rendered.headers);
+        if (!reJudged.isChallenge) {
+          // The browser got the real page. Adopt its response wholesale so the
+          // header checks below describe the site rather than the block page.
+          result.responseStatus = rendered.status;
+          result.headers = { ...rendered.headers };
+          rootHtml = rendered.html;
+          result.challenge = reJudged;
+          result.renderedWithBrowser = true;
+          emit?.(
+            "recon",
+            `Browser reached the origin — HTTP ${rendered.status}. Full analysis proceeds on the real page.`,
+          );
+        }
+      }
+    }
+
     if (result.challenge.isChallenge) {
       emit?.(
         "recon",

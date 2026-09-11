@@ -108,6 +108,12 @@ export interface DiagnosticResult {
    * so findings read from it are withheld rather than attributed to the target.
    */
   challenge?: ChallengeVerdict;
+  /**
+   * True when the plain HTTP client was challenged and the page was recovered
+   * with the headless browser instead (see runPassiveScan). The scan is a full
+   * one — the browser reached the origin — this only records how.
+   */
+  renderedWithBrowser?: boolean;
   // Full-transparency record of exactly which check groups ran and how many
   // discrete checks each fired against this target (see server/coverage.ts).
   coverage?: ScanCoverage;
