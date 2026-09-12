@@ -247,6 +247,20 @@ export interface ScanEvidence {
   activeProbesRun: boolean; // false when gated off for an unverified domain
   coverage?: ScanCoverage; // exactly which checks ran, and how many (transparency)
   screenshot?: TargetScreenshot; // headless-browser capture of the target, when enabled
+  // Which compliance controls these findings are EVIDENCE FOR — never a
+  // compliance verdict. Computed at scan time and frozen here alongside the
+  // findings it describes, so a later change to the mapping cannot silently
+  // restate what an already-delivered report said. Any view of this MUST show
+  // `disclaimer`. See server/compliance.ts.
+  compliance?: ComplianceSummary;
+}
+
+export interface ComplianceSummary {
+  frameworks: Array<{
+    framework: { id: string; name: string; version: string; note: string };
+    controls: Array<{ control: string; title: string; findings: number }>;
+  }>;
+  disclaimer: string;
 }
 
 // A visual capture of the scanned target's landing page, taken by a headless

@@ -19,6 +19,7 @@ import { Semaphore } from "./semaphore.js";
 import { config, SCANNER_USER_AGENT } from "./config.js";
 import type { ProcessScanJob } from "./routes/context.js";
 import { INSTANCE_ID } from "./instance.js";
+import { summariseCompliance, COMPLIANCE_DISCLAIMER } from "./compliance.js";
 
 // There is no cancellation token threaded through the probe pipeline (see
 // db.cancelScan's doc comment), so a canceled scan's in-flight network work
@@ -150,6 +151,15 @@ export function makeProcessScanJob(oobCollaborator?: OobCollaborator) {
         ...parseAuthHeader(scan.authHeader),
       });
       if (shot) evidence.screenshot = shot;
+
+      // Which controls these findings are evidence for. Computed here, once, and
+      // stored with the findings it describes — re-deriving it at render time
+      // would let a later mapping change restate an already-delivered report.
+      // Not a compliance verdict: the disclaimer travels with the data.
+      evidence.compliance = {
+        frameworks: summariseCompliance(outputReport.findings),
+        disclaimer: COMPLIANCE_DISCLAIMER,
+      };
 
       if (await isCanceled(scanId)) { console.log(`[Job Worker] Scan ${scanId} was canceled mid-flight — discarding the finished report.`); return; }
       const completed = (await db.updateScan(scanId, {
