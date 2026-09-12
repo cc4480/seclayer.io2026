@@ -73,6 +73,11 @@ const PREFERENCE_PATTERNS: RegExp[] = [
   /currency/i,
   /country/i,
   /region/i,
+  // Geo-location cookies (GeoIP is the MaxMind/Wikipedia convention): non-secret
+  // country/region data, read by client JS to render geo-appropriate content.
+  // Anchored so it cannot swallow a credential-bearing name — and SESSION_PATTERNS
+  // are checked first anyway, so "geo_token" is already classified session.
+  /(^|[._-])geo(ip|location)?([._-]|$)/i,
   /timezone/i,
   /(^|[._-])tz([._-]|$)/i,
   /theme/i,

@@ -22,6 +22,12 @@ test('non-secret preference cookies are recognized', () => {
   assert.equal(classifyCookie('lang'), 'preference');
   assert.equal(classifyCookie('theme'), 'preference');
   assert.equal(classifyCookie('tz'), 'preference');
+  // Geo cookies — the wikipedia.org FP: non-secret country/region data, read by
+  // client JS by design. GeoIP is the MaxMind/Wikipedia convention.
+  assert.equal(classifyCookie('GeoIP'), 'preference');
+  assert.equal(classifyCookie('geo'), 'preference');
+  assert.equal(classifyCookie('geo_country'), 'preference');
+  assert.equal(classifyCookie('geolocation'), 'preference');
 });
 
 test('genuine session/auth cookies stay classified as session', () => {
@@ -32,6 +38,11 @@ test('genuine session/auth cookies stay classified as session', () => {
   assert.equal(classifyCookie('access_token'), 'session');
   assert.equal(classifyCookie('csrf_token'), 'session');
   assert.equal(classifyCookie('auth'), 'session');
+  // A geo-NAMED cookie that also carries a credential keyword must stay session:
+  // SESSION_PATTERNS are checked before PREFERENCE, so the geo pattern can never
+  // downgrade a real credential cookie.
+  assert.equal(classifyCookie('geo_token'), 'session');
+  assert.equal(classifyCookie('geo_session'), 'session');
 });
 
 test('an unrecognized cookie stays "unknown" so it is never under-reported', () => {
