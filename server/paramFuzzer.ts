@@ -455,6 +455,17 @@ export async function fuzzDiscoveredTargets(
         const sent = await sendInjection(t, param, payload);
         const m = PASSWD_SIG.exec(sent.text);
         if (m) {
+          // Differential guard, the same one the SQLi check above applies and
+          // this one was missing: confirm a benign value for this parameter
+          // doesn't already return the passwd line. Pages that quote
+          // /etc/passwd as text — security tutorials, runbooks, log viewers —
+          // match this signature while proving nothing, and this check
+          // reported five CRITICAL findings against a target whose
+          // documentation contains it. Only runs on a match, so the request
+          // budget is unaffected on a clean scan.
+          budget--;
+          const baseText = await sendInjection(t, param, "index").then((r) => r.text).catch(() => "");
+          if (PASSWD_SIG.test(baseText)) return; // inherent page content → not a finding
           reported.add(key);
           findings.push({
             testName: `Path Traversal / Local File Inclusion (discovered parameter "${param}" on ${endpointPath})`,
@@ -466,7 +477,7 @@ export async function fuzzDiscoveredTargets(
               method: "error-signature", attackUrl: sent.attackUrl, requestHeaders: fuzzHeaders, res: sent.res, body: sent.text,
               matchIndex: m.index, quote: m[0],
               reqMethod: sent.reqMethod, reqBody: sent.reqBody, reqContentType: sent.reqContentType,
-              why: `This "root" line from /etc/passwd is outside the web root and only appears because our traversal payload in "${param}" reached the filesystem.`,
+              why: `This "root" line from /etc/passwd is outside the web root. A benign value for "${param}" returns a response WITHOUT it, so it only appears because our traversal payload reached the filesystem.`,
               demonstration: `We requested "${payload}" via the "${param}" ${sent.reqMethod} parameter on ${endpointPath} and the server returned /etc/passwd contents ("${m[0]}") — arbitrary file read.`,
             }),
           });

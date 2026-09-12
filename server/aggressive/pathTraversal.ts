@@ -4,6 +4,7 @@
 // boot.ini/win.ini marker). Non-destructive: it only READS a well-known file.
 import { buildProbeEvidence } from "../evidence.js";
 import { probeFetch } from "../redTeam/probeHttp.js";
+import { signaturePreexists } from "../redTeam/baseline.js";
 import type { ProbeContext, RedTeamFinding } from "../redTeam/types.js";
 
 // Parameters most likely to be used as a file path by the application.
@@ -34,6 +35,22 @@ export async function probePathTraversal(ctx: ProbeContext): Promise<RedTeamFind
       }
       const match = PASSWD_SIGNATURE.exec(body);
       if (match) {
+        // Was the passwd line already there before we sent anything?
+        //
+        // Plenty of legitimate pages contain it as text — security tutorials,
+        // operator runbooks, log viewers, paste sites. Matching the signature
+        // only shows it is IN the response, not that our traversal put it
+        // there, and this probe previously reported six CRITICAL findings
+        // against a target whose documentation quotes /etc/passwd.
+        //
+        // The baseline is the same parameter with a benign value, so the
+        // comparison is against the page this endpoint normally serves. Checked
+        // only after a match, so a clean scan costs no extra requests.
+        const benignUrl = `${ctx.url}/?${param}=index`;
+        if (await signaturePreexists(benignUrl, ctx.fuzzHeaders, PASSWD_SIGNATURE)) {
+          continue;
+        }
+
         return {
           testName: "Active Path Traversal / Local File Inclusion",
           payload: `${param}=${payload}`,
@@ -49,8 +66,8 @@ export async function probePathTraversal(ctx: ProbeContext): Promise<RedTeamFind
             body,
             matchIndex: match.index,
             quote: match[0],
-            why: `This is the "root" account line from /etc/passwd — a file outside the web root that a normal response never contains. It was returned only because our traversal payload in the "${param}" parameter reached the filesystem.`,
-            demonstration: `We asked for "${payload}" via the "${param}" parameter and the server returned the contents of /etc/passwd (including "${match[0]}"). That file is not part of the site — the app read an arbitrary path we supplied, proving Local File Inclusion.`,
+            why: `This is the "root" account line from /etc/passwd — a file outside the web root. The same request WITHOUT the traversal payload does not contain it, so it was returned only because our payload in the "${param}" parameter reached the filesystem.`,
+            demonstration: `We asked for "${payload}" via the "${param}" parameter and the server returned the contents of /etc/passwd (including "${match[0]}"). A benign value for the same parameter returns a page WITHOUT that line, so the app read an arbitrary path we supplied — Local File Inclusion.`,
           }),
         };
       }
