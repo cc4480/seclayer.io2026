@@ -20,7 +20,7 @@ import { PROBE_DESCRIPTORS, emitProbeFiring, emitProbeResult } from "./probeDesc
 
 // Ordered exactly as before: SQLi → XSS → cmd injection → reflected SSRF → blind
 // OOB SSRF. probeBlindSsrf no-ops on its own when no collaborator is configured.
-const PROBES: Probe[] = [
+export const PROBES: Probe[] = [
   probeSqlInjection,
   probeReflectedXss,
   probeCommandInjection,

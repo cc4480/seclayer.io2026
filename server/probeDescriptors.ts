@@ -45,8 +45,12 @@ export const PROBE_DESCRIPTORS: Record<string, ProbeDescriptor> = {
   // --- Aggressive tier ---
   probeSsti: {
     label: "Server-side template injection",
-    payload: "?name={{7*7}}",
-    why: "checking whether a template engine evaluates injected expressions (arithmetic oracle)",
+    // A randomised product, not a literal — the probe fires "{{a*b}}" with fresh
+    // factors each run and confirms only when the response contains the computed
+    // product (which the literal payload never contains). The ticker shows the
+    // shape; the result line shows the exact expression from the receipt.
+    payload: "?name={{a*b}}",
+    why: "checking whether a template engine evaluates injected expressions (randomised arithmetic oracle)",
   },
   probePathTraversal: {
     label: "Path traversal / LFI",

@@ -19,7 +19,7 @@ import { probeXxe } from "./aggressive/xxe.js";
 import { probeNoSql } from "./aggressive/nosql.js";
 import { probeHostHeaderInjection } from "./aggressive/hostHeaderInjection.js";
 
-const PROBES: Probe[] = [
+export const PROBES: Probe[] = [
   probeSsti,
   probePathTraversal,
   probeOpenRedirect,
