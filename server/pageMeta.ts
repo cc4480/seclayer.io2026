@@ -122,6 +122,14 @@ export function applyPageMeta(html: string, meta: PageMeta): string {
       /<meta\s+name="robots"\s+content="[^"]*"\s*\/?>/i,
       '<meta name="robots" content="noindex, nofollow" />',
     );
+  } else {
+    // Give a non-JS crawler this route's actual subject, not just the
+    // homepage's noscript copy repeated under a different <title>. Skipped
+    // for noindex routes (e.g. /r/:token) — nothing there is meant to rank.
+    out = out.replace(
+      /(<p>Seclayer needs JavaScript to run a scan interactively\. These pages read fine without it:<\/p>)/,
+      `<h2>${title}</h2>\n      <p>${desc}</p>\n      $1`,
+    );
   }
 
   return out;

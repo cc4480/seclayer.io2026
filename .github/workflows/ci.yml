@@ -37,3 +37,11 @@ jobs:
 
       - name: Build MCP server
         run: npm run build -w @seclayer/mcp
+
+      # Railway deploys from this same push independently of this workflow, so
+      # this doesn't wait on it — IndexNow's own crawl isn't instant either.
+      # Never fails the build: a missed ping just falls back to organic crawl.
+      - name: Ping IndexNow
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        run: node scripts/indexnow-ping.mjs https://seclayer.app

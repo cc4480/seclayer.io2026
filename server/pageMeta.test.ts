@@ -13,6 +13,38 @@ const SHELL = `<!doctype html><html><head>
 <meta property="og:url" content="https://seclayer.app/" />
 </head><body></body></html>`;
 
+// Shaped like the real built index.html's <body>, which the plain SHELL above
+// doesn't have — the noscript-rewrite tests need the actual paragraph the
+// rewrite matches against.
+const SHELL_WITH_NOSCRIPT = `<!doctype html><html><head>
+<title>Seclayer</title>
+<meta name="description" content="Old." />
+<meta name="robots" content="index, follow" />
+<link rel="canonical" href="https://seclayer.app/" />
+</head><body>
+<noscript>
+  <h1>Seclayer — black-box penetration testing SaaS &amp; MCP server</h1>
+  <p>Point Seclayer at a public URL and get a real black-box penetration test.</p>
+  <p>Seclayer needs JavaScript to run a scan interactively. These pages read fine without it:</p>
+  <nav><ul><li><a href="/">Home</a></li></ul></nav>
+</noscript>
+<div id="root"></div>
+</body></html>`;
+
+test('a non-JS crawler on /docs gets that route\'s subject, not just the homepage noscript copy', () => {
+  const html = applyPageMeta(SHELL_WITH_NOSCRIPT, metaForPath('/docs')!);
+  assert.match(html, /<h2>Documentation — Seclayer<\/h2>/);
+  assert.match(html, /<p>How to run a Seclayer scan/);
+  // Still ahead of the nav, so it doesn't look tacked on after the links.
+  assert.ok(html.indexOf('<h2>Documentation') < html.indexOf('<nav>'));
+});
+
+test('noindex routes are left out of the noscript rewrite', () => {
+  const meta = metaForPath('/r/AbC123_-xy')!;
+  const html = applyPageMeta(SHELL_WITH_NOSCRIPT, meta);
+  assert.doesNotMatch(html, /<h2>/);
+});
+
 test('the homepage keeps the built metadata', () => {
   assert.equal(metaForPath('/'), null);
 });
