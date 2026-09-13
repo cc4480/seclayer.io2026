@@ -32,6 +32,13 @@ export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
       // rather than RAILWAY_REPLICA_ID so this leaks no platform detail — it only
       // has to differ between processes.
       instance: INSTANCE_ID,
+      // Resident set size, for capacity work. A scan holds a headless browser
+      // and hundreds of sockets, so how far concurrency can safely go is a
+      // memory question — and without this the only way to read it was
+      // `railway ssh` into the container, which a load-test harness cannot do.
+      // Deliberately just a number of megabytes: it discloses nothing about the
+      // host, the workload, or any user.
+      memory: { rssMb: Math.round(process.memoryUsage().rss / 1048576) },
       timestamp: new Date().toISOString(),
     });
   });

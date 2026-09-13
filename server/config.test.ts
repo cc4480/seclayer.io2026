@@ -63,3 +63,33 @@ test("the PUBLIC appVersion never picks up a commit SHA from the platform", () =
   assert.ok(line, "expected an appVersion line in server/config.ts");
   assert.doesNotMatch(line, /COMMIT|SHA|buildId/i, `appVersion is public surface: ${line.trim()}`);
 });
+
+// --- DISABLE_RATE_LIMITS is hard-disabled in production --------------------
+// This flag turns off EVERY limit, including the sign-in code gate that bounds
+// brute force against a six-digit code. It exists so a load test can measure
+// real scan capacity instead of measuring the limiter. Its entire safety rests
+// on the NODE_ENV guard, so that guard is pinned here rather than trusted.
+//
+// config reads process.env once at module load, so each case runs in its own
+// process — mutating process.env in-test would prove nothing about the value
+// the real server computes at boot.
+import { execFileSync } from "node:child_process";
+
+function configFlagUnder(env: Record<string, string>): boolean {
+  const out = execFileSync(
+    process.execPath,
+    ["--import", "tsx", "--eval", "import('./server/config.ts').then(m => console.log(m.config.disableRateLimits))"],
+    { env: { ...process.env, ...env }, encoding: "utf8", cwd: process.cwd() },
+  );
+  return out.trim().endsWith("true");
+}
+
+test("DISABLE_RATE_LIMITS is ignored in production, however it is set", () => {
+  assert.equal(configFlagUnder({ NODE_ENV: "production", DISABLE_RATE_LIMITS: "true" }), false);
+});
+
+test("DISABLE_RATE_LIMITS applies in development only when explicitly 'true'", () => {
+  assert.equal(configFlagUnder({ NODE_ENV: "development", DISABLE_RATE_LIMITS: "true" }), true);
+  assert.equal(configFlagUnder({ NODE_ENV: "development", DISABLE_RATE_LIMITS: "1" }), false);
+  assert.equal(configFlagUnder({ NODE_ENV: "development", DISABLE_RATE_LIMITS: "" }), false);
+});

@@ -44,13 +44,36 @@ function sanitizeLoginCredentials(raw: any): LoginCredentials | undefined {
 export function registerScanRoutes(app: express.Express, ctx: RouteContext) {
   const { requireAuth, getUserId, processScanJob } = ctx;
 
-  const scanLimiter = rateLimit({
+  // Two gates, composed, for the reason rateLimit.ts documents: IP alone is a
+  // weak identity in BOTH directions. This endpoint used to be IP-keyed only,
+  // which meant an office, a university, a VPN or any CGNAT'd group of
+  // customers shared ONE 10/min allowance and could lock each other out —
+  // the paying user's scan rejected because a stranger on the same egress IP
+  // ran theirs first. A load test surfaced it: 100 signed-in users from one
+  // address got 10 scans through and 90 HTTP 429s.
+  //
+  // Per user is the fairness gate — it is the identity that actually maps to
+  // "a customer", and it survives someone rotating source addresses.
+  const scanUserLimiter = rateLimit({
     windowMs: 60 * 1000,
     max: 10,
-    keyPrefix: "scan",
+    keyPrefix: "scan-user",
+    // requireAuth runs first, so this is always present. Kept defensive:
+    // undefined would SKIP this gate, and the IP gate below still applies.
+    keyFrom: (req) => getUserId(req) || undefined,
     message: "Scan rate limit reached. Please wait a moment before launching more scans.",
   });
-  app.post("/api/scans", requireAuth, scanLimiter, async (req, res) => {
+  // Per IP stays as the abuse gate — one machine registering many accounts to
+  // multiply its allowance is exactly what the per-user gate cannot see. Set
+  // well above the per-user cap so that legitimate shared egress is not the
+  // thing it catches.
+  const scanIpLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 60,
+    keyPrefix: "scan-ip",
+    message: "Too many scans from this network. Please wait a moment before launching more.",
+  });
+  app.post("/api/scans", requireAuth, scanUserLimiter, scanIpLimiter, async (req, res) => {
     const { url, authHeader } = req.body;
     const userId = getUserId(req);
     if (!url) {

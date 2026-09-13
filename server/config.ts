@@ -132,6 +132,14 @@ export const config = {
   // SCAN_DEV_ALLOW_HOSTS to also let the SSRF guard reach a loopback target.
   devSkipDomainVerification:
     process.env.NODE_ENV !== 'production' && process.env.DEV_SKIP_DOMAIN_VERIFICATION === 'true',
+  // Dev-only: drop the rate limits so a load test can measure real scan
+  // capacity. The limits are IP-keyed as well as user-keyed, so a harness
+  // running 100 simulated users from one machine hits the network gate long
+  // before it reaches the queue and measures nothing but the limiter.
+  // HARD-disabled in production for the obvious reason: rate limits are what
+  // stop one client exhausting the scan workers for everybody.
+  disableRateLimits:
+    process.env.NODE_ENV !== 'production' && process.env.DISABLE_RATE_LIMITS === 'true',
   // OPERATOR opt-in (works in production too, unlike the dev flag above): unlock
   // the active red-team/aggressive probes on THIS instance without per-domain
   // ownership proof. Off by default. Intended for a private, single-tenant
@@ -173,6 +181,9 @@ export function validateConfigOnBoot(): boolean {
   }
   if (config.devSkipDomainVerification) {
     warnings.push('DEV_SKIP_DOMAIN_VERIFICATION is on — active red-team probes run WITHOUT domain-ownership proof. DEV ONLY: only scan targets you own (this is hard-disabled in production). Unset it to restore the verification gate.');
+  }
+  if (config.disableRateLimits) {
+    warnings.push('DISABLE_RATE_LIMITS is on — every rate limit is bypassed, including the sign-in code and scan launch gates. DEV/LOAD-TEST ONLY (hard-disabled in production). Unset it to restore the limits.');
   }
   if (config.allowUnverifiedActiveProbes) {
     warnings.push('ALLOW_UNVERIFIED_ACTIVE_PROBES is on — active red-team probes run WITHOUT domain-ownership proof on EVERY scan path, including in production. Only safe on a PRIVATE instance you control, testing targets you own. Anyone who can use this instance can now aim active exploits at any domain. Unset it to restore the ownership gate.');

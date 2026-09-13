@@ -296,6 +296,9 @@ export function startScanQueueWorker(processScanJob: ProcessScanJob): NodeJS.Tim
     // and over-claim past the cap.
     if (draining) return;
     draining = true;
+    // Did this pass take a job? Decides whether to come straight back for
+    // another (see the re-arm below) or wait out the full poll interval.
+    let claimed = false;
     try {
       // ONE claim per tick, not a greedy fill.
       //
@@ -327,6 +330,7 @@ export function startScanQueueWorker(processScanJob: ProcessScanJob): NodeJS.Tim
         }
         const job = await db.claimNextQueuedScan();
         if (!job) return; // queue empty — wait for the next tick
+        claimed = true;
         // Stamped with the instance so the fleet's behaviour is observable:
         // without it there is no way to tell whether three workers are sharing
         // the queue or one is doing everything.
@@ -349,6 +353,26 @@ export function startScanQueueWorker(processScanJob: ProcessScanJob): NodeJS.Tim
       console.warn('[scan queue] claim failed:', err?.message || err);
     } finally {
       draining = false;
+    }
+
+    // Re-arm FAST after a successful claim while slots remain.
+    //
+    // One claim per tick spreads a burst across the fleet, which is why it is
+    // there — but on its own it also caps how fast ANY instance can START
+    // work at one scan per poll interval: 30 scans/minute at a 2s tick, no
+    // matter what maxConcurrentScans says. A load test of 100 scans measured
+    // exactly that 30/min, with the concurrency cap never reached, and the
+    // hundredth user waiting ~200s to start a scan that runs in under a
+    // second.
+    //
+    // Coming straight back keeps the spreading property — the hesitation
+    // above still makes a loaded worker yield to an idle peer, and that is
+    // what actually does the balancing — while letting one instance reach its
+    // cap in a few hundred ms instead of maxConcurrentScans x 2s. Only after
+    // a claim, so an empty queue still polls at the slow interval rather than
+    // spinning on the database.
+    if (claimed && inFlight < config.maxConcurrentScans) {
+      setTimeout(() => { void drain(); }, 150).unref?.();
     }
   };
 

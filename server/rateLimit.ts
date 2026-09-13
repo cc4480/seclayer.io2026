@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { db } from './db.js';
+import { config } from './config.js';
 
 // Rate limiting with a PLUGGABLE store so the same middleware works both on a
 // single node (default: in-memory) and across a horizontally-scaled fleet
@@ -143,6 +144,9 @@ export function rateLimit(opts: {
   keyFrom?: (req: Request) => string | undefined;
 }) {
   return async (req: Request, res: Response, next: NextFunction) => {
+    // Checked per-request rather than captured when the middleware is built, so
+    // a test can flip it without rebuilding the app. Non-prod only (see config).
+    if (config.disableRateLimits) return next();
     const identity = opts.keyFrom ? opts.keyFrom(req) : clientIp(req);
     if (identity === undefined) return next();
     const key = `${opts.keyPrefix}:${identity}`;

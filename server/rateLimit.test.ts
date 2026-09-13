@@ -182,3 +182,60 @@ test('keyFrom returning undefined skips limiting rather than bucketing everyone 
     assert.equal(nexted, 5, 'identity-less requests must pass through, not consume a shared bucket');
   } finally { setRateLimitStore(prev); }
 });
+
+// ── The scan-launch keying regression ────────────────────────────────────────
+// The scan endpoint was IP-keyed only, at 10/min. rateLimit's own documentation
+// warns about exactly the consequence: "everyone behind one office NAT shares a
+// bucket and can lock each other out." A 100-user load test from one address
+// confirmed it — 10 scans accepted, 90 rejected with HTTP 429. These pin the
+// composition that replaced it: per-user for fairness, per-IP for abuse.
+test('a per-user gate gives each user their own allowance from one shared IP', async () => {
+  const app = express();
+  app.use(express.json());
+  // Stand-in for requireAuth + getUserId: the real route reads an authenticated
+  // session, and every request here shares one source address by construction.
+  app.use(rateLimit({
+    windowMs: 60_000,
+    max: 2,
+    keyPrefix: 'test-scan-user',
+    keyFrom: (req: any) => req.header('x-test-user') || undefined,
+  }));
+  app.post('/scan', (_req, res) => res.json({ ok: true }));
+
+  await withApp(app, async (base) => {
+    const launch = (user: string) =>
+      fetch(`${base}/scan`, { method: 'POST', headers: { 'x-test-user': user } }).then((r) => r.status);
+
+    // Two different users, same IP: neither is affected by the other's usage.
+    assert.deepEqual([await launch('alice'), await launch('alice')], [200, 200]);
+    assert.equal(await launch('alice'), 429, 'alice spent her own allowance');
+    assert.equal(await launch('bob'), 200, 'bob must not inherit alice’s exhausted bucket');
+    assert.equal(await launch('bob'), 200);
+    assert.equal(await launch('bob'), 429);
+  });
+});
+
+test('the per-IP gate still catches one host cycling through many accounts', async () => {
+  const app = express();
+  // Composed exactly as the scan route does it: per-user first, per-IP second.
+  app.use(rateLimit({
+    windowMs: 60_000,
+    max: 2,
+    keyPrefix: 'test-compose-user',
+    keyFrom: (req: any) => req.header('x-test-user') || undefined,
+  }));
+  app.use(rateLimit({ windowMs: 60_000, max: 5, keyPrefix: 'test-compose-ip' }));
+  app.post('/scan', (_req, res) => res.json({ ok: true }));
+
+  await withApp(app, async (base) => {
+    // A fresh user every time, so the per-user gate never fires. Without the
+    // per-IP gate, registering accounts would buy unlimited scans from one box.
+    const statuses: number[] = [];
+    for (let i = 0; i < 7; i++) {
+      statuses.push(
+        await fetch(`${base}/scan`, { method: 'POST', headers: { 'x-test-user': `u${i}` } }).then((r) => r.status),
+      );
+    }
+    assert.deepEqual(statuses, [200, 200, 200, 200, 200, 429, 429]);
+  });
+});
