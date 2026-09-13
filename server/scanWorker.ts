@@ -17,6 +17,8 @@ import type { OobCollaborator } from "./oob.js";
 import type { BolaIdentity, LoginCredentials } from "../src/types.js";
 import { Semaphore } from "./semaphore.js";
 import { config, SCANNER_USER_AGENT } from "./config.js";
+import { sendEmail, buildScanReadyEmail } from "./email.js";
+import { gradeForScore } from "./scoring.js";
 import type { ProcessScanJob } from "./routes/context.js";
 import { INSTANCE_ID } from "./instance.js";
 import { summariseCompliance, COMPLIANCE_DISCLAIMER } from "./compliance.js";
@@ -184,6 +186,43 @@ export function makeProcessScanJob(oobCollaborator?: OobCollaborator) {
       const prior = (await db.getPreviousCompletedScan(completed.userId, completed.url, completed.id));
       const priorSuppressed = prior ? (await db.getScanWithSuppressedFindings(prior)) : undefined;
       notifyScanComplete(owner?.notifyWebhook, current, priorSuppressed);
+
+      // Tell the owner their report exists. Until now nothing did: sign-in codes
+      // and the periodic digest were the only mail Seclayer sent, and
+      // notifyScanComplete above returns immediately without a webhook — so a
+      // user who ran a scan, or whose monitored target was rescanned, only found
+      // out by coming back to look.
+      //
+      // The link is a share token, not the dashboard URL, for the same reason
+      // SecScan's report email carries one: a dashboard link needs a session as
+      // the owner, which fails when mail is opened on a phone that is logged out
+      // or signed into another account. createShareToken is idempotent, so a
+      // re-scan of the same target reuses the existing link rather than churning
+      // it.
+      //
+      // Non-fatal throughout: a scan that completed successfully must not be
+      // recorded as failed because its notification could not be sent.
+      if (owner?.email) {
+        try {
+          const token = (await db.createShareToken(owner.id, completed.id));
+          if (token) {
+            const base = (config.appUrl || "https://seclayer.app").replace(/\/+$/, "");
+            const mail = buildScanReadyEmail({
+              targetUrl: completed.url,
+              grade: gradeForScore(completed.score ?? 0),
+              score: completed.score ?? 0,
+              findingCount: (current.findings ?? []).filter((f) => !f.isFalsePositive).length,
+              reportUrl: `${base}/r/${token}`,
+            });
+            await sendEmail({ to: owner.email, subject: mail.subject, html: mail.html, text: mail.text, kind: "bulk" });
+            console.log(`[Job Worker] Report-ready email sent for scan ${scanId}.`);
+          } else {
+            console.warn(`[Job Worker] Could not mint a share token for scan ${scanId} — no report email sent.`);
+          }
+        } catch (mailErr: any) {
+          console.warn(`[Job Worker] Report-ready email failed for scan ${scanId}:`, mailErr?.message || mailErr);
+        }
+      }
     } catch (err: any) {
       console.error(`[Job Worker] FAILED scan ${scanId}:`, err?.message || err);
       if (stream && !await isCanceled(scanId)) stream.emit("system", `Scan failed: ${err?.message || "The scan could not be completed."}`);

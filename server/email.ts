@@ -137,3 +137,67 @@ export function buildLoginCodeEmail(code: string, ttlMinutes: number): { subject
       </div>`,
   };
 }
+
+/**
+ * The scan-is-ready email.
+ *
+ * Seclayer had no per-scan notification at all: it emailed sign-in codes and the
+ * periodic digest, and `notifyScanComplete` was webhook-only (`if (!webhook)
+ * return`). So a user who ran a scan, or whose monitored target was rescanned,
+ * was never told the report existed unless they came back and looked.
+ *
+ * The link is a SHARE TOKEN (/r/<token>), not the dashboard URL, for the reason
+ * SecScan's report email was changed to one: a dashboard link requires being
+ * signed in as the report's owner, which fails on the most common way people
+ * open mail — on a phone, logged out or signed into another account — and
+ * renders as a dead end. A share token resolves with no session.
+ *
+ * kind: 'bulk' — this is a notification, not account-critical mail. Someone who
+ * marked a Seclayer notification as spam should stop receiving these, while
+ * their sign-in codes keep working. See server/emailSuppression.ts.
+ */
+export function buildScanReadyEmail(opts: {
+  targetUrl: string;
+  grade: string;
+  score: number;
+  findingCount: number;
+  reportUrl: string;
+}): { subject: string; html: string; text: string } {
+  const { targetUrl, grade, score, findingCount, reportUrl } = opts;
+  const host = (() => {
+    try { return new URL(targetUrl).host; } catch { return targetUrl; }
+  })();
+  const countLine =
+    findingCount === 0
+      ? 'No active findings.'
+      : `${findingCount} active finding${findingCount === 1 ? '' : 's'}.`;
+
+  return {
+    subject: `Grade ${grade} for ${host} — your Seclayer report is ready`,
+    text:
+      `Your Seclayer scan of ${targetUrl} is complete.\n\n` +
+      `Grade ${grade} (score ${score}/100). ${countLine}\n\n` +
+      `Read the full report:\n${reportUrl}\n\n` +
+      `This link opens without signing in, so it works on any device. ` +
+      `Anyone with the link can read this one report — you can revoke it from the report page.`,
+    html: `
+      <div style="font-family:system-ui,-apple-system,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#18181b">
+        <h2 style="color:#16a34a;margin:0 0 8px">Your report is ready</h2>
+        <p style="margin:0 0 20px;color:#52525b;font-size:14px">Seclayer finished scanning <strong style="color:#18181b">${host}</strong>.</p>
+        <div style="display:flex;gap:12px;margin:0 0 20px">
+          <div style="flex:1;background:#f4f4f5;border:1px solid #e4e4e7;border-radius:8px;padding:14px;text-align:center">
+            <div style="font-size:28px;font-weight:700;line-height:1;color:#18181b">${grade}</div>
+            <div style="font-size:11px;color:#71717a;margin-top:4px">GRADE</div>
+          </div>
+          <div style="flex:1;background:#f4f4f5;border:1px solid #e4e4e7;border-radius:8px;padding:14px;text-align:center">
+            <div style="font-size:28px;font-weight:700;line-height:1;color:#18181b">${score}</div>
+            <div style="font-size:11px;color:#71717a;margin-top:4px">SCORE / 100</div>
+          </div>
+        </div>
+        <p style="margin:0 0 20px;font-size:14px;line-height:1.5">${countLine}</p>
+        <a href="${reportUrl}" style="display:inline-block;background:#16a34a;color:#fff;text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:600">Read the full report</a>
+        <p style="margin:20px 0 0;font-size:12px;color:#71717a;line-height:1.5">This link opens without signing in, so it works on any device. Anyone with the link can read this one report — you can revoke it from the report page.</p>
+        <p style="margin:12px 0 0;font-size:12px;color:#71717a;word-break:break-all">${reportUrl}</p>
+      </div>`,
+  };
+}
