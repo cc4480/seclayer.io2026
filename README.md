@@ -7,8 +7,10 @@
 > (`VibeScan-Enterprise-Build`, deployed at secscan.us) with no shared git
 > history. Seclayer is the higher tier: everything SecScan does, plus real
 > nmap port/service scanning and the red-team attack modules in
-> `server/redTeam/`. Data lives in SQLite on a Railway volume
-> (`DB_PATH=/data/seclayer.sqlite`), not Postgres.
+> `server/redTeam/`. Production runs on **Postgres** (`DATABASE_URL`, three
+> replicas on Railway); SQLite (`DB_PATH`) is the local-dev / single-node
+> fallback only — the process refuses to boot in production without
+> `DATABASE_URL` (see `server/db.ts`).
 >
 > The two launch separately. Never deploy one to the other's Railway service.
 
@@ -44,10 +46,11 @@ signature-confirmed for high precision (low false positives).
 
 - **Frontend:** React 19 + Vite 6 + Tailwind 4
 - **Backend:** Express 4 (TypeScript via tsx), better-sqlite3
-- **Auth:** passwordless magic-link sign-in with httpOnly session cookies; MCP
-  API keys are shown once at creation and stored only as a SHA-256 hash
+- **Auth:** passwordless sign-in via a one-time emailed code, with httpOnly
+  session cookies; MCP API keys are shown once at creation and stored only as
+  a SHA-256 hash
 - **AI:** DeepSeek (OpenAI-compatible API), with local fallback summaries
-- **Email:** Resend (magic links); console fallback in dev
+- **Email:** Resend (one-time sign-in codes); console fallback in dev
 - **Payments:** Stripe Checkout + signed webhooks
 
 ## Run locally
@@ -60,9 +63,10 @@ cp .env.example .env.local   # optional: configure keys
 npm run dev                  # http://localhost:3000
 ```
 
-With no keys set, the app still runs: AI uses local summaries, magic-link URLs
+With no keys set, the app still runs: AI uses local summaries, sign-in codes
 are printed to the server console (and returned to the dev UI), and credit
-purchases are disabled.
+purchases are disabled. No `DATABASE_URL`, no problem either — outside
+production the app falls back to a local SQLite file.
 
 ## Scripts
 
@@ -80,13 +84,14 @@ See [.env.example](.env.example). Key variables:
 |----------|---------|
 | `NODE_ENV` | `production` enables Secure cookies, HSTS, trust-proxy, static serving |
 | `PORT` | Listen port (default 3000) |
-| `APP_URL` | Public base URL (magic-link + checkout redirect URLs) |
-| `DB_PATH` | SQLite file path (default `./data.sqlite`) |
+| `APP_URL` | Public base URL (sign-in code + checkout redirect URLs) |
+| `DATABASE_URL` | Postgres connection string. **Required in production** — the process refuses to boot on the SQLite fallback in `NODE_ENV=production` (see `server/db.ts`). Schema is applied automatically at boot from `server/pg/schema.sql`. |
+| `DB_PATH` | SQLite file path (default `./data.sqlite`), used only when `DATABASE_URL` is unset — local dev, tests, or a deliberate single-node deploy |
 | `ENABLE_BROWSER_RENDERING` | `true` to crawl SPAs via headless Playwright (opt-in; install Playwright separately) |
 | `ENABLE_TARGET_SCREENSHOT` | `true` to capture the target's landing page and show it on the report's Overview tab. Uses the same headless browser but is a **separate** flag, so a visual can be had without a full JS crawl. Silently produces no screenshot when unset. |
 | `DEEPSEEK_API_KEY` | Enables AI reports (else local summaries) |
 | `ENCRYPTION_KEY` | 32-byte base64 AES-256-GCM key. Required to store a user's personal DeepSeek key (Settings → bring your own key), which is sealed at rest. Without it that feature returns 503; everything else is unaffected. Generate: `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"` |
-| `RESEND_API_KEY` / `EMAIL_FROM` | Sends magic-link emails (else console) |
+| `RESEND_API_KEY` / `EMAIL_FROM` | Sends sign-in code emails (else console) |
 | `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` | Enables credit purchases |
 
 Point your Stripe webhook at `POST /api/webhooks/stripe`
@@ -96,9 +101,11 @@ Point your Stripe webhook at `POST /api/webhooks/stripe`
 
 ```bash
 docker build -t seclayer .
-docker run -p 3000:3000 --env-file .env.local -v seclayer-data:/data seclayer
+docker run -p 3000:3000 --env-file .env.local -e DATABASE_URL=postgres://... seclayer
 ```
 
-The container exposes a `/api/system/health` healthcheck and stores its SQLite
-database on the `/data` volume. CI (`.github/workflows/ci.yml`) runs typecheck,
-tests, and build on every push.
+The container exposes a `/api/system/health` healthcheck and runs in
+`NODE_ENV=production`, which requires `DATABASE_URL` (Postgres) — it will not
+silently fall back to SQLite. See [DEPLOY.md](DEPLOY.md) for the full
+checklist, including the single-node SQLite fallback. CI
+(`.github/workflows/ci.yml`) runs typecheck, tests, and build on every push.

@@ -1,13 +1,21 @@
 # Deploying Seclayer
 
-A single Node process serves both the API and the prebuilt React client. State
-lives in a SQLite file that must be on a persistent volume. This is the
-practical checklist for standing it up.
+A Node process (or several — the app is multi-replica-safe, see below) serves
+both the API and the prebuilt React client. **Production state lives in
+Postgres** (`DATABASE_URL`); the app refuses to boot in
+`NODE_ENV=production` without it (see `server/db.ts`). SQLite (`DB_PATH`) is
+the fallback for local dev, tests, and a deliberate single-node deploy only.
+This is the practical checklist for standing it up.
 
 ## 1. Prerequisites
 
 - Node.js 22 (matches the Docker image and CI).
-- A persistent volume for the SQLite database.
+- A Postgres database (Railway Postgres, Supabase, or any Postgres 13+)
+  reachable via `DATABASE_URL`. Schema is applied automatically at boot from
+  `server/pg/schema.sql` — no manual migration step for a fresh database.
+  (Only skip this and use the SQLite fallback if you genuinely want a
+  single-node, non-`production` deploy — then you need a persistent volume
+  for the SQLite file instead.)
 - The third-party keys below (email is mandatory in production; the rest gate
   optional features).
 
@@ -21,15 +29,16 @@ if a production-critical value is missing (see `server/config.ts`).
 | Variable | Purpose |
 |---|---|
 | `NODE_ENV=production` | Enables Secure cookies, HSTS, `trust proxy`, and serving the prebuilt `dist/` instead of the Vite dev server. |
-| `APP_URL` | Public base URL (e.g. `https://seclayer.app`). Magic-link sign-in and Stripe redirect URLs are built from this trusted host, never the request `Host` header. |
-| `RESEND_API_KEY` | Resend key for magic-link sign-in emails. Without it, production refuses to boot (users could never receive a login link). |
+| `APP_URL` | Public base URL (e.g. `https://seclayer.app`). Sign-in and Stripe redirect URLs are built from this trusted host, never the request `Host` header. |
+| `DATABASE_URL` | Postgres connection string. Production **refuses to boot** without it — the SQLite fallback would otherwise serve an empty, ephemeral database and look healthy while doing it (`server/db.ts`, `assertNotSilentlyFallingBack`). Schema self-applies at boot; multi-replica safe (a transaction-scoped advisory lock serializes concurrent boots). |
+| `RESEND_API_KEY` | Resend key for sign-in emails (one-time code, not a link). Without it, production refuses to boot (users could never receive a code). |
 
 ### Recommended / feature-gating (optional)
 
 | Variable | Default / when unset | Purpose |
 |---|---|---|
 | `PORT` | `3000` | Listen port (most platforms inject this). |
-| `DB_PATH` | `./data.sqlite` | SQLite file path. Point at the persistent volume (the Docker image uses `/data/seclayer.sqlite`). |
+| `DB_PATH` | `./data.sqlite` | SQLite file path, used only when `DATABASE_URL` is unset (local dev / single-node fallback). Point at a persistent volume if you deploy this way (the Docker image uses `/data/seclayer.sqlite`). |
 | `EMAIL_FROM` | `Seclayer <onboarding@resend.dev>` | Sender identity for outbound email. |
 | `DEEPSEEK_API_KEY` | local summaries | Enables AI-written reports; falls back to built-in local summaries when unset. |
 | `ENCRYPTION_KEY` | BYO-key storage disabled | 32-byte base64 key (AES-256-GCM) that seals a user's own DeepSeek API key at rest. A user's key is a live billable third-party credential, so without this the endpoint refuses to store one (503) rather than writing cleartext to the `users` table. Rows written before this existed are read as plaintext and re-sealed the next time the user saves. Generate with `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`; rotating it invalidates stored keys (users re-enter them). |
@@ -39,7 +48,7 @@ if a production-critical value is missing (see `server/config.ts`).
 | `ENABLE_BROWSER_RENDERING` | off | `true` renders SPAs with headless Chromium during the crawl, surfacing client-rendered links and XHR endpoints static parsing cannot see. |
 | `ENABLE_TARGET_SCREENSHOT` | off | `true` captures the target's landing page and shows it on the report's Overview tab. A **separate** flag from the one above, on purpose: a landing-page visual is much cheaper than a full JS crawl. Chromium ships in the image either way, so neither flag needs anything installed — but with both unset the browser is dead weight. Unset produces no screenshot and no error. |
 | `NMAP_SCAN_TIMEOUT_MS` | `1800000` (30 min) | Hard timeout for a single Network Reconnaissance scan (see §7). Resource ceiling, not a scope limit. |
-| `ALLOW_MISSING_EMAIL_PROVIDER` | off | Lets production boot without `RESEND_API_KEY`. Sign-in links are logged to the console AND returned directly in the login modal as a one-click "open sign-in link" button — no inbox or log-reading needed. Auth itself is unchanged (still a real, single-use, 15-minute token) — only safe on a private, single-operator instance (e.g. local Docker), since anyone who can reach the login form gets handed the token directly instead of it going to the target inbox. |
+| `ALLOW_MISSING_EMAIL_PROVIDER` | off | Lets production boot without `RESEND_API_KEY`. The sign-in code is logged to the console AND returned directly to the login modal, which displays it inline ("Dev mode — your code is ...") — no inbox or log-reading needed. Auth itself is unchanged (still a real, single-use, 10-minute 6-digit code) — only safe on a private, single-operator instance (e.g. local Docker), since anyone who can reach the login form gets handed the code directly instead of it going to the target inbox. |
 
 ### Do NOT set in production
 
@@ -55,14 +64,18 @@ control, persists the DB on a named volume, and passes the `NET_RAW`
 capability that upgrades Network Reconnaissance to full SYN + OS scans — see §7):
 
 ```bash
-cp .env.example .env   # fill in at least APP_URL + RESEND_API_KEY
+cp .env.example .env   # fill in at least APP_URL + RESEND_API_KEY + DATABASE_URL
 docker compose up -d --build
 ```
 
-No `RESEND_API_KEY` yet? For local-only use you can set
-`ALLOW_MISSING_EMAIL_PROVIDER=true` in `.env` instead — the login modal then
-shows an "open sign-in link" button directly, no email or log-reading needed
-(see the table above).
+The image runs `NODE_ENV=production`, so it needs a real `DATABASE_URL`
+(Postgres) — it will not silently fall back to SQLite. For a local-only,
+single-node run without Postgres, set `NODE_ENV=development` in `.env`
+instead; data then persists to the SQLite file on the `seclayer-data` volume.
+
+No `RESEND_API_KEY` yet? You can set `ALLOW_MISSING_EMAIL_PROVIDER=true` in
+`.env` instead — the login modal then displays the sign-in code inline, no
+email or log-reading needed (see the table above).
 
 **Via plain `docker run`:**
 
@@ -70,10 +83,10 @@ shows an "open sign-in link" button directly, no email or log-reading needed
 docker build -t seclayer .
 docker run -d --name seclayer \
   -p 3000:3000 \
-  -v seclayer-data:/data \
   -e NODE_ENV=production \
   -e APP_URL=https://your-host \
   -e RESEND_API_KEY=re_... \
+  -e DATABASE_URL=postgres://user:pass@host:5432/seclayer \
   --cap-add=NET_RAW \
   # optional: DEEPSEEK_API_KEY, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET
   # --cap-add=NET_RAW upgrades Network Reconnaissance to SYN + OS scans; it is
@@ -82,23 +95,31 @@ docker run -d --name seclayer \
   seclayer
 ```
 
-The image is multi-stage (build → pruned runtime), runs `node dist/server.cjs`,
-persists the DB on the `/data` volume, and has a `HEALTHCHECK` wired to the
-endpoint below.
+The image is multi-stage (build → pruned runtime) and runs `node
+dist/server.cjs`, with a `HEALTHCHECK` wired to the endpoint below. State
+lives in the Postgres database above, not in the container — no volume is
+needed for `DATABASE_URL` deploys. Running without `DATABASE_URL` instead
+(`-e NODE_ENV=development`, single-node only) needs `-v seclayer-data:/data`
+to persist the SQLite file across restarts.
 
 ### Railway
 
-`railway.json` pins the Dockerfile builder and wires `/api/system/health` as
-Railway's own healthcheck. Railway's builder does not support a Dockerfile
-`VOLUME` instruction (rejects the build outright) — this repo's Dockerfile
-intentionally omits it and relies on an attached Railway Volume instead, same
-as the Docker/compose flows above already do with an explicit `-v`.
+There is no `railway.json` in this repo (one existed briefly but was never
+actually applied — Railway reported `railwayConfigFile: null` — and was
+deleted; see "Railway configuration" below). Build/deploy settings — builder,
+healthcheck path, replica count — are set on the service itself, in the
+Railway dashboard or via `railway api`, not from a file here. Railway's
+builder also does not support a Dockerfile `VOLUME` instruction (rejects the
+build outright); this repo's Dockerfile intentionally omits it.
+
+Add a Railway Postgres to the project first (**Postgres is what production
+actually runs on** — see the top of this file):
 
 ```bash
 npx @railway/cli login          # opens a browser
 npx @railway/cli init --name seclayer
+npx @railway/cli add --database postgres         # provisions a Postgres service in this project
 npx @railway/cli up --ci --service seclayer      # first build (will crash-loop until env vars below are set — expected)
-npx @railway/cli volume add -m /data             # persistent SQLite volume
 npx @railway/cli domain                          # generates a *.up.railway.app URL
 npx @railway/cli variable set "APP_URL=https://<the-generated-domain>" --skip-deploys
 npx @railway/cli variable set "FREE_MODE=true" --skip-deploys   # or leave unset; defaults on without Stripe
@@ -106,6 +127,28 @@ echo -n "re_..." | npx @railway/cli variable set RESEND_API_KEY --stdin --skip-d
 echo -n "sk-..." | npx @railway/cli variable set DEEPSEEK_API_KEY --stdin --skip-deploys
 npx @railway/cli redeploy --yes
 npx @railway/cli service source connect --repo <owner>/<repo> --branch main   # auto-deploy on future pushes
+```
+
+Set `DATABASE_URL` on the `seclayer` service to the Postgres service's
+connection string — in the dashboard's Variables tab, reference it as
+`${{Postgres.DATABASE_URL}}` (confirm the exact reference variable name under
+the Postgres service's own Variables tab; it is not necessarily set
+automatically just by both services existing in the same project).
+
+Once `DATABASE_URL` is set, schema applies itself on boot (`server/pg/schema.sql`)
+— nothing to migrate by hand for a fresh database, and it's safe across
+however many replicas boot at once (a transaction-scoped advisory lock
+serializes them). This is also what makes the service safe to scale to
+multiple replicas (see "Railway configuration" below) — SQLite on a Railway
+Volume cannot be shared across replicas at all.
+
+Deploying single-node on SQLite instead is still possible (skip the Postgres
+step, don't set `DATABASE_URL`, and keep `NODE_ENV` off `production` — or see
+`server/db.ts` if you genuinely want a production single-node SQLite deploy).
+That path needs a persistent volume:
+
+```bash
+npx @railway/cli volume add -m /data             # persistent SQLite volume
 ```
 
 Note: on Git Bash (Windows), a leading `/` in `--mount-path`/`-m` gets
@@ -205,14 +248,19 @@ or a bare local `npm run dev` checkout without nmap installed.
 
 ## 8. Pre-production checklist
 
-- [ ] Required env vars set (`NODE_ENV`, `APP_URL`, `RESEND_API_KEY`); optional
-      keys set for any feature you want live (AI reports, payments).
-- [ ] `DB_PATH` points at a persistent volume that survives redeploys.
-- [ ] Database backups: automated `VACUUM INTO` snapshots run on a cadence
-      (default daily, keeping 7) to `BACKUP_DIR` (defaults next to `DB_PATH`).
-      Point `BACKUP_DIR` at durable storage and/or copy snapshots off-box
-      (they are single self-contained files); set `BACKUP_ENABLED=false` to
-      opt out.
+- [ ] Required env vars set (`NODE_ENV`, `APP_URL`, `RESEND_API_KEY`,
+      `DATABASE_URL`); optional keys set for any feature you want live (AI
+      reports, payments).
+- [ ] Database backups: with `DATABASE_URL` set, the app's own SQLite
+      snapshotter turns itself off (it would only be backing up a stale,
+      unused file) — backups are the Postgres provider's job instead (e.g.
+      Railway Postgres PITR, or `pg_dump`). Confirm PITR/backups are actually
+      enabled on the database, not just assumed. *(Only relevant if you're
+      deliberately running the SQLite fallback: automated `VACUUM INTO`
+      snapshots then run on a cadence — default daily, keeping 7 — to
+      `BACKUP_DIR`, which should point at durable, off-box storage; set
+      `BACKUP_ENABLED=false` to opt out, and `DB_PATH` must point at a
+      persistent volume that survives redeploys.)*
 - [ ] Behind TLS + a proxy/load balancer (the app sets `trust proxy` and
       derives Secure cookies / client IP from `X-Forwarded-*` in production).
 - [ ] Stripe webhook configured (if payments are enabled).

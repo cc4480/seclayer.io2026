@@ -6,9 +6,11 @@
 # belt-and-suspenders (it also survives hardened cap-drop bases). Omit it and
 # nmap still works — the app detects the missing raw-socket capability at boot
 # and runs a TCP connect scan instead (no OS detection). NET_ADMIN is NOT
-# needed. Copy .env.example to .env and fill in at least APP_URL +
-# RESEND_API_KEY before `docker compose up` (the app refuses to boot in
-# production without them — see server/config.ts).
+# needed. Copy .env.example to .env and fill in at least APP_URL,
+# RESEND_API_KEY, and DATABASE_URL before `docker compose up` — the image runs
+# NODE_ENV=production, so it refuses to boot without them (see server/config.ts,
+# server/db.ts). No DATABASE_URL yet? Set NODE_ENV=development in .env instead
+# to run on the SQLite fallback (data persists to the seclayer-data volume below).
 services:
   seclayer:
     build: .
