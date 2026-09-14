@@ -1,10 +1,31 @@
 # Seclayer — As-Built Master Blueprint
 
 > Closed-source, pay-per-scan black-box penetration-testing SaaS + MCP server for vibe coders and developers.
-> Documents what is **actually built** as of July 2026, reconstructed from live product output + the Seclayer PRD v1.0 + development history.
+> Documents what is **actually built**, reconstructed from live product output + the Seclayer PRD v1.0 + development history.
 > **`[VERIFY]`** = inferred from screenshots, Claude Code must confirm against repo. **`[BUG]`** = known defect observed in live output, needs fixing.
 >
-> **Reconciled against repo commit `8539ad1` (2026-07-11).** `[VERIFIED ✓]` markers below were confirmed against the code; the biggest change since reconstruction: the active-exploitation modules (RED_TEAM / API_SEC) **now fire and are covered by 138 passing evidence-backed tests** — see §4 and §2a.
+> **Refreshed against repo commit `203eba2` (2026-09-14).** The body below §0 was originally reconciled against `8539ad1` (2026-07-11); ~230 commits have landed since, so read **§0.1 "What changed since the July reconciliation"** first — it supersedes the older architecture and module claims wherever they conflict. The `[VERIFIED ✓]` markers in the body were true at `8539ad1` and mostly still hold; §0.1 calls out the ones that have moved.
+
+---
+
+## 0.1 What changed since the July reconciliation `[VERIFIED ✓ — 203eba2, 2026-09-14]`
+
+The July body (§1–§11) is still broadly accurate on the scan engine, evidence tiers, and ownership gate. But four areas have materially changed and this section is authoritative where it conflicts with the older text:
+
+**A. Infrastructure — no longer single-node SQLite (supersedes §9).**
+- **Postgres, not SQLite, in production.** seclayer.app runs on its own Railway Postgres; the app *refuses to boot in production* without `DATABASE_URL` (`server/db.ts`, `assertNotSilentlyFallingBack`). SQLite remains only the local-dev / test / single-node fallback. The Postgres schema self-applies at boot from `server/pg/schema.sql` under a transaction-scoped advisory lock, so an environment stands up from code with no manual migration.
+- **Three replicas, not one.** The single-node ceiling in §9 is gone. What made that safe: a **database-backed shared rate limiter**, a **load-aware distributed scan queue** (claims exactly once across workers), **DB-backed live scan events** (the ticker is pollable from any replica), and **leased scan recovery** (a replica restart no longer refunds every other replica's in-flight scans). See `docs/VERIFICATION.md` for the per-item proof commands.
+
+**B. Auth — one-time emailed code, not magic-link (supersedes §9's auth line).** Passwordless sign-in now issues a 6-digit, single-use, 10-minute code by email (`server/routes/auth.ts`, `server/loginCode.ts`), plus Google sign-in. httpOnly session cookies unchanged. ("Magic-link" survives only in older code comments.)
+
+**C. Active tier — 15 probes fire, not 8 (extends §2 / §2a).** The RED_TEAM + API_SEC set has grown by an "aggressive" tier under `server/aggressive/`. Live-verified end-to-end via `test-targets/validate-probes.mjs` (**15/15 PROVEN** against `vulnerable-app.mjs`, **0 false positives** against `hardened-app.mjs`):
+  - Original 8: SQLi, reflected XSS, OS command injection, reflected SSRF, blind out-of-band SSRF, GraphQL introspection, two-identity BOLA, discovered-parameter fuzzer.
+  - Added (in the validated 15): **SSTI**, **Path Traversal / LFI**, **Open Redirect**, **CRLF / header injection**, **CORS misconfiguration**, **XXE (out-of-band)**, **NoSQL injection**, and an exposed-user-object API check. A **host-header injection** module (`server/aggressive/hostHeaderInjection.ts`) also exists but is not part of that 15-probe matrix.
+  - Many new *passive* detection modules also landed (JWT weakness, source-map exposure, Firebase/BaaS, prototype pollution, LLM-endpoint, auth rate-limit, webhook-signature, DOM/stored XSS, weak-token, price-manipulation, credential-chain, OpenAPI discovery) and a **Network Reconnaissance (nmap)** feature with its own report tab + XML export.
+
+**D. Monetization / monitoring specifics (updates §7).** Signup grant is **5 credits** (`server/db.ts`, `// 5 signup credits` — resolves the §7 `[VERIFY]`). Continuous monitoring runs on a **user-chosen cadence** (daily / weekly / monthly + time-of-day, `server/schedule.ts`), *not* the risk-adaptive A=14d/B=7d/D=3d cadence §7 describes as planned. Stripe credit-granting is still webhook-signature-gated.
+
+**Status of the July "top open tasks" (§10):** #1 (verify active modules fire) — **done**, and extended to 15. The residual score-authority prose guard (§5) and cross-repo VibeScan scoring consolidation remain open. Docs drift (README/DEPLOY said SQLite + magic-link) was **fixed 2026-09-14**.
 
 ---
 
@@ -138,25 +159,29 @@ Original: score box `31/F` but AI prose says "85/100" — contradictory. **Curre
 ## 7. Monetization (as-built per PRD)
 
 - **Credits** — 1 credit = 1 scan (dashboard, monitor tick, or MCP). Observed credit balance in UI (e.g. "Credits: 82").
-- **Stripe packs** — single / 5-pack / 20-pack; credits granted only by a **signature-verified** webhook (`constructEvent`, `stripe.ts:82`) on `checkout.session.completed`, never on checkout click `[VERIFIED ✓ — signature]`. *(Idempotency of credit-granting: not clearly located — verify a duplicate webhook can't double-grant.)*
-- **5 free credits** on signup `[VERIFY]`
-- **Continuous Monitoring** — $129/yr per URL: risk-adaptive cadence (A=14d, B/C=7d, D/F=3d), CVE+EPSS alerts, regression detection, cert-expiry alerts `[VERIFY implemented vs planned]`
+- **Stripe packs** — single / 5-pack / 20-pack; credits granted only by a **signature-verified** webhook (`constructEvent`) on `checkout.session.completed`, never on checkout click `[VERIFIED ✓ — signature]`. **Idempotency confirmed** `[VERIFIED ✓ — 203eba2]`: `hasStripeSession()` checks `SELECT 1 FROM transactions WHERE stripeSessionId = ?` before granting, so a retried/duplicate webhook cannot double-grant.
+- **5 free credits** on signup `[VERIFIED ✓ — 203eba2]` (`server/db.ts`, `INSERT INTO users (…credits…) … 5` + a `tx-signup-` transaction row).
+- **Continuous Monitoring** — scheduled re-scans on a **user-chosen cadence** (daily / weekly / monthly + time-of-day; `server/schedule.ts`, `server/monitorWorker.ts`), with regression diffing and alerting. **Note:** this differs from the PRD's planned *risk-adaptive* cadence (A=14d/B=7d/D=3d) — as-built is user-selected, not grade-derived. `[VERIFIED ✓ — 203eba2, differs from PRD]`
 
 ---
 
 ## 8. Developer / MCP surface (as-built per PRD)
 
 - **`POST /api/mcp/scan`** `[VERIFIED ✓]` (`server.ts:553`) — API-key auth (validate + deduct 1 credit), SSRF pre-check on the target before spending, runs the full diagnostic + AI pipeline (incl. the OOB collaborator), returns the same report quality as the dashboard. Active probes gated by the same `isDomainVerified` check.
-- API keys shown once at creation, stored hashed + masked preview `[VERIFY]`
+- API keys shown once at creation, stored as a **SHA-256 hash** with a **masked preview** for display `[VERIFIED ✓ — 203eba2]` (`server/db.ts` via `dbCrypto.hashToken` / `maskKey`).
 
 ---
 
-## 9. System architecture (as-built per PRD)
+## 9. System architecture
 
-- Single Express process serves API + built client; in-process job worker (`queued → scanning → analyzing → complete`); no external queue `[VERIFY]`
-- **SQLite (WAL)** single file, persistent volume; additive column migrations `[VERIFY]`
-- Auth: passwordless magic-link, SHA-256 hashed tokens, httpOnly session cookie `[VERIFY]`
-- Single-node ceiling (in-memory rate limiter, setInterval scheduler) — accepted tradeoff per PRD
+> ⚠️ **Superseded by §0.1.A/B.** The list below described the original single-node SQLite design and is kept for history. Current production reality:
+
+- **Postgres in production** (`DATABASE_URL`, TLS, pooled), schema self-applied at boot from `server/pg/schema.sql`; **SQLite is dev/single-node fallback only** and production refuses to boot on it. `[VERIFIED ✓ — 203eba2]`
+- **Three Railway replicas**, each an Express process serving API + built client with an in-process job worker (`queued → scanning → analyzing → complete`). No external queue broker — coordination is through Postgres: DB-backed shared rate limiter, load-aware exactly-once scan claiming, DB-backed live scan-event feed, and lease-based crash recovery. `[VERIFIED ✓ — 203eba2]`
+- Auth: passwordless **one-time emailed 6-digit code** (single-use, 10-min TTL) + Google sign-in, SHA-256 hashed tokens, httpOnly session cookie. `[VERIFIED ✓ — 203eba2]`
+- ~~Single-node ceiling (in-memory rate limiter, setInterval scheduler)~~ — **no longer true**; the single-node limits were removed to reach the three-replica fleet (see §0.1.A and `docs/VERIFICATION.md`).
+
+*Original design (pre-cutover, for history):* single Express process; SQLite (WAL) single file on a persistent volume with additive column migrations; passwordless magic-link auth; single-node ceiling accepted per PRD.
 
 ---
 
@@ -164,7 +189,7 @@ Original: score box `31/F` but AI prose says "85/100" — contradictory. **Curre
 
 In priority order — updated to the verified state at `8539ad1`:
 
-1. ~~**Verify active-exploitation modules actually fire.**~~ **DONE `[VERIFIED ✓]`** — all eight modules fire with PROVEN evidence receipts against `test-targets/vulnerable-app.mjs`; 138 passing tests. Was the #1 unknown.
+1. ~~**Verify active-exploitation modules actually fire.**~~ **DONE `[VERIFIED ✓]`** — and since extended to **15 probes**, re-verified live at `203eba2` (see §0.1.C). All fire with PROVEN evidence receipts against `test-targets/vulnerable-app.mjs`. Was the #1 unknown.
 2. **Close the residual score-authority gap** — the displayed score is already deterministic (recalculated on read), but add the §5 guard: inject the deterministic score into the prompt and forbid the model from stating its own number in prose; consider storing the deterministic score in the `score` field too. → SECLAYER-FIXES.md
 3. **Calibration + count bugs (2, 3, 5, 6) need a live scan / VibeScan comparison** — several have code-level mitigations already (header clamp, single-source posture counts); confirm against real targets and reconcile scoring with VibeScan.
 4. **DeepSeek model string confirmed `[VERIFIED ✓]`** — explicit `deepseek-v4-pro` via env, no legacy aliases in code.
@@ -173,6 +198,8 @@ In priority order — updated to the verified state at `8539ad1`:
 ---
 
 ## 11. Verified against commit `8539ad1`, live-verified through `4938769` (2026-07-11/12)
+
+> ⚠️ **Historical record of the July reconciliation.** Item 1 below states "SQLite WAL, magic-link auth confirmed" — both were true then but are **no longer current** (now Postgres + one-time-code auth; see §0.1.A/B). Kept as-is to record what was verified at the time.
 
 This section was the reconciliation task; it is now closed. Static reconciliation was done against `8539ad1`; the live end-to-end verifications in §4 were then carried out on the running app through `4938769`. Results:
 

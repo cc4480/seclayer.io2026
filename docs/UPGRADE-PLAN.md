@@ -9,12 +9,23 @@ fast on.
 
 ## Part 1 — Codebase refactor
 
+> **Status note (2026-09-14):** this refactor is **not started** — it remains an
+> aspirational plan. The line counts in the table below are from July and are now
+> **stale**; several flagged files have *grown* (e.g. `db.ts` 501 → ~1120,
+> `findings.ts` 297 → ~640, `paramFuzzer.ts` 367 → ~620) as the aggressive probe
+> tier and Postgres backend landed. The suite is now **760 passing** (not 200).
+> A Sept audit judged the code healthy and this split **low priority** — the
+> 200-line threshold is a smell, not a defect, and the risk of refactoring
+> money/auth paths (`db.ts`) on a live 3-replica prod system outweighs the
+> benefit. Do it incrementally, per-file, tests green, only when a file is
+> genuinely impeding work.
+
 **Principle:** split by *responsibility*, not to hit a number. ~200 lines is a
 smell, not a law. Cohesive data tables and one-job modules can be longer; tangled
-multi-purpose files should split even under 200. Tests (`npm test`, 200 passing)
-stay green after each step — refactor one module, re-run, commit.
+multi-purpose files should split even under 200. Tests stay green after each step
+— refactor one module, re-run, commit.
 
-### Files over 200 lines and the proposed split
+### Files over 200 lines and the proposed split *(line counts stale — see status note above)*
 
 | File | LOC | Plan | Priority |
 |------|----:|------|:--------:|
