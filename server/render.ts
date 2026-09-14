@@ -199,8 +199,16 @@ export async function captureScreenshot(
       if (hostLooksInternal(landed.hostname)) return null;
     } catch {}
 
-    // Brief settle for above-the-fold content, capped so a slow page can't hang.
-    await page.waitForTimeout(Math.min(1500, Math.floor(timeoutMs / 4)));
+    // Settle time for above-the-fold content — long enough for a client-rendered
+    // SPA to fire its initial API call(s) and re-render before the shot, capped
+    // so a slow page can't hang. 1500ms was too thin: a target whose first
+    // render depends on an auth/session check (common for SPAs that gate even
+    // the public landing page) could still be mid-request at that point, and
+    // the resulting screenshot would show a transient loading/error state as if
+    // it were the page's real content. 3000ms stays comfortably under the
+    // quarter-of-timeoutMs ceiling at the 15s default, so it's the binding cap
+    // in practice, not the ceiling.
+    await page.waitForTimeout(Math.min(3000, Math.floor(timeoutMs / 4)));
 
     // Viewport-only JPEG (not fullPage) to bound the encoded size.
     const buf: Buffer = await page.screenshot({ type: "jpeg", quality: 55, fullPage: false });
