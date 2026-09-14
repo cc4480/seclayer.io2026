@@ -45,3 +45,95 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         continue-on-error: true
         run: node scripts/indexnow-ping.mjs https://seclayer.app
+
+  # The main suite runs on SQLite, so the Postgres adapter's own integration
+  # tests (server/pg/pgDb.integration.test.ts) skip themselves there — including
+  # the one that proves deductCredits never double-spends the last credit under
+  # concurrency, which is the property that matters most on the real backend.
+  # This job gives them a real Postgres so they actually run.
+  postgres-integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: seclayer_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/seclayer_test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Apply Postgres schema + run integration tests
+        run: |
+          set -euo pipefail
+          # A throwaway key so the BYOK seal/open path in the suite can run.
+          export ENCRYPTION_KEY="$(openssl rand -base64 32)"
+          node --import tsx scripts/apply-pg-schema.ts
+          node --import tsx --test server/pg/pgDb.integration.test.ts
+
+  # The unit suite proves the scanner stays quiet on clean input and fires on
+  # planted flaws in isolation, but nothing in CI drives the FULL pipeline end
+  # to end. These three harnesses do, against the bundled reference targets:
+  #   - detection-check: 10 planted passive flaws are all found (false negatives)
+  #   - validate-probes: every active red-team/API probe fires with a PROVEN
+  #     receipt against the intentionally-vulnerable target
+  #   - validate-no-fp:  the hardened target yields ZERO actionable findings
+  # Together they catch a regression that quietly stops the product working
+  # while every unit test still passes.
+  scanner-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Detection check (false negatives — no server needed)
+        run: SCAN_DEV_ALLOW_HOSTS=127.0.0.1 node --import tsx scripts/detection-check.ts
+      - name: Boot targets + dev server, run probe + false-positive harnesses
+        env:
+          NODE_ENV: development
+          PORT: '3000'
+          DEV_SKIP_AUTH: 'true'
+          DEV_SKIP_DOMAIN_VERIFICATION: 'true'
+          SCAN_DEV_ALLOW_HOSTS: 127.0.0.1:4100,127.0.0.1:4101
+          OOB_BASE_URL: http://127.0.0.1:3000
+          APP_URL: http://127.0.0.1:3000
+        run: |
+          set -euo pipefail
+          node test-targets/vulnerable-app.mjs 4100 & VA=$!
+          node test-targets/hardened-app.mjs 4101 & HA=$!
+          node --import tsx server.ts & SRV=$!
+          # Tear everything down whatever happens, so the job can't hang on exit.
+          trap 'kill $VA $HA $SRV 2>/dev/null || true' EXIT
+          # Wait for the dev server to answer its health probe (targets are tiny
+          # and up effectively immediately).
+          for i in $(seq 1 45); do
+            if curl -sf http://127.0.0.1:3000/api/system/health >/dev/null 2>&1; then
+              echo "dev server healthy after ${i}s"; break
+            fi
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:3000/api/system/health >/dev/null || { echo "dev server never became healthy"; exit 1; }
+          echo "--- validate-probes (every active probe must fire) ---"
+          SECLAYER_BASE=http://127.0.0.1:3000 TARGET_URL=http://127.0.0.1:4100 node test-targets/validate-probes.mjs
+          echo "--- validate-no-fp (hardened target must be clean) ---"
+          SECLAYER_BASE=http://127.0.0.1:3000 TARGET_URL=http://127.0.0.1:4101 node test-targets/validate-no-fp.mjs

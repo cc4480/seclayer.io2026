@@ -18,11 +18,11 @@ import {
 } from './loginCode.js';
 import { PostgresDb } from './pg/pgDb.js';
 import type { PgPool } from './pg/pgClient.js';
-
-// How long a scan's lease may go unrefreshed before recovery treats its owner
-// as dead. Comfortably longer than the heartbeat interval so a slow tick, a
-// long probe or a brief database blip never orphans a healthy scan.
-export const STALE_LEASE_MS = 5 * 60 * 1000;
+// Re-exported so existing importers of `STALE_LEASE_MS` from db.js keep working.
+// It is defined in a leaf module (not here) to avoid a db.ts <-> pgDb.ts import
+// cycle — see scanLeaseConstants.ts for why.
+import { STALE_LEASE_MS } from './scanLeaseConstants.js';
+export { STALE_LEASE_MS };
 
 const DB_FILE = process.env.DB_PATH || path.join(process.cwd(), 'data.sqlite');
 

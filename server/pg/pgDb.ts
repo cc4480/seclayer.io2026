@@ -31,10 +31,15 @@ import { cleanUrl } from "../urlClean.js";
 import { toPositional } from "./pgParams.js";
 import { normalizeRow, normalizeRows } from "./pgRowCase.js";
 import type { PgPool, PgQueryable } from "./pgClient.js";
-// Type-only import (erased at runtime), so this does NOT pull server/db.js in —
-// which would instantiate SqliteDb and open the SQLite file. It only makes tsc
-// verify this adapter satisfies the same contract SqliteDb defines.
-import { STALE_LEASE_MS } from "../db.js";
+// STALE_LEASE_MS comes from a leaf module, NOT db.js. Importing it from db.js
+// created a db.ts <-> pgDb.ts value cycle, and because db.ts constructs
+// PostgresDb at load time (`export const db = createDb()`), importing pgDb.ts
+// first — as the Postgres integration tests do, with DATABASE_URL set — crashed
+// with "Cannot access 'PostgresDb' before initialization" (TDZ). The leaf breaks
+// the cycle. The `Db` type import below is type-only (erased at runtime), so it
+// does NOT pull server/db.js in (which would instantiate SqliteDb and open the
+// SQLite file); it only makes tsc verify this adapter satisfies SqliteDb's contract.
+import { STALE_LEASE_MS } from "../scanLeaseConstants.js";
 import type { Db } from "../db.js";
 
 // Every replica must contend on the SAME lock for the boot schema apply, so
