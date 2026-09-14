@@ -195,17 +195,35 @@ async function startServer() {
 
   // Resolve the session cookie to a userId for every request. Identity is
   // derived server-side from the signed session — never from client input.
+  //
+  // Wrapped in try/catch on purpose: this runs on every request, before any
+  // route, as an async app.use() middleware — in Express 4 an async
+  // middleware that rejects without calling next(err) doesn't reach the JSON
+  // error handler below or get caught by anything except the process-level
+  // unhandledRejection listener, which only logs. Unguarded, that means a
+  // thrown lookup here would leave the request hanging with no response ever
+  // sent, instead of the request failing closed as anonymous and letting
+  // requireAuth answer it with a clean 401 like any other unauthenticated
+  // request. (getSessionUserId reads a local SQLite file rather than a
+  // networked database, so this is a low-probability path today — but the
+  // fix costs nothing and the failure mode without it, a silently hung
+  // request, is worse than the bug this middleware has no reason to allow.)
   app.use(async (req, res, next) => {
-    const token = req.cookies?.[SESSION_COOKIE];
-    if (token) {
-      const userId = (await db.getSessionUserId(token));
-      if (userId) (req as any).userId = userId;
-    }
-    // Dev convenience (config.devSkipAuth, never true in production): skip the
-    // magic-link flow entirely by treating every unauthenticated request as a
-    // fixed local dev account, so the app is usable immediately while building.
-    if (!(req as any).userId && config.devSkipAuth) {
-      (req as any).userId = (await db.getOrCreateUser('dev@localhost')).id;
+    try {
+      const token = req.cookies?.[SESSION_COOKIE];
+      if (token) {
+        const userId = (await db.getSessionUserId(token));
+        if (userId) (req as any).userId = userId;
+      }
+      // Dev convenience (config.devSkipAuth, never true in production): skip
+      // the magic-link flow entirely by treating every unauthenticated
+      // request as a fixed local dev account, so the app is usable
+      // immediately while building.
+      if (!(req as any).userId && config.devSkipAuth) {
+        (req as any).userId = (await db.getOrCreateUser('dev@localhost')).id;
+      }
+    } catch (err) {
+      console.error('[server] Session lookup failed — continuing as unauthenticated:', err);
     }
     next();
   });
