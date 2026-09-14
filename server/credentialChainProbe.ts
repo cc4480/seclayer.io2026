@@ -24,30 +24,92 @@ export interface UrlKeyPair {
   key: string;
 }
 
-const URL_DECL_RE = /\b([A-Z][A-Z0-9]*)_URL\s*[=:]\s*["']?(https?:\/\/[^"'\s,}]+)["']?/g;
-const KEY_DECL_RE = /\b([A-Z][A-Z0-9]*)_(?:ANON_KEY|API_KEY|KEY)\s*[=:]\s*["']?([A-Za-z0-9_\-.]{20,})["']?/g;
+// Capture the whole NAME sitting before _URL / _KEY, then normalizeName() strips
+// any framework prefix so the pairing core is what's left. This makes
+// NEXT_PUBLIC_SUPABASE_URL, VITE_SUPABASE_URL and a bare SUPABASE_URL all pair
+// on the same "SUPABASE" core — a real Supabase app almost never writes the bare
+// form. The name is captured reluctantly up to a known suffix, so
+// VITE_SUPABASE_ANON_KEY yields NAME "VITE_SUPABASE" (→ "SUPABASE"), not "ANON".
+// PUBLISHABLE_KEY is Supabase's newer name for the anon key.
+const URL_DECL_RE = /\b([A-Z0-9_]+?)_URL\s*[=:]\s*["']?(https?:\/\/[^"'\s,}]+)["']?/g;
+const KEY_DECL_RE = /\b([A-Z0-9_]+?)_(?:ANON_KEY|API_KEY|PUBLISHABLE_KEY|KEY)\s*[=:]\s*["']?([A-Za-z0-9_\-.]{20,})["']?/g;
 
-// Pulls a same-prefix (URL, key) pair out of served content — e.g.
-// `window.SUPABASE_URL = "..."` sitting next to
-// `window.SUPABASE_ANON_KEY = "..."`. The shared prefix is what proves the
-// two belong together, rather than pairing an arbitrary URL with an
-// arbitrary key found anywhere on the page. Bounded to 3 pairs.
+// Build-tool prefixes that expose an env var to the client bundle. Stripped so
+// the pairing core is the service name the developer chose, not the framework's.
+const FRAMEWORK_PREFIXES = [
+  "NEXT_PUBLIC", "VITE", "REACT_APP", "EXPO_PUBLIC", "GATSBY",
+  "NUXT_PUBLIC", "VUE_APP", "PUBLIC", "NG",
+];
+
+// Strip a leading framework prefix so VITE_SUPABASE -> SUPABASE, leaving the
+// developer-chosen service name (which may itself be multi-segment) to pair on.
+function normalizeName(name: string): string {
+  for (const p of FRAMEWORK_PREFIXES) {
+    if (name.startsWith(p + "_") && name.length > p.length + 1) return name.slice(p.length + 1);
+  }
+  return name;
+}
+
+// The Supabase/PostgREST/GoTrue SDK's positional init — createClient(url, key)
+// — pairs a URL and a key with NO shared variable name at all, so the
+// name-prefix passes above never see it. Their being the first two arguments of
+// the SAME createClient call is itself the pairing signal (stronger, if
+// anything, than a shared prefix), so it carries the same false-positive bar.
+const CREATE_CLIENT_RE =
+  /createClient\s*(?:<[^>]*>)?\s*\(\s*["'](https?:\/\/[^"']+)["']\s*,\s*["']([A-Za-z0-9_\-.]{20,})["']/g;
+
+// Name a synthetic prefix for a pair discovered positionally (no variable name
+// to borrow). A *.supabase.co host is unmistakable and worth surfacing by name;
+// anything else is a generic BaaS.
+function prefixForUrl(url: string): string {
+  try {
+    return /(^|\.)supabase\.co$/i.test(new URL(url).hostname) ? "SUPABASE" : "BAAS";
+  } catch {
+    return "BAAS";
+  }
+}
+
+// Pulls (URL, key) pairs out of served content by three means, in order:
+//   1. Same-token env-var declarations — `SUPABASE_URL` next to
+//      `SUPABASE_ANON_KEY`, or their `VITE_`/`NEXT_PUBLIC_`-prefixed forms.
+//   2. The positional `createClient(url, key)` SDK call.
+// The shared token (1) or shared call site (2) is what proves the two belong
+// together, rather than pairing an arbitrary URL with an arbitrary key found
+// anywhere on the page. Deduped by (url,key) and bounded to 3 pairs.
 export function extractUrlKeyPairs(bodyText: string): UrlKeyPair[] {
   if (!bodyText) return [];
+  const seen = new Set<string>();
+  const out: UrlKeyPair[] = [];
+  const push = (prefix: string, rawUrl: string, key: string) => {
+    const url = rawUrl.replace(/\/+$/, "");
+    const dedupeKey = `${url}|${key}`;
+    if (seen.has(dedupeKey)) return;
+    seen.add(dedupeKey);
+    out.push({ prefix, url, key });
+  };
+
+  // 1. Same-core env-var pairs (framework prefix stripped before pairing).
   const urls = new Map<string, string>();
   let m: RegExpExecArray | null;
   URL_DECL_RE.lastIndex = 0;
   while ((m = URL_DECL_RE.exec(bodyText)) !== null) {
-    if (!urls.has(m[1])) urls.set(m[1], m[2]);
+    const core = normalizeName(m[1]);
+    if (!urls.has(core)) urls.set(core, m[2]);
   }
-  const out: UrlKeyPair[] = [];
   KEY_DECL_RE.lastIndex = 0;
-  while ((m = KEY_DECL_RE.exec(bodyText)) !== null) {
-    const url = urls.get(m[1]);
-    if (url) out.push({ prefix: m[1], url: url.replace(/\/+$/, ""), key: m[2] });
-    if (out.length >= 3) break;
+  while ((m = KEY_DECL_RE.exec(bodyText)) !== null && out.length < 3) {
+    const core = normalizeName(m[1]);
+    const url = urls.get(core);
+    if (url) push(core, url, m[2]);
   }
-  return out;
+
+  // 2. Positional createClient(url, key).
+  CREATE_CLIENT_RE.lastIndex = 0;
+  while ((m = CREATE_CLIENT_RE.exec(bodyText)) !== null && out.length < 3) {
+    push(prefixForUrl(m[1]), m[1], m[2]);
+  }
+
+  return out.slice(0, 3);
 }
 
 async function timedGet(url: string, headers: Record<string, string>): Promise<{ res: Response; text: string } | null> {

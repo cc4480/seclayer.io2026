@@ -28,6 +28,7 @@ import { probeWebhookSignatureBypass } from "./webhookSignatureProbe.js";
 import { probeAuthRateLimit } from "./authRateLimitProbe.js";
 import { probeDomXss } from "./domXss.js";
 import { runPassiveScan, cookieFlagIssues } from "./passiveScan.js";
+import { probeTls } from "./tlsProbe.js";
 import { analyzeSecrets, analyzeDataDumpExposure } from "./staticAnalysis.js";
 import { buildScanCoverage } from "./coverage.js";
 import type { DiagnosticResult, ScanOptions } from "./scanTypes.js";
@@ -116,6 +117,15 @@ export async function runDiagnostics(
   // seed the crawler. Throws on an unreachable target. See server/passiveScan.ts.
   emit?.("system", "Target validated. Passive recon: headers, TLS, secrets, libraries, perimeter & sensitive paths…");
   const rootHtml = await runPassiveScan(url, host, hostname, headers, result, emit);
+
+  // TLS/certificate posture (HTTPS only, read-only, SSRF-gated). A plain fetch
+  // can't see an expired cert or a deprecated protocol — one handshake can.
+  // Best-effort: never throws, and a failed handshake leaves no finding.
+  try {
+    result.tls = await probeTls(url);
+  } catch {
+    /* posture is a bonus signal — a probe failure must never fail the scan */
+  }
 
   // RED TEAM active fuzzing (SQLi/XSS/cmd-injection/SSRF, incl. blind OOB).
   // Gated behind verified domain ownership. See server/redTeamProbes.ts.

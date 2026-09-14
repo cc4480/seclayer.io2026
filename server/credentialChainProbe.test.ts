@@ -43,6 +43,44 @@ test("extractUrlKeyPairs ignores a bare URL or bare key with nothing to pair", (
   assert.deepEqual(extractUrlKeyPairs('window.SUPABASE_ANON_KEY = "some-long-enough-key-value-here";'), []);
 });
 
+test("extractUrlKeyPairs pairs framework-prefixed env vars (VITE_ / NEXT_PUBLIC_)", () => {
+  const vite = `const u="",k=""; import.meta.env.VITE_SUPABASE_URL="https://abc.supabase.co"; import.meta.env.VITE_SUPABASE_ANON_KEY="eyJhbGciOiJIUzI1NiJ9.eyJyb2xlIjoiYW5vbiJ9.sig";`;
+  const vp = extractUrlKeyPairs(vite);
+  assert.equal(vp.length, 1);
+  assert.equal(vp[0].prefix, "SUPABASE");
+  assert.equal(vp[0].url, "https://abc.supabase.co");
+
+  const next = `process.env.NEXT_PUBLIC_SUPABASE_URL="https://xyz.supabase.co";process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY="eyJhbGciOiJIUzI1NiJ9.eyJyb2xlIjoiYW5vbiJ9.sig2";`;
+  const np = extractUrlKeyPairs(next);
+  assert.equal(np.length, 1);
+  assert.equal(np[0].prefix, "SUPABASE");
+  assert.equal(np[0].url, "https://xyz.supabase.co");
+});
+
+test("extractUrlKeyPairs catches the positional createClient(url, key) SDK form", () => {
+  const bundle = `const supabase=createClient("https://proj.supabase.co","eyJhbGciOiJIUzI1NiJ9.eyJyb2xlIjoiYW5vbiJ9.sig3");`;
+  const pairs = extractUrlKeyPairs(bundle);
+  assert.equal(pairs.length, 1);
+  assert.equal(pairs[0].prefix, "SUPABASE");
+  assert.equal(pairs[0].url, "https://proj.supabase.co");
+  assert.match(pairs[0].key, /^eyJ/);
+});
+
+test("extractUrlKeyPairs labels a non-supabase positional createClient as BAAS", () => {
+  const bundle = `createClient('http://127.0.0.1:54321', 'some-anon-key-value-1234567890')`;
+  const pairs = extractUrlKeyPairs(bundle);
+  assert.equal(pairs.length, 1);
+  assert.equal(pairs[0].prefix, "BAAS");
+});
+
+test("extractUrlKeyPairs dedupes the same (url,key) found by two means, capped at 3", () => {
+  // Declared as env vars AND passed to createClient — one pair, not two.
+  const both = `window.SUPABASE_URL="https://p.supabase.co";window.SUPABASE_ANON_KEY="eyJ0.eyJyb2xlIjoiYW5vbiJ9.zz";` +
+    `createClient("https://p.supabase.co","eyJ0.eyJyb2xlIjoiYW5vbiJ9.zz");`;
+  const pairs = extractUrlKeyPairs(both);
+  assert.equal(pairs.length, 1);
+});
+
 test("probeCredentialUrlPairs proves unrestricted table access via PostgREST-style OpenAPI root listing", async () => {
   await withServer((req, res) => {
     if (req.url === "/rest/v1/") {

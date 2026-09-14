@@ -16,6 +16,7 @@ import { mapOwasp } from "./owasp.js";
 import { buildAgentPrompt, buildImpactFallback } from "./agentPrompt.js";
 import { buildObservationEvidence } from "./evidence.js";
 import { SCANNER_USER_AGENT } from "./config.js";
+import { classifyTls } from "./tlsProbe.js";
 import crypto from "crypto";
 
 // Every finding carries a random id; red-team/API findings namespace theirs.
@@ -193,6 +194,22 @@ function buildEasmFindings(diag: DiagnosticResult): Finding[] {
       confidence: "high",
       fix: "Deploy a valid SSL/TLS certificate and configure permanent rewrite rules on port 80 to redirect HTTP traffic securely to HTTPS.",
       category: "EASM",
+    });
+  }
+
+  // TLS/certificate posture (expired or soon-expiring cert, deprecated
+  // protocol). Deterministic facts read straight off the handshake, so
+  // confidence is high; mapped to Cryptographic Failures. See server/tlsProbe.ts.
+  for (const issue of classifyTls(diag.tls ?? { checked: false, reachable: false })) {
+    findings.push({
+      id: fid(),
+      title: issue.title,
+      description: issue.description,
+      severity: issue.severity,
+      confidence: "high",
+      fix: issue.fix,
+      category: "EASM",
+      owasp: "A02:2021 – Cryptographic Failures",
     });
   }
 

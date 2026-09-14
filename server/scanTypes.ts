@@ -5,6 +5,7 @@ import type { ChallengeVerdict } from "./challengePage.js";
 import type { Finding, Severity, ExploitEvidence, BolaIdentity, LoginCredentials, ScanCoverage } from "../src/types.js";
 import type { OobCollaborator } from "./oob.js";
 import type { EmitFn } from "./scanEvents.js";
+import type { TlsObservation } from "./tlsProbe.js";
 
 // A confirmed exploit result from an active red-team probe (see server/redTeam/).
 // evidence, when present, is a captured receipt that promotes the finding to
@@ -30,6 +31,9 @@ export interface DiagnosticResult {
   scannedAt: string;
   responseStatus: number;
   sslSecure: boolean;
+  // Negotiated protocol + certificate posture for an HTTPS target (undefined for
+  // HTTP, or when the handshake couldn't be completed). See server/tlsProbe.ts.
+  tls?: TlsObservation;
   headers: Record<string, string>;
   missingHeaders: string[];
   techLeaked: string[];

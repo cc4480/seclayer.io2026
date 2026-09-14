@@ -34,7 +34,9 @@ export function buildScanCoverage(p: CoverageInputs): ScanCoverage {
     // --- Passive tier: always runs ---
     { label: "Security response headers", category: "IAST", checks: SECURITY_HEADERS.length, ran: true },
     { label: "Cookie security flags (Secure, HttpOnly)", category: "IAST", checks: 2, ran: true },
-    { label: "TLS / HTTPS transport", category: "EASM", checks: 1, ran: true },
+    // HTTP-vs-HTTPS transport, plus the TLS handshake posture check (certificate
+    // expiry + negotiated protocol version) added by server/tlsProbe.ts.
+    { label: "TLS transport & certificate posture", category: "EASM", checks: 3, ran: true },
     { label: "DNS resolution (A record + nameserver)", category: "EASM", checks: 2, ran: true },
     { label: "Subdomain enumeration", category: "EASM", checks: p.subdomainsChecked, ran: p.subdomainsChecked > 0 },
     { label: "Exposed-secret signatures (SAST)", category: "SAST", checks: SECRET_SIGNATURE_COUNT, ran: true },
