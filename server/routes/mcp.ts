@@ -10,6 +10,7 @@ import { runDiagnostics, compileStaticFindings, compileScanEvidence, assertScanT
 import { scanSlots } from "../scanWorker.js";
 import { generateAiReport } from "../deepseek.js";
 import { activeProbesUnlocked } from "../activeProbeGate.js";
+import { asyncHandler } from "../asyncHandler.js";
 import type { RouteContext } from "./context.js";
 
 export function registerMcpRoutes(app: express.Express, ctx: RouteContext) {
@@ -24,7 +25,7 @@ export function registerMcpRoutes(app: express.Express, ctx: RouteContext) {
     keyPrefix: "mcp-scan",
     message: "MCP scan rate limit reached. Please wait a moment before the next call.",
   });
-  app.post("/api/mcp/scan", mcpLimiter, async (req, res) => {
+  app.post("/api/mcp/scan", mcpLimiter, asyncHandler(async (req, res) => {
     const { url, apiKey, authHeader, aggressiveProbes } = req.body;
     if (!url || !apiKey) {
       return res.status(400).json({ error: "Missing parameters. required: url, apiKey" });
@@ -120,7 +121,7 @@ export function registerMcpRoutes(app: express.Express, ctx: RouteContext) {
       }));
       res.status(500).json({ error: "Internal audit scanning failed", details: err.message, creditsRemaining });
     }
-  });
+  }));
 
   // --- Read access for agents (no credit cost) ---
   // Retrieval is READ-ONLY: it never runs the pipeline and never spends a
@@ -143,7 +144,7 @@ export function registerMcpRoutes(app: express.Express, ctx: RouteContext) {
 
   // List this key owner's recent scans (compact: no findings bodies), newest
   // first — so an agent can find the id of a scan to fetch in full below.
-  app.get("/api/mcp/scans", mcpReadLimiter, async (req, res) => {
+  app.get("/api/mcp/scans", mcpReadLimiter, asyncHandler(async (req, res) => {
     const user = await keyOwner(req);
     if (!user) {
       return res.status(401).json({ error: "Invalid or missing API key. Pass it in the X-API-Key header or the apiKey query parameter." });
@@ -159,13 +160,13 @@ export function registerMcpRoutes(app: express.Express, ctx: RouteContext) {
       completedAt: s.completedAt ?? null,
     }));
     res.json({ success: true, scans });
-  });
+  }));
 
   // Fetch one completed scan's full report by id — the SAME shape POST
   // /api/mcp/scan returns, so an agent (and the MCP formatter) can consume a
   // retrieved report identically to a freshly-run one. Suppression is applied
   // and the score recalculated via the shared read-model.
-  app.get("/api/mcp/scans/:id", mcpReadLimiter, async (req, res) => {
+  app.get("/api/mcp/scans/:id", mcpReadLimiter, asyncHandler(async (req, res) => {
     const user = await keyOwner(req);
     if (!user) {
       return res.status(401).json({ error: "Invalid or missing API key. Pass it in the X-API-Key header or the apiKey query parameter." });
@@ -191,5 +192,5 @@ export function registerMcpRoutes(app: express.Express, ctx: RouteContext) {
       createdAt: scan.createdAt,
       completedAt: scan.completedAt,
     });
-  });
+  }));
 }

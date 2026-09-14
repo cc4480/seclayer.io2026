@@ -10,6 +10,7 @@ import { db } from "../db.js";
 import { config } from "../config.js";
 import { rateLimit } from "../rateLimit.js";
 import { callDeepSeekAgentTurn, DeepSeekMessage, DeepSeekToolDef } from "../deepseekClient.js";
+import { asyncHandler } from "../asyncHandler.js";
 
 const MODEL_AGENT = process.env.DEEPSEEK_MODEL_AGENT || "deepseek-v4-pro";
 // A hard ceiling on model turns per finding, enforced here independent of
@@ -115,7 +116,7 @@ export function registerAutofixRoutes(app: express.Express) {
   // /api/mcp/scan there is no async pipeline after the charge that can fail, so
   // there's no refund path here: creating the session row cannot meaningfully
   // fail once the key/credit check has passed.
-  app.post("/api/mcp/autofix/start", startLimiter, async (req, res) => {
+  app.post("/api/mcp/autofix/start", startLimiter, asyncHandler(async (req, res) => {
     const { apiKey, url, findingTitle, findingCategory } = req.body;
     if (!apiKey || !url || !findingTitle || !findingCategory) {
       return res.status(400).json({ error: "Missing parameters. required: apiKey, url, findingTitle, findingCategory" });
@@ -132,14 +133,14 @@ export function registerAutofixRoutes(app: express.Express) {
 
     const session = (await db.createAutofixSession(user.id, url, findingTitle, findingCategory));
     res.json({ success: true, sessionId: session.id, creditsRemaining: user.credits });
-  });
+  }));
 
   // One turn of the tool-calling loop: caller sends the full transcript so
   // far, gets back the model's next move (a final answer and/or tool calls),
   // executes any tool calls locally, and calls this again with the result
   // appended. No credit cost per turn — the session's single credit already
   // covers the whole attempt.
-  app.post("/api/mcp/autofix/turn", turnLimiter, async (req, res) => {
+  app.post("/api/mcp/autofix/turn", turnLimiter, asyncHandler(async (req, res) => {
     const { apiKey, sessionId, messages } = req.body;
     if (!apiKey || !sessionId || !Array.isArray(messages)) {
       return res.status(400).json({ error: "Missing parameters. required: apiKey, sessionId, messages" });
@@ -184,5 +185,5 @@ export function registerAutofixRoutes(app: express.Express) {
     } catch (err: any) {
       res.status(500).json({ error: "Autofix turn failed.", details: err?.message || String(err) });
     }
-  });
+  }));
 }

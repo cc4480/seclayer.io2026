@@ -10,6 +10,7 @@ import { LOGIN_CODE_TTL_MS, normalizeLoginCode, normalizeLoginEmail } from "../l
 import crypto from "node:crypto";
 import { INSTANCE_ID } from "../instance.js";
 import { verifyGoogleIdToken } from "../googleAuth.js";
+import { asyncHandler } from "../asyncHandler.js";
 import type { RouteContext } from "./context.js";
 
 export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
@@ -19,7 +20,7 @@ export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
   // reporting a hardcoded "Online", so an orchestrator (or the Docker
   // HEALTHCHECK) can detect a process that is up but has lost its database and
   // pull it out of rotation. Returns 503 when the DB is unreachable.
-  app.get("/api/system/health", async (req, res) => {
+  app.get("/api/system/health", asyncHandler(async (req, res) => {
     const dbOk = (await db.healthy());
     res.status(dbOk ? 200 : 503).json({
       status: dbOk ? "Online" : "Degraded",
@@ -41,7 +42,7 @@ export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
       memory: { rssMb: Math.round(process.memoryUsage().rss / 1048576) },
       timestamp: new Date().toISOString(),
     });
-  });
+  }));
 
   // --- Out-of-band collaborator listener ---
   // Public and unauthenticated by necessity: the SCANNED TARGET (not the user)
@@ -50,7 +51,7 @@ export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
   // recently, so this can't be used as an open write-anything store; the token
   // is 48 hex chars of CSPRNG output, so callbacks can't be forged or enumerated.
   // Always returns a flat 200 so it reveals nothing about which tokens are valid.
-  app.all("/api/oob/:token", async (req, res) => {
+  app.all("/api/oob/:token", asyncHandler(async (req, res) => {
     const token = req.params.token || "";
     if (/^[a-f0-9]{16,96}$/i.test(token)) {
       try {
@@ -63,7 +64,7 @@ export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
       } catch { /* never let a callback error affect anything */ }
     }
     res.status(200).type("text/plain").send("ok");
-  });
+  }));
 
   // --- Auth (one-time emailed code) ---
   //
@@ -117,7 +118,7 @@ export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
     message: "Too many code attempts. Please wait a few minutes and try again.",
   });
 
-  app.post("/api/auth/request-code", requestLinkLimiter, requestLinkEmailLimiter, async (req, res) => {
+  app.post("/api/auth/request-code", requestLinkLimiter, requestLinkEmailLimiter, asyncHandler(async (req, res) => {
     const { email } = req.body || {};
     if (!email || typeof email !== "string" || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
       return res.status(400).json({ status: "error", message: "A valid email address is required." });
@@ -138,9 +139,9 @@ export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
     // see config.ts). Any real deployment never exposes it.
     const devCode = !isEmailConfigured() && (!config.isProd || config.allowMissingEmailProvider) ? code : undefined;
     res.json({ status: "ok", message: "If that email is valid, a sign-in code is on its way.", devCode });
-  });
+  }));
 
-  app.post("/api/auth/verify-code", verifyCodeLimiter, async (req, res) => {
+  app.post("/api/auth/verify-code", verifyCodeLimiter, asyncHandler(async (req, res) => {
     const rawEmail = (req.body || {}).email;
     const code = normalizeLoginCode((req.body || {}).code);
     if (!rawEmail || typeof rawEmail !== "string" || !code) {
@@ -164,7 +165,7 @@ export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
     const session = (await db.createSession(user.id));
     res.cookie(sessionCookie, session, cookieOptions);
     res.json({ status: "ok" });
-  });
+  }));
 
   // Public, pre-auth: the login form has no session yet, so it can't learn the
   // client id from /api/auth/me. Returns null when Google sign-in isn't
@@ -180,7 +181,7 @@ export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
   // email address. A Google sign-in with an address that already has a
   // magic-link account therefore lands in that same account rather than
   // creating a duplicate.
-  app.post("/api/auth/google", requestLinkLimiter, async (req, res) => {
+  app.post("/api/auth/google", requestLinkLimiter, asyncHandler(async (req, res) => {
     if (!config.googleClientId) {
       return res.status(503).json({ status: "error", message: "Google sign-in is not configured on this deployment." });
     }
@@ -193,16 +194,16 @@ export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
     const session = (await db.createSession(user.id));
     res.cookie(sessionCookie, session, cookieOptions);
     res.json({ status: "ok" });
-  });
+  }));
 
-  app.post("/api/auth/logout", async (req, res) => {
+  app.post("/api/auth/logout", asyncHandler(async (req, res) => {
     const token = req.cookies?.[sessionCookie];
     if (token) (await db.deleteSession(token));
     res.clearCookie(sessionCookie, { ...cookieOptions, maxAge: undefined });
     res.json({ status: "ok", message: "Logged out successfully" });
-  });
+  }));
 
-  app.get("/api/auth/me", requireAuth, async (req, res) => {
+  app.get("/api/auth/me", requireAuth, asyncHandler(async (req, res) => {
     const user = (await db.getUser(getUserId(req)));
     if (!user) {
       return res.status(404).json({ status: "error", message: "User profile not found" });
@@ -227,5 +228,5 @@ export function registerAuthRoutes(app: express.Express, ctx: RouteContext) {
       nmapAvailable,
       ...deepseekKeyStatus((await db.getUserDeepseekKey(user.id))),
     });
-  });
+  }));
 }

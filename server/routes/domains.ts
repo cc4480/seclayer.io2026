@@ -10,16 +10,17 @@ import {
   extractDomain, generateVerificationToken, txtRecordName, WELL_KNOWN_PATH,
   checkTxtRecord, checkWellKnownFile,
 } from "../domainVerify.js";
+import { asyncHandler } from "../asyncHandler.js";
 import type { RouteContext } from "./context.js";
 
 export function registerDomainRoutes(app: express.Express, ctx: RouteContext) {
   const { requireAuth, getUserId } = ctx;
 
-  app.get("/api/domains", requireAuth, async (req, res) => {
+  app.get("/api/domains", requireAuth, asyncHandler(async (req, res) => {
     res.json({ domains: (await db.listDomainVerifications(getUserId(req))) });
-  });
+  }));
 
-  app.post("/api/domains/verify/start", requireAuth, async (req, res) => {
+  app.post("/api/domains/verify/start", requireAuth, asyncHandler(async (req, res) => {
     const { url } = req.body || {};
     if (!url || typeof url !== "string") {
       return res.status(400).json({ status: "error", message: "url is required" });
@@ -43,9 +44,9 @@ export function registerDomainRoutes(app: express.Express, ctx: RouteContext) {
       txtRecord: { name: txtRecordName(domain), value: record.token },
       wellKnownFile: { path: WELL_KNOWN_PATH, content: record.token },
     });
-  });
+  }));
 
-  app.post("/api/domains/verify/check", requireAuth, async (req, res) => {
+  app.post("/api/domains/verify/check", requireAuth, asyncHandler(async (req, res) => {
     const { url } = req.body || {};
     if (!url || typeof url !== "string") {
       return res.status(400).json({ status: "error", message: "url is required" });
@@ -73,5 +74,5 @@ export function registerDomainRoutes(app: express.Express, ctx: RouteContext) {
       return res.json({ status: "ok", domain, verified: true });
     }
     res.json({ status: "ok", domain, verified: false, message: "Verification not found yet — DNS/file changes can take a few minutes to propagate." });
-  });
+  }));
 }

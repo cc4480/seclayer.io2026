@@ -9,6 +9,7 @@ import { assertScanTargetSafe } from "../ssrf.js";
 import { activeProbesUnlocked } from "../activeProbeGate.js";
 import { killNmapProcess } from "../nmap/run.js";
 import * as scanEvents from "../scanEvents.js";
+import { asyncHandler } from "../asyncHandler.js";
 import type { RouteContext } from "./context.js";
 
 export function registerNmapRoutes(app: express.Express, ctx: RouteContext) {
@@ -25,7 +26,7 @@ export function registerNmapRoutes(app: express.Express, ctx: RouteContext) {
     message: "Network reconnaissance rate limit reached. Please wait a moment before launching more scans.",
   });
 
-  app.post("/api/nmap/scans", requireAuth, nmapLimiter, async (req, res) => {
+  app.post("/api/nmap/scans", requireAuth, nmapLimiter, asyncHandler(async (req, res) => {
     if (!nmapAvailable) {
       return res.status(503).json({
         status: "error",
@@ -87,13 +88,13 @@ export function registerNmapRoutes(app: express.Express, ctx: RouteContext) {
     const scan = (await db.createNmapScan(userId, url, deep));
     processNmapScanJob(scan.id); // fire-and-forget, mirrors processScanJob
     res.json({ status: "ok", scan });
-  });
+  }));
 
-  app.get("/api/nmap/scans", requireAuth, async (req, res) => {
+  app.get("/api/nmap/scans", requireAuth, asyncHandler(async (req, res) => {
     res.json({ scans: (await db.listNmapScans(getUserId(req))) });
-  });
+  }));
 
-  app.get("/api/nmap/scans/:id", requireAuth, async (req, res) => {
+  app.get("/api/nmap/scans/:id", requireAuth, asyncHandler(async (req, res) => {
     const scan = (await db.getNmapScan(req.params.id));
     // 404 (not 403) so a scan id can't be probed for existence — matches
     // /api/scans/:id's identical ownership check.
@@ -101,11 +102,11 @@ export function registerNmapRoutes(app: express.Express, ctx: RouteContext) {
       return res.status(404).json({ status: "error", message: "Scan not found" });
     }
     res.json({ scan });
-  });
+  }));
 
   // Live event feed for the progress ticker — identical contract to
   // GET /api/scans/:id/events, reusing the exact same in-memory stream module.
-  app.get("/api/nmap/scans/:id/events", requireAuth, async (req, res) => {
+  app.get("/api/nmap/scans/:id/events", requireAuth, asyncHandler(async (req, res) => {
     const scan = (await db.getNmapScan(req.params.id));
     if (!scan || scan.userId !== getUserId(req)) {
       return res.status(404).json({ status: "error", message: "Scan not found" });
@@ -114,17 +115,17 @@ export function registerNmapRoutes(app: express.Express, ctx: RouteContext) {
     const cursor = Number.isFinite(since) && since >= 0 ? since : 0;
     const { events, cursor: nextCursor, found } = await scanEvents.getSince(scan.id, cursor);
     res.json({ status: "ok", events, cursor: nextCursor, found, scanStatus: scan.status });
-  });
+  }));
 
   // User-initiated cancellation. Unlike /api/scans/:id/cancel, this also
   // kills the real OS process (nmap is exactly one killable process, unlike
   // the AppSec scanner's many small in-flight HTTP probes).
-  app.post("/api/nmap/scans/:id/cancel", requireAuth, async (req, res) => {
+  app.post("/api/nmap/scans/:id/cancel", requireAuth, asyncHandler(async (req, res) => {
     const scan = (await db.cancelNmapScan(getUserId(req), req.params.id));
     if (!scan) {
       return res.status(409).json({ status: "error", message: "This scan can no longer be canceled — it may already be complete, failed, or not exist." });
     }
     killNmapProcess(scan.id);
     res.json({ status: "ok", scan });
-  });
+  }));
 }

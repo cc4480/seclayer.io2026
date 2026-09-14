@@ -28,6 +28,7 @@ import { registerAutofixRoutes } from './server/routes/autofix.js';
 import { registerWellKnownRoutes } from './server/routes/wellKnown.js';
 import { accessLog } from './server/accessLog.js';
 import { securityHeaders } from './server/securityHeaders.js';
+import { asyncHandler } from './server/asyncHandler.js';
 import type { RouteContext } from './server/routes/context.js';
 
 async function startServer() {
@@ -107,7 +108,7 @@ async function startServer() {
   // Stripe webhook MUST receive the raw body for signature verification, so it
   // is registered before the JSON body parser. Credits are granted only here,
   // on a verified, paid checkout.session.completed event.
-  app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), async (req, res) => {
+  app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), asyncHandler(async (req, res) => {
     let completion;
     try {
       completion = parseWebhookEvent(req.body as Buffer, req.headers['stripe-signature'] as string | undefined);
@@ -123,7 +124,7 @@ async function startServer() {
       }
     }
     res.json({ received: true });
-  });
+  }));
 
   // Resend delivery events (bounces and spam complaints). Registered here, with
   // the Stripe webhook and before the JSON parser, for the same reason: Svix
@@ -134,7 +135,7 @@ async function startServer() {
   // to a dead address repeated forever and every "mark as spam" went unseen,
   // both of which erode the sender reputation that decides whether sign-in
   // codes reach the inbox.
-  app.post('/api/webhooks/resend', express.raw({ type: 'application/json' }), async (req, res) => {
+  app.post('/api/webhooks/resend', express.raw({ type: 'application/json' }), asyncHandler(async (req, res) => {
     const secret = process.env.RESEND_WEBHOOK_SECRET;
     if (!secret) {
       // 503, not 200. Answering OK would make Resend believe events are being
@@ -176,7 +177,7 @@ async function startServer() {
       console.error('[resend] Could not record an email suppression:', err);
       res.status(500).json({ error: 'Could not record suppression' });
     }
-  });
+  }));
 
   // Body parsers + cookies (explicit body size cap)
   app.use(express.json({ limit: '256kb' }));

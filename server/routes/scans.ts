@@ -9,6 +9,7 @@ import { activeProbesUnlocked } from "../activeProbeGate.js";
 import { retestFinding } from "../retest.js";
 import * as scanEvents from "../scanEvents.js";
 import type { BolaIdentity, LoginCredentials } from "../../src/types.js";
+import { asyncHandler } from "../asyncHandler.js";
 import type { RouteContext } from "./context.js";
 
 // Validate + normalize a client-supplied two-identity BOLA payload. Returns a
@@ -73,7 +74,7 @@ export function registerScanRoutes(app: express.Express, ctx: RouteContext) {
     keyPrefix: "scan-ip",
     message: "Too many scans from this network. Please wait a moment before launching more.",
   });
-  app.post("/api/scans", requireAuth, scanUserLimiter, scanIpLimiter, async (req, res) => {
+  app.post("/api/scans", requireAuth, scanUserLimiter, scanIpLimiter, asyncHandler(async (req, res) => {
     const { url, authHeader } = req.body;
     const userId = getUserId(req);
     if (!url) {
@@ -158,32 +159,32 @@ export function registerScanRoutes(app: express.Express, ctx: RouteContext) {
     }
 
     res.json({ status: "ok", scan });
-  });
+  }));
 
-  app.get("/api/scans", requireAuth, async (req, res) => {
+  app.get("/api/scans", requireAuth, asyncHandler(async (req, res) => {
     const scansList = await Promise.all((await db.listScans(getUserId(req))).map(async (s) => (await db.getScanWithSuppressedFindings(s))));
     res.json({ scans: scansList });
-  });
+  }));
 
   // User-initiated cancellation. Only valid while the scan is still in
   // flight; the credit is refunded (see db.cancelScan). Does not abort
   // in-flight network probes — see the doc comment on db.cancelScan.
-  app.post("/api/scans/:id/cancel", requireAuth, async (req, res) => {
+  app.post("/api/scans/:id/cancel", requireAuth, asyncHandler(async (req, res) => {
     const scan = (await db.cancelScan(getUserId(req), req.params.id));
     if (!scan) {
       return res.status(409).json({ status: "error", message: "This scan can no longer be canceled — it may already be complete, failed, or not exist." });
     }
     res.json({ status: "ok", scan });
-  });
+  }));
 
   // Clear the caller's entire scan history — a deliberate "start fresh". Only
   // ever affects the authenticated user's own scans (see db.deleteAllScans).
-  app.delete("/api/scans", requireAuth, async (req, res) => {
+  app.delete("/api/scans", requireAuth, asyncHandler(async (req, res) => {
     const deleted = (await db.deleteAllScans(getUserId(req)));
     res.json({ status: "ok", deleted });
-  });
+  }));
 
-  app.get("/api/scans/:id", requireAuth, async (req, res) => {
+  app.get("/api/scans/:id", requireAuth, asyncHandler(async (req, res) => {
     let scan = (await db.getScan(req.params.id));
     // Enforce ownership: a scan ID alone must not grant access to another
     // user's results. Return 404 (not 403) to avoid leaking scan existence.
@@ -192,7 +193,7 @@ export function registerScanRoutes(app: express.Express, ctx: RouteContext) {
     }
     scan = (await db.getScanWithSuppressedFindings(scan));
     res.json({ scan });
-  });
+  }));
 
   // Live event feed for the real-time scan ticker. The client polls this with a
   // ?since=<cursor> seq and appends the returned events (see
@@ -200,7 +201,7 @@ export function registerScanRoutes(app: express.Express, ctx: RouteContext) {
   // been evicted (e.g. a scan finished a while ago) — the client then falls back
   // to the persisted narrationLog. Ownership is enforced exactly like GET
   // /api/scans/:id: a 404 (not 403) so a scan id can't be probed for existence.
-  app.get("/api/scans/:id/events", requireAuth, async (req, res) => {
+  app.get("/api/scans/:id/events", requireAuth, asyncHandler(async (req, res) => {
     const scan = (await db.getScan(req.params.id));
     if (!scan || scan.userId !== getUserId(req)) {
       return res.status(404).json({ status: "error", message: "Scan not found" });
@@ -209,9 +210,9 @@ export function registerScanRoutes(app: express.Express, ctx: RouteContext) {
     const cursor = Number.isFinite(since) && since >= 0 ? since : 0;
     const { events, cursor: nextCursor, found } = await scanEvents.getSince(scan.id, cursor);
     res.json({ status: "ok", events, cursor: nextCursor, found, scanStatus: scan.status });
-  });
+  }));
 
-  app.get("/api/scans/:id/report", requireAuth, async (req, res) => {
+  app.get("/api/scans/:id/report", requireAuth, asyncHandler(async (req, res) => {
     let scan = (await db.getScan(req.params.id));
     if (!scan || scan.userId !== getUserId(req)) {
       return res.status(404).json({ status: "error", message: "Scan not found" });
@@ -233,7 +234,7 @@ export function registerScanRoutes(app: express.Express, ctx: RouteContext) {
       createdAt: scan.createdAt,
       completedAt: scan.completedAt,
     });
-  });
+  }));
 
   // --- Public shareable report links ---
   // The base for the public URL: the trusted APP_URL in production, the request
@@ -242,21 +243,21 @@ export function registerScanRoutes(app: express.Express, ctx: RouteContext) {
 
   // Owner creates (or re-fetches) the public link for one of their completed
   // scans. Returns the token + the full /r/<token> URL to copy.
-  app.post("/api/scans/:id/share", requireAuth, async (req, res) => {
+  app.post("/api/scans/:id/share", requireAuth, asyncHandler(async (req, res) => {
     const token = (await db.createShareToken(getUserId(req), req.params.id));
     if (!token) {
       return res.status(404).json({ status: "error", message: "Scan not found, not yours, or not complete yet." });
     }
     res.json({ status: "ok", shareToken: token, shareUrl: `${publicBase(req)}/r/${token}` });
-  });
+  }));
 
   // Owner revokes the public link — any existing /r/<token> immediately 404s.
-  app.delete("/api/scans/:id/share", requireAuth, async (req, res) => {
+  app.delete("/api/scans/:id/share", requireAuth, asyncHandler(async (req, res) => {
     if (!(await db.revokeShareToken(getUserId(req), req.params.id))) {
       return res.status(404).json({ status: "error", message: "This scan has no active share link, or it isn't yours." });
     }
     res.json({ status: "ok" });
-  });
+  }));
 
   // PUBLIC, unauthenticated read-only report by share token. Rate-limited so the
   // (unguessable, 128-bit) token space can't be brute-forced. Serves only a
@@ -268,7 +269,7 @@ export function registerScanRoutes(app: express.Express, ctx: RouteContext) {
     keyPrefix: "public-report",
     message: "Too many requests. Please slow down.",
   });
-  app.get("/api/public/report/:token", shareLimiter, async (req, res) => {
+  app.get("/api/public/report/:token", shareLimiter, asyncHandler(async (req, res) => {
     const raw = (await db.getScanByShareToken(req.params.token));
     // A revoked/never-shared token, or a scan that somehow isn't complete, is a
     // flat 404 — no hint about whether the token ever existed.
@@ -293,7 +294,7 @@ export function registerScanRoutes(app: express.Express, ctx: RouteContext) {
         completedAt: scan.completedAt,
       },
     });
-  });
+  }));
 
   // --- Single-finding fix verification (retest) ---
   // Replays ONE finding's recorded exploit and reports whether it still fires.
@@ -306,7 +307,7 @@ export function registerScanRoutes(app: express.Express, ctx: RouteContext) {
     keyPrefix: "retest",
     message: "Retest rate limit reached. Please wait a moment before verifying more findings.",
   });
-  app.post("/api/scans/:scanId/findings/:findingId/retest", requireAuth, retestLimiter, async (req, res) => {
+  app.post("/api/scans/:scanId/findings/:findingId/retest", requireAuth, retestLimiter, asyncHandler(async (req, res) => {
     const userId = getUserId(req);
     const scan = (await db.getScan(req.params.scanId));
     if (!scan || scan.userId !== userId) {
@@ -335,30 +336,30 @@ export function registerScanRoutes(app: express.Express, ctx: RouteContext) {
     // FindingCard.tsx — so the envelope was dead code that only looked like a
     // contract.
     res.json(result);
-  });
+  }));
 
   // --- False Positive & Suppression Rules ---
-  app.get("/api/suppressions", requireAuth, async (req, res) => {
+  app.get("/api/suppressions", requireAuth, asyncHandler(async (req, res) => {
     res.json({ suppressions: (await db.listSuppressions(getUserId(req))) });
-  });
+  }));
 
-  app.post("/api/suppressions", requireAuth, async (req, res) => {
+  app.post("/api/suppressions", requireAuth, asyncHandler(async (req, res) => {
     const { targetUrl, findingTitle, reason } = req.body;
     if (!targetUrl || !findingTitle) {
       return res.status(400).json({ error: "targetUrl and findingTitle are required" });
     }
     const rule = (await db.addSuppression(getUserId(req), targetUrl, findingTitle, reason || "False positive confirmation"));
     res.json({ status: "ok", rule });
-  });
+  }));
 
-  app.delete("/api/suppressions/:id", requireAuth, async (req, res) => {
+  app.delete("/api/suppressions/:id", requireAuth, asyncHandler(async (req, res) => {
     if (!(await db.removeSuppression(getUserId(req), req.params.id))) {
       return res.status(404).json({ error: "Suppression exclusion rule not found" });
     }
     res.json({ status: "ok" });
-  });
+  }));
 
-  app.post("/api/scans/:scanId/findings/:findingId/suppress", requireAuth, async (req, res) => {
+  app.post("/api/scans/:scanId/findings/:findingId/suppress", requireAuth, asyncHandler(async (req, res) => {
     const { scanId, findingId } = req.params;
     const { reason = "Manual enterprise validation" } = req.body;
     const userId = getUserId(req);
@@ -375,5 +376,5 @@ export function registerScanRoutes(app: express.Express, ctx: RouteContext) {
 
     const rule = (await db.addSuppression(userId, scan.url, finding.title, reason));
     res.json({ status: "ok", rule, message: "Finding successfully suppressed and marked as False Positive." });
-  });
+  }));
 }
