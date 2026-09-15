@@ -10,8 +10,9 @@ import { buildProbeEvidence, renderRawRequest, renderRawResponse, windowAround }
 import { bolaProbe } from "./bola.js";
 
 // Distinct API-security checks run per scan (for coverage reporting): GraphQL
-// introspection, exposed-object endpoint, and the BOLA/IDOR authorization probe.
-export const API_PROBE_COUNT = 3;
+// introspection, GraphQL query-cost controls, exposed-object endpoint, and the
+// BOLA/IDOR authorization probe.
+export const API_PROBE_COUNT = 4;
 
 // Guessable paths for a single admin record OR a "list every user" admin
 // panel. Kept short and specific (not a huge wordlist) to stay a targeted
@@ -248,6 +249,81 @@ export async function runApiSecProbes(
       }
     } catch (e) {
       /* Ignore fetch errors */
+    }
+
+    // 1b. GraphQL query-cost controls. A single request of many aliased
+    // __typename fields — a meta-field valid on any GraphQL schema, so no
+    // introspection or schema knowledge is needed. If the server resolves all
+    // of them, there is no alias/complexity/cost limit, which is a documented
+    // amplification-DoS vector (one small request forces large server work).
+    // Proof-gated and self-gating: a non-GraphQL endpoint returns no `data`
+    // object and no aliases resolve, so nothing is reported; a server that caps
+    // aliases/complexity rejects the query and likewise yields no finding.
+    try {
+      const ALIAS_COUNT = 250;
+      const MIN_RESOLVED = 200; // clearly unbounded; a real cap rejects well below this
+      const aliasQuery = "{" + Array.from({ length: ALIAS_COUNT }, (_, i) => `a${i}:__typename`).join(" ") + "}";
+      const costBody = JSON.stringify({ query: aliasQuery });
+      const costCtl = new AbortController();
+      const costId = setTimeout(() => costCtl.abort(), 5000);
+      const costRes = await safeFetch(`${url}/graphql`, {
+        method: "POST",
+        headers: { ...apiHeaders, "Content-Type": "application/json" },
+        body: costBody,
+        signal: costCtl.signal,
+      });
+      clearTimeout(costId);
+      const costText = await costRes.text();
+
+      let resolved = 0;
+      try {
+        const parsed = JSON.parse(costText);
+        const data = parsed?.data;
+        if (data && typeof data === "object") {
+          for (const k of Object.keys(data)) {
+            if (/^a\d+$/.test(k) && data[k] != null) resolved++;
+          }
+        }
+      } catch {
+        resolved = 0;
+      }
+
+      if (resolved >= MIN_RESOLVED) {
+        const lastAlias = `"a${ALIAS_COUNT - 1}"`;
+        const aliasIdx = costText.indexOf(lastAlias);
+        const requestText = renderRawRequest(
+          "POST",
+          `${url}/graphql`,
+          { ...apiHeaders, "Content-Type": "application/json" },
+          // The receipt shows the shape, not all 250 aliases, so it stays legible.
+          JSON.stringify({ query: `{a0:__typename a1:__typename … a${ALIAS_COUNT - 1}:__typename}` }),
+        );
+        const responseText = renderRawResponse(costRes, windowAround(costText, Math.max(0, aliasIdx), lastAlias.length, 2000));
+        apiSecFindings.push({
+          testName: "GraphQL Query-Cost Controls Missing (alias amplification)",
+          endpoint: "/graphql",
+          // A denial-of-service amplification vector, not data disclosure or
+          // exploitation — hardening severity, never critical.
+          severity: "medium",
+          description:
+            `The GraphQL endpoint executed a single request containing ${ALIAS_COUNT} aliased fields and resolved ${resolved} of them, with no query-complexity, alias, or cost limit. An attacker can amplify one small request into large server-side work (deeply nested or heavily aliased queries), a denial-of-service vector unique to GraphQL.`,
+          fix: "Enforce a query-cost/complexity budget, a maximum alias/field count, and a maximum query depth on the GraphQL server (e.g. a cost-analysis or depth-limit plugin), and rate-limit the endpoint.",
+          evidence: {
+            method: "amplification",
+            attack: { request: requestText, response: responseText },
+            signal: {
+              quote: lastAlias,
+              offsetInResponse: responseText.indexOf(lastAlias),
+              why: `We sent ${ALIAS_COUNT} aliased __typename fields in one query and the server resolved ${resolved} (including ${lastAlias}). __typename is valid on every schema, so this proves the endpoint applies no per-query cost or alias limit — not merely that a particular field exists.`,
+            },
+            demonstration: `A single GraphQL request with ${ALIAS_COUNT} aliased fields was fully executed (${resolved} resolved). With no cost limit, an attacker scales this into an amplification DoS.`,
+            reproduction: `curl -s -X POST "${url}/graphql" -H "Content-Type: application/json" --data '{"query":"{a0:__typename a1:__typename ... a${ALIAS_COUNT - 1}:__typename}"}'`,
+            capturedAt: new Date().toISOString(),
+          },
+        });
+      }
+    } catch (e) {
+      /* Ignore fetch errors — no GraphQL endpoint or it refused the query */
     }
 
     // 2. Exposed user-object endpoint probe (fixed-path guesses). This is a

@@ -34,6 +34,9 @@ export function buildScanCoverage(p: CoverageInputs): ScanCoverage {
     // --- Passive tier: always runs ---
     { label: "Security response headers", category: "IAST", checks: SECURITY_HEADERS.length, ran: true },
     { label: "Cookie security flags (Secure, HttpOnly)", category: "IAST", checks: 2, ran: true },
+    // Passive CWE-502: a native serialized object (Java/PHP/Ruby/pickle) in a
+    // cookie the server issues — deserialized on every request. See deserializationScan.ts.
+    { label: "Insecure deserialization (serialized object in cookies)", category: "IAST", checks: 1, ran: true },
     // HTTP-vs-HTTPS transport, plus the TLS handshake posture check (certificate
     // expiry + negotiated protocol version) added by server/tlsProbe.ts.
     { label: "TLS transport & certificate posture", category: "EASM", checks: 3, ran: true },
@@ -56,7 +59,7 @@ export function buildScanCoverage(p: CoverageInputs): ScanCoverage {
       note: active ? undefined : OWNERSHIP_NOTE,
     },
     {
-      label: "API security probes: GraphQL introspection, exposed-object, BOLA/IDOR",
+      label: "API security probes: GraphQL introspection, GraphQL query-cost controls, exposed-object, BOLA/IDOR",
       category: "API_SEC", checks: API_PROBE_COUNT, ran: active, note: active ? undefined : OWNERSHIP_NOTE,
     },
     {

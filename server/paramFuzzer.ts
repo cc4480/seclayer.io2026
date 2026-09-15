@@ -170,6 +170,19 @@ export async function fuzzDiscoveredTargets(
   const sqlErrorSig =
     /(SQL syntax;|valid MySQL result|mysqli?_fetch|ORA-\d{4,5}|PLS-\d{4,5}|PostgreSQL.*?ERROR|PG::\w*Error|SQLSTATE\[|SQLite3?::|SQLiteException|SQLITE_ERROR|near \\?".*?\\?": syntax error|syntax error at (?:or near|end of input)|unterminated quoted (?:string|identifier) at or near|Unclosed quotation mark after the character string|quoted string not properly terminated|Microsoft OLE DB Provider for SQL Server|ODBC SQL Server Driver|Npgsql\.)/i;
 
+  // LDAP filter-syntax errors. Emitted by real LDAP stacks when an unbalanced
+  // filter metacharacter reaches the query. Kept tight to the raw error text /
+  // library class names each stack prints, NOT the bare word "ldap" (which
+  // appears in ordinary config and docs) — the FP trap the SQL sig comment warns of.
+  const ldapErrorSig =
+    /(javax\.naming\.(?:directory\.)?(?:InvalidSearchFilterException|NamingException)|com\.sun\.jndi\.ldap|LDAPException|ldap_(?:search|bind|list|read|modify|add|compare)\(\)|Bad search filter|Invalid (?:DN syntax|search filter)|System\.DirectoryServices|DirectoryServicesCOMException|ldap\.(?:FILTER_ERROR|INVALID_SYNTAX|OPERATIONS_ERROR|PROTOCOL_ERROR)|Protocol error occurred|supplied argument is not a valid ldap)/i;
+
+  // XPath expression errors. Emitted by XML/XPath engines when an unbalanced
+  // quote breaks an XPath string literal. Tight to error text / engine class
+  // names — never the bare word "xpath", which is common in legitimate copy.
+  const xpathErrorSig =
+    /(XPath(?:Exception|EvalError|ExpressionException)|xmlXPathEval|SimpleXMLElement::xpath|System\.Xml\.XPath|net\.sf\.saxon|org\.apache\.xpath|lxml\.etree\.XPath|Invalid (?:XPath )?(?:expression|predicate)|A closing bracket expected|Expression must evaluate to a node-?set|MS ?XML|msxml\d)/i;
+
   const buildUrl = (base: string, param: string, value: string): string => {
     const u = new URL(base);
     u.searchParams.set(param, value);
@@ -803,6 +816,84 @@ export async function fuzzDiscoveredTargets(
     return sess;
   };
 
+  // LDAP injection (error-based). Inject an unbalanced LDAP filter metacharacter
+  // and confirm ONLY when the response carries a distinctive LDAP filter-syntax
+  // error that a benign value for the same parameter does not — the same
+  // differential guard the SQLi error probe uses, so an LDAP error already in
+  // the page (docs, an unrelated stack trace) is not mistaken for injection.
+  const tryLdap = async (t: InjectableTarget, param: string, endpointPath: string): Promise<void> => {
+    const key = `ldap:${endpointPath}:${param}`;
+    if (reported.has(key)) return;
+    for (const breaker of ["*)(&", ")(|(", "*)(uid=*))(|(uid=*", "*))%00"]) {
+      if (!canSpend()) return;
+      budget--;
+      try {
+        const sent = await sendInjection(t, param, breaker);
+        const m = ldapErrorSig.exec(sent.text);
+        if (m) {
+          budget--;
+          const baseText = await sendInjection(t, param, "seclayer1").then((s) => s.text).catch(() => "");
+          if (ldapErrorSig.test(baseText)) return; // inherent error → not a finding
+          reported.add(key);
+          findings.push({
+            testName: `LDAP Injection (discovered parameter "${param}" on ${endpointPath})`,
+            payload: `${param}=${breaker}`,
+            severity: "critical",
+            description: `Injecting LDAP filter metacharacters into the discovered ${sent.reqMethod} parameter "${param}" on ${endpointPath} provoked an LDAP filter-syntax error, indicating the value is concatenated into an LDAP query unescaped — exploitable for authentication bypass and directory data disclosure.`,
+            fix: "Escape LDAP special characters per RFC 4515 (or use a parameterized LDAP API) for this parameter; never build a search filter by string concatenation of request input.",
+            evidence: buildProbeEvidence({
+              method: "error-signature", attackUrl: sent.attackUrl, requestHeaders: sessionHeaders(), res: sent.res, body: sent.text,
+              matchIndex: m.index, quote: m[0],
+              reqMethod: sent.reqMethod, reqBody: sent.reqBody, reqContentType: sent.reqContentType,
+              why: `This raw LDAP error is emitted only when the injected metacharacter breaks the LDAP filter's syntax, proving the "${param}" value reaches the directory query unescaped. A benign value for the same parameter returns no such error.`,
+              demonstration: `We injected ${breaker} into the "${param}" ${sent.reqMethod} parameter on ${endpointPath} and the server returned a raw LDAP filter error — proof this parameter is concatenated into an LDAP query unescaped.`,
+            }),
+          });
+          return;
+        }
+      } catch { /* probe failed */ }
+    }
+  };
+
+  // XPath injection (error-based). Inject an unbalanced quote that breaks an
+  // XPath string literal and confirm ONLY on a distinctive XPath-engine error
+  // absent from the benign baseline. Runs independently of the SQLi quote probe:
+  // the same "'" breaker may be tested by both, but each fires only on its own
+  // engine's signature, so they never collide.
+  const tryXpath = async (t: InjectableTarget, param: string, endpointPath: string): Promise<void> => {
+    const key = `xpath:${endpointPath}:${param}`;
+    if (reported.has(key)) return;
+    for (const breaker of ["'", "\"", "']", "')"]) {
+      if (!canSpend()) return;
+      budget--;
+      try {
+        const sent = await sendInjection(t, param, breaker);
+        const m = xpathErrorSig.exec(sent.text);
+        if (m) {
+          budget--;
+          const baseText = await sendInjection(t, param, "seclayer1").then((s) => s.text).catch(() => "");
+          if (xpathErrorSig.test(baseText)) return; // inherent error → not a finding
+          reported.add(key);
+          findings.push({
+            testName: `XPath Injection (discovered parameter "${param}" on ${endpointPath})`,
+            payload: `${param}=${breaker}`,
+            severity: "high",
+            description: `Injecting an unbalanced quote into the discovered ${sent.reqMethod} parameter "${param}" on ${endpointPath} provoked an XPath expression error, indicating the value is concatenated into an XPath query unescaped — exploitable to bypass authentication and read arbitrary nodes of the backing XML document.`,
+            fix: "Use parameterized/variable-bound XPath (pass untrusted values as variables, not string-concatenated), or strictly escape quotes and metacharacters for this parameter.",
+            evidence: buildProbeEvidence({
+              method: "error-signature", attackUrl: sent.attackUrl, requestHeaders: sessionHeaders(), res: sent.res, body: sent.text,
+              matchIndex: m.index, quote: m[0],
+              reqMethod: sent.reqMethod, reqBody: sent.reqBody, reqContentType: sent.reqContentType,
+              why: `This raw XPath error is emitted only when the injected quote breaks the XPath expression's syntax, proving the "${param}" value reaches the XPath query unescaped. A benign value for the same parameter returns no such error.`,
+              demonstration: `We injected ${breaker} into the "${param}" ${sent.reqMethod} parameter on ${endpointPath} and the server returned a raw XPath expression error — proof this parameter is concatenated into an XPath query unescaped.`,
+            }),
+          });
+          return;
+        }
+      } catch { /* probe failed */ }
+    }
+  };
+
   for (const t of targets) {
     if (!canSpend()) break;
     let endpointPath = t.url;
@@ -823,7 +914,7 @@ export async function fuzzDiscoveredTargets(
     for (const { p: param, s } of ranked) {
       if (!canSpend()) break;
       paramsTested++;
-      emit?.("probe", `→ Fuzzing "${param}" on ${endpointPath} — ${aggressive ? "SQLi/XSS/SSTI/LFI/redirect/CRLF" : "SQLi/XSS"} payloads…`);
+      emit?.("probe", `→ Fuzzing "${param}" on ${endpointPath} — ${aggressive ? "SQLi/XSS/SSTI/LFI/redirect/CRLF/LDAP/XPath" : "SQLi/XSS"} payloads…`);
       const before = findings.length;
       // Run the higher-leaning class first so a tight budget hits likely wins.
       if (s.sqli >= s.xss) { await trySqli(t, param, endpointPath); await tryXss(t, param, endpointPath); }
@@ -838,6 +929,8 @@ export async function fuzzDiscoveredTargets(
         await tryLfi(t, param, endpointPath);
         await tryOpenRedirect(t, param, endpointPath);
         await tryCrlf(t, param, endpointPath);
+        await tryLdap(t, param, endpointPath);
+        await tryXpath(t, param, endpointPath);
         // Blind SQLi (time-based + boolean-based): only when error-based SQLi
         // didn't already fire for this param, once per target, on a SQLi-leaning
         // parameter — catches injection on apps that suppress errors and reflect

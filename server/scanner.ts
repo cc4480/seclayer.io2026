@@ -22,7 +22,7 @@ import { extractFirebaseDbUrls, probeFirebaseOpenDb } from "./firebaseProbe.js";
 import { extractBucketUrls, probeOpenBuckets } from "./bucketProbe.js";
 import { assessCsrf, redactCookieValue } from "./csrfProbe.js";
 import { probeExposedSourceMaps } from "./sourceMapProbe.js";
-import { probeLlmPromptInjection } from "./llmProbe.js";
+import { probeLlmPromptInjection, probeLlmMemoryPoisoning, probeLlmInsecureToolUse } from "./llmProbe.js";
 import { probeEdgeFunctionAuth } from "./edgeFunctionProbe.js";
 import { probePrototypePollution } from "./prototypePollutionProbe.js";
 import { probePriceManipulation } from "./priceManipulationProbe.js";
@@ -30,6 +30,7 @@ import { probeWebhookSignatureBypass } from "./webhookSignatureProbe.js";
 import { probeAuthRateLimit } from "./authRateLimitProbe.js";
 import { probeDomXss } from "./domXss.js";
 import { runPassiveScan, cookieFlagIssues } from "./passiveScan.js";
+import { scanCookiesForSerialized } from "./deserializationScan.js";
 import { probeTls } from "./tlsProbe.js";
 import { analyzeSecrets, analyzeDataDumpExposure } from "./staticAnalysis.js";
 import { buildScanCoverage } from "./coverage.js";
@@ -142,6 +143,19 @@ export async function runDiagnostics(
   result.apiSecFindings = allowActiveProbes
     ? await runApiSecProbes(url, host, headers, { bolaIdentities: opts.bolaIdentities })
     : [];
+
+  // Insecure deserialization (PASSIVE, unconditional): a native serialized
+  // object stored in a cookie the server issued is deserialized on every
+  // request — CWE-502 exposure. Inspects only the root Set-Cookie lines already
+  // captured; makes no new request. Placed AFTER the apiSecFindings assignment
+  // above so it isn't overwritten; per-page cookies are scanned in the crawl
+  // loop below. See server/deserializationScan.ts.
+  for (const df of scanCookiesForSerialized(rootCookies, url)) {
+    const key = `${df.testName}|${df.endpoint}`;
+    if (!(result.apiSecFindings || []).some((f) => `${f.testName}|${f.endpoint}` === key)) {
+      result.apiSecFindings = [...(result.apiSecFindings || []), df];
+    }
+  }
   if (allowActiveProbes && emit) {
     for (const f of result.apiSecFindings || []) {
       // Label by the finding's actual tier, not a blanket "CONFIRMED". An
@@ -229,6 +243,8 @@ export async function runDiagnostics(
         for (const capFinding of [
           exposedUserListInCapture(capture.text, capture.url),
           exposedCredentialListInCapture(capture.text, capture.url),
+          // Serialized object in a cookie this page set — insecure-deser exposure.
+          ...scanCookiesForSerialized(capture.setCookie, capture.url),
         ]) {
           if (!capFinding) continue;
           const key = `${capFinding.testName}|${capFinding.endpoint}`;
@@ -580,12 +596,20 @@ export async function runDiagnostics(
       // tokens. See server/llmProbe.ts.
       if (allowAggressiveProbes) {
         try {
-          const llmFinding = await probeLlmPromptInjection(
-            allTargets.map((t) => ({ url: t.url, method: t.method, params: t.params })),
-            host,
-            { ...headers, "Cache-Control": "no-cache" },
-          );
+          const llmTargets = allTargets.map((t) => ({ url: t.url, method: t.method, params: t.params }));
+          const llmHeaders = { ...headers, "Cache-Control": "no-cache" };
+          const llmFinding = await probeLlmPromptInjection(llmTargets, host, llmHeaders);
           if (llmFinding) result.redTeamFindings = [...(result.redTeamFindings || []), llmFinding];
+
+          // AI-scope probes (proof-gated): memory poisoning (a planted canary
+          // that leaks into an independent request) and insecure tool use (the
+          // model fetching an injected OOB URL — callback is the proof, needs a
+          // collaborator). Both fire only on hard evidence. See server/llmProbe.ts.
+          const memFinding = await probeLlmMemoryPoisoning(llmTargets, host, llmHeaders);
+          if (memFinding) result.redTeamFindings = [...(result.redTeamFindings || []), memFinding];
+
+          const toolFinding = await probeLlmInsecureToolUse(llmTargets, host, llmHeaders, opts.oob, opts.scanId);
+          if (toolFinding) result.redTeamFindings = [...(result.redTeamFindings || []), toolFinding];
         } catch (e) {
           console.warn("LLM prompt-injection probe encountered an error", e);
         }

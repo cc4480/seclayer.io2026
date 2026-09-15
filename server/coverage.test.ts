@@ -14,8 +14,8 @@ const passiveInputs = {
 
 test('passive coverage totals only the groups that ran, and gates the exploit tiers', () => {
   const c = buildScanCoverage(passiveInputs);
-  // Sum of passive checks: headers + cookie(2) + tls(3) + dns(2) + subs(33) + secrets + libs + paths(6) + templates(12) + crawl(8).
-  const expected = SECURITY_HEADERS.length + 2 + 3 + 2 + 33 + SECRET_SIGNATURE_COUNT + LIBRARY_SIGNATURE_COUNT + 6 + 12 + 8;
+  // Sum of passive checks: headers + cookie(2) + deser(1) + tls(3) + dns(2) + subs(33) + secrets + libs + paths(6) + templates(12) + crawl(8).
+  const expected = SECURITY_HEADERS.length + 2 + 1 + 3 + 2 + 33 + SECRET_SIGNATURE_COUNT + LIBRARY_SIGNATURE_COUNT + 6 + 12 + 8;
   assert.equal(c.totalChecks, expected);
   assert.equal(c.activeProbesRun, false);
   // Every RED_TEAM/API_SEC exploit group is present but not run, each with a reason.

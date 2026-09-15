@@ -1,6 +1,32 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { exposedCredentialListInCapture } from "./apiProbes.js";
+import http from "node:http";
+import { exposedCredentialListInCapture, runApiSecProbes } from "./apiProbes.js";
+
+// Same loopback escape hatch the fuzzer/scanner tests use: safeFetch blocks
+// loopback unless SCAN_DEV_ALLOW_HOSTS names this exact host:port in dev.
+async function withServer(handler: http.RequestListener, fn: (port: number) => Promise<void>) {
+  const server = http.createServer(handler);
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+  const port = (server.address() as any).port;
+  const prevEnv = process.env.NODE_ENV;
+  const prevAllow = process.env.SCAN_DEV_ALLOW_HOSTS;
+  try {
+    process.env.NODE_ENV = "development";
+    process.env.SCAN_DEV_ALLOW_HOSTS = `127.0.0.1:${port}`;
+    await fn(port);
+  } finally {
+    if (prevEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = prevEnv;
+    if (prevAllow === undefined) delete process.env.SCAN_DEV_ALLOW_HOSTS; else process.env.SCAN_DEV_ALLOW_HOSTS = prevAllow;
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+}
+
+function readBody(req: http.IncomingMessage): Promise<string> {
+  return new Promise((resolve) => { let d = ""; req.on("data", (c) => (d += c)); req.on("end", () => resolve(d)); });
+}
+
+const HEADERS = { "User-Agent": "test", "Cache-Control": "no-cache" };
 
 const SRC = "http://127.0.0.1:4103/api/tokens";
 
@@ -68,4 +94,48 @@ test("does NOT fire when only SOME rows carry the credential (must be every row)
     { user_id: "b", note: "no token on this one" },
   ]);
   assert.equal(exposedCredentialListInCapture(body, SRC), null);
+});
+
+test("GraphQL cost probe: flags alias amplification when the server resolves every aliased __typename", async () => {
+  await withServer(async (req, res) => {
+    if (req.method === "POST" && req.url === "/graphql") {
+      const body = await readBody(req);
+      let query = "";
+      try { query = JSON.parse(body).query || ""; } catch { /* not json */ }
+      // Resolve every aX:__typename the client asked for — an uncapped server.
+      const data: Record<string, string> = {};
+      for (const m of query.matchAll(/a(\d+):__typename/g)) data[`a${m[1]}`] = "Query";
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(Object.keys(data).length ? { data } : { data: { __typename: "Query" } }));
+      return;
+    }
+    res.writeHead(404); res.end("nope");
+  }, async (port) => {
+    const findings = await runApiSecProbes(`http://127.0.0.1:${port}`, `127.0.0.1:${port}`, HEADERS);
+    const cost = findings.find((f) => /Query-Cost Controls/i.test(f.testName));
+    assert.ok(cost, "expected a GraphQL cost-control finding on an uncapped endpoint");
+    assert.equal(cost.severity, "medium");
+    assert.match(cost.evidence.signal.quote, /^"a\d+"$/, "receipt quotes a late resolved alias");
+  });
+});
+
+test("GraphQL cost probe: does NOT flag a server that caps query cost (rejects the batch)", async () => {
+  await withServer(async (req, res) => {
+    if (req.method === "POST" && req.url === "/graphql") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ errors: [{ message: "Query exceeds maximum operation cost of 100" }] }));
+      return;
+    }
+    res.writeHead(404); res.end("nope");
+  }, async (port) => {
+    const findings = await runApiSecProbes(`http://127.0.0.1:${port}`, `127.0.0.1:${port}`, HEADERS);
+    assert.ok(!findings.some((f) => /Query-Cost Controls/i.test(f.testName)), "a cost-capped server must not be flagged");
+  });
+});
+
+test("GraphQL cost probe: does NOT flag a non-GraphQL endpoint (no data object)", async () => {
+  await withServer((req, res) => { res.writeHead(404); res.end("not here"); }, async (port) => {
+    const findings = await runApiSecProbes(`http://127.0.0.1:${port}`, `127.0.0.1:${port}`, HEADERS);
+    assert.ok(!findings.some((f) => /Query-Cost Controls/i.test(f.testName)), "no /graphql endpoint => no finding");
+  });
 });

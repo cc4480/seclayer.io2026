@@ -422,3 +422,79 @@ test('fuzzer reaches a CSRF-token-protected form sink it would otherwise be 403-
     assert.ok(!JSON.stringify(sqli.evidence).includes('session-xyz'), 'cookie value must be redacted in the receipt');
   });
 });
+
+test('aggressive tier confirms LDAP injection via a filter-syntax error (differential baseline stays clean)', async () => {
+  // The endpoint concatenates `q` into an LDAP filter. An unbalanced filter
+  // metacharacter provokes a real JNDI filter error; a benign value does not.
+  await withServer((req, res) => {
+    const q = new URL(req.url!, 'http://x').searchParams.get('q') ?? '';
+    let html = '<!doctype html><html><body>directory';
+    if (/[*()|]/.test(q)) {
+      html += '<pre>javax.naming.directory.InvalidSearchFilterException: invalid attribute description</pre>';
+    }
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(html + '</body></html>');
+  }, async (port) => {
+    const targets: InjectableTarget[] = [
+      { url: `http://127.0.0.1:${port}/dir`, method: 'GET', params: ['q'], source: 'query' },
+    ];
+    const { findings } = await fuzzDiscoveredTargets(targets, HEADERS, { aggressive: true });
+    const ldap = findings.find((f) => /LDAP Injection/i.test(f.testName));
+    assert.ok(ldap, 'expected an LDAP injection finding on the filter parameter');
+    assert.equal(ldap.severity, 'critical');
+    assert.match(ldap.evidence.signal.quote, /InvalidSearchFilterException/i);
+    assert.ok(ldap.evidence.attack.response.includes(ldap.evidence.signal.quote));
+  });
+});
+
+test('LDAP probe does NOT false-positive when the filter error is inherent page content', async () => {
+  // The page always contains an LDAP error string regardless of input. The
+  // differential guard must see it in the benign baseline and suppress.
+  await withServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end('<!doctype html><html><body>Bad search filter (see docs)</body></html>');
+  }, async (port) => {
+    const targets: InjectableTarget[] = [
+      { url: `http://127.0.0.1:${port}/dir`, method: 'GET', params: ['q'], source: 'query' },
+    ];
+    const { findings } = await fuzzDiscoveredTargets(targets, HEADERS, { aggressive: true });
+    assert.ok(!findings.some((f) => /LDAP Injection/i.test(f.testName)), 'inherent LDAP error text must not be reported as injection');
+  });
+});
+
+test('aggressive tier confirms XPath injection via an expression error (differential baseline stays clean)', async () => {
+  // The endpoint concatenates `name` into an XPath query. An unbalanced quote
+  // breaks the expression and the engine emits an XPath error; benign input does not.
+  await withServer((req, res) => {
+    const name = new URL(req.url!, 'http://x').searchParams.get('name') ?? '';
+    let html = '<!doctype html><html><body>lookup';
+    if (/['"]/.test(name)) {
+      html += '<pre>System.Xml.XPath.XPathException: Expression must evaluate to a node-set.</pre>';
+    }
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(html + '</body></html>');
+  }, async (port) => {
+    const targets: InjectableTarget[] = [
+      { url: `http://127.0.0.1:${port}/lookup`, method: 'GET', params: ['name'], source: 'query' },
+    ];
+    const { findings } = await fuzzDiscoveredTargets(targets, HEADERS, { aggressive: true });
+    const xpath = findings.find((f) => /XPath Injection/i.test(f.testName));
+    assert.ok(xpath, 'expected an XPath injection finding on the parameter');
+    assert.equal(xpath.severity, 'high');
+    assert.match(xpath.evidence.signal.quote, /XPath/i);
+    assert.ok(xpath.evidence.attack.response.includes(xpath.evidence.signal.quote));
+  });
+});
+
+test('XPath probe does NOT false-positive when the expression error is inherent page content', async () => {
+  await withServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end('<!doctype html><html><body>Invalid expression: example in our XPath tutorial</body></html>');
+  }, async (port) => {
+    const targets: InjectableTarget[] = [
+      { url: `http://127.0.0.1:${port}/lookup`, method: 'GET', params: ['name'], source: 'query' },
+    ];
+    const { findings } = await fuzzDiscoveredTargets(targets, HEADERS, { aggressive: true });
+    assert.ok(!findings.some((f) => /XPath Injection/i.test(f.testName)), 'inherent XPath error text must not be reported as injection');
+  });
+});
