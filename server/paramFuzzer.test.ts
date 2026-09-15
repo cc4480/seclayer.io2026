@@ -7,6 +7,7 @@ import {
   responsesEquivalent,
   responsesDistinct,
   booleanBlindConfirmed,
+  extractHiddenToken,
   type CmpResponse,
 } from './paramFuzzer.js';
 import { isProven } from './scoring.js';
@@ -362,5 +363,62 @@ test('fuzzer does NOT false-positive boolean-blind on a volatile page (stability
     ];
     const { findings } = await fuzzDiscoveredTargets(targets, HEADERS, { aggressive: true });
     assert.ok(!findings.some((f) => /boolean-based blind/i.test(f.testName)), 'volatile page must not yield a boolean-blind finding');
+  });
+});
+
+// --- Session-aware form submission (stateful scanning slice) -----------------
+
+test('extractHiddenToken pulls the anti-CSRF token across frameworks and attribute orders', () => {
+  assert.deepEqual(extractHiddenToken('<input type="hidden" name="csrf_token" value="abc123">'), { name: 'csrf_token', value: 'abc123' });
+  // value-before-name attribute order
+  assert.deepEqual(extractHiddenToken('<input value="tok999" name="authenticity_token" type="hidden">'), { name: 'authenticity_token', value: 'tok999' });
+  assert.deepEqual(extractHiddenToken('<input type=hidden name=_token value=laravel1>'), { name: '_token', value: 'laravel1' });
+  // a non-token hidden field is ignored
+  assert.equal(extractHiddenToken('<input type="hidden" name="return_to" value="/home">'), null);
+  assert.equal(extractHiddenToken('<p>no inputs here</p>'), null);
+});
+
+test('fuzzer reaches a CSRF-token-protected form sink it would otherwise be 403-blocked on', async () => {
+  // The endpoint mints a token bound to a session cookie on GET, and REJECTS any
+  // POST whose token/cookie is missing or wrong (403). Only once the fuzzer
+  // carries the session cookie AND resubmits the token does the injectable `id`
+  // sink become reachable — and then a SQL metacharacter provokes the DB error.
+  let issued: string | null = null;
+  await withServer(async (req, res) => {
+    const u = new URL(req.url || '/', 'http://127.0.0.1');
+    if (req.method === 'GET') {
+      issued = 'tok-' + Math.random().toString(16).slice(2, 10);
+      res.writeHead(200, { 'Content-Type': 'text/html', 'Set-Cookie': `sid=session-xyz; Path=/` });
+      res.end(`<!doctype html><html><body>
+        <form method="POST" action="/orders">
+          <input type="hidden" name="csrf_token" value="${issued}">
+          <input name="id" placeholder="order id">
+        </form></body></html>`);
+      return;
+    }
+    // POST: enforce the CSRF token + session cookie, exactly like a real app.
+    const body = await readBody(req);
+    const params = new URLSearchParams(body);
+    const cookieOk = /(?:^|;\s*)sid=session-xyz/.test(req.headers.cookie || '');
+    const tokenOk = params.get('csrf_token') === issued;
+    if (!cookieOk || !tokenOk) { res.writeHead(403); return res.end('CSRF check failed'); }
+    const id = params.get('id') || '';
+    let html = '<!doctype html><html><body>order';
+    if (/['"]/.test(id)) html += `<pre>You have an error in your SQL syntax; check the manual near '${id}'</pre>`;
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(html + '</body></html>');
+  }, async (port) => {
+    const base = `http://127.0.0.1:${port}`;
+    const targets: InjectableTarget[] = [
+      // A form target whose page (discoveredOnPage) issues the token+cookie.
+      { url: `${base}/orders`, method: 'POST', params: ['id', 'csrf_token'], source: 'form', discoveredOnPage: `${base}/order-form` },
+    ];
+    const { findings } = await fuzzDiscoveredTargets(targets, HEADERS);
+    const sqli = findings.find((f) => /SQL Injection/i.test(f.testName));
+    assert.ok(sqli, 'the SQLi sink behind the CSRF token must now be reached and confirmed');
+    assert.match(sqli.evidence.signal.quote, /SQL syntax/i);
+    assert.ok(sqli.evidence.attack.response.includes(sqli.evidence.signal.quote));
+    // The receipt must not leak the session cookie value.
+    assert.ok(!JSON.stringify(sqli.evidence).includes('session-xyz'), 'cookie value must be redacted in the receipt');
   });
 });

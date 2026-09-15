@@ -94,6 +94,42 @@ export function booleanBlindConfirmed(
   );
 }
 
+// --- Session-aware form submission (a slice of stateful scanning) ------------
+// A form protected by an anti-CSRF token rejects a raw POST (typically 403), so
+// every injection probe against it silently fails and its sinks go untested. The
+// fuzzer fetches the form's page once, carries its session cookie forward, and
+// resubmits the hidden CSRF token with each payload — so protected form sinks are
+// actually reached. Falls back to today's behaviour when there is no token/cookie.
+
+// Pull the anti-CSRF hidden token (name + value) out of a form page, if present.
+// Matches the token field across the common frameworks (csrf/xsrf, Rails
+// authenticity_token, Laravel _token, Django csrfmiddlewaretoken, ASP.NET
+// __RequestVerificationToken); returns the FIRST such hidden input with a value.
+const HIDDEN_INPUT_RE = /<input\b[^>]*?\btype\s*=\s*["']?hidden["']?[^>]*>/gi;
+const TOKEN_NAME_RE = /csrf|xsrf|authenticity_token|requestverificationtoken|csrfmiddlewaretoken|^_token$/i;
+export function extractHiddenToken(html: string): { name: string; value: string } | null {
+  if (!html) return null;
+  HIDDEN_INPUT_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  const attr = (tag: string, a: string): string | undefined => {
+    const mm = new RegExp(`\\b${a}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'>]+))`, "i").exec(tag);
+    return mm ? (mm[1] ?? mm[2] ?? mm[3]) : undefined;
+  };
+  while ((m = HIDDEN_INPUT_RE.exec(html)) !== null) {
+    const tag = m[0];
+    const name = attr(tag, "name");
+    const value = attr(tag, "value");
+    if (name && value && TOKEN_NAME_RE.test(name.trim())) return { name, value };
+  }
+  return null;
+}
+
+interface FormSession {
+  cookie?: string; // "name=value; name2=value2" for the Cookie request header
+  tokenName?: string;
+  tokenValue?: string;
+}
+
 export async function fuzzDiscoveredTargets(
   targets: InjectableTarget[],
   fuzzHeaders: Record<string, string>,
@@ -144,7 +180,7 @@ export async function fuzzDiscoveredTargets(
     const ctl = new AbortController();
     const id = setTimeout(() => ctl.abort(), 4000);
     try {
-      const res = await safeFetch(target, { headers: fuzzHeaders, signal: ctl.signal });
+      const res = await safeFetch(target, { headers: sessionHeaders(), signal: ctl.signal });
       return { res, text: await res.text() };
     } finally {
       clearTimeout(id);
@@ -157,7 +193,7 @@ export async function fuzzDiscoveredTargets(
     const ctl = new AbortController();
     const id = setTimeout(() => ctl.abort(), 4000);
     try {
-      return await guardedFetch(target, { headers: fuzzHeaders, redirect: "manual", signal: ctl.signal });
+      return await guardedFetch(target, { headers: sessionHeaders(), redirect: "manual", signal: ctl.signal });
     } finally {
       clearTimeout(id);
     }
@@ -168,11 +204,23 @@ export async function fuzzDiscoveredTargets(
   // holds the payload, the rest a benign filler, so endpoints that validate the
   // presence of sibling fields still process our value. The injected field is
   // guaranteed present even if it wasn't in the discovered list.
+  // The session for the target currently being fuzzed: its carried cookie and
+  // the CSRF token to resubmit. Set once per target in the dispatch loop below;
+  // stays {} for GET/query targets and for forms with no token/session, so the
+  // request shape is byte-for-byte what it was before when there's nothing to add.
+  let activeSession: FormSession = {};
+
+  // A field's value in a POST body: the injected payload wins; the carried CSRF
+  // token keeps its real value (filler would fail the token check); everything
+  // else is benign filler so sibling-field validation still passes.
   const FILLER = "seclayer";
+  const fieldValue = (p: string, injectParam: string, value: string): string =>
+    p === injectParam ? value : (p === activeSession.tokenName && activeSession.tokenValue != null ? activeSession.tokenValue : FILLER);
   const formBody = (allParams: string[], injectParam: string, value: string): string => {
     const usp = new URLSearchParams();
-    const names = allParams.includes(injectParam) ? allParams : [...allParams, injectParam];
-    for (const p of names) usp.set(p, p === injectParam ? value : FILLER);
+    let names = allParams.includes(injectParam) ? allParams : [...allParams, injectParam];
+    if (activeSession.tokenName && !names.includes(activeSession.tokenName)) names = [...names, activeSession.tokenName];
+    for (const p of names) usp.set(p, fieldValue(p, injectParam, value));
     return usp.toString();
   };
   // JSON body carrying every field (injected one = payload, rest = filler), for
@@ -181,10 +229,15 @@ export async function fuzzDiscoveredTargets(
   // so every probe below works identically over a JSON POST.
   const jsonBody = (allParams: string[], injectParam: string, value: string): string => {
     const obj: Record<string, string> = {};
-    const names = allParams.includes(injectParam) ? allParams : [...allParams, injectParam];
-    for (const p of names) obj[p] = p === injectParam ? value : FILLER;
+    let names = allParams.includes(injectParam) ? allParams : [...allParams, injectParam];
+    if (activeSession.tokenName && !names.includes(activeSession.tokenName)) names = [...names, activeSession.tokenName];
+    for (const p of names) obj[p] = fieldValue(p, injectParam, value);
     return JSON.stringify(obj);
   };
+  // Request headers for the target being fuzzed, adding the carried session
+  // Cookie when there is one. renderRawRequest redacts Cookie in receipts.
+  const sessionHeaders = (): Record<string, string> =>
+    activeSession.cookie ? { ...fuzzHeaders, Cookie: activeSession.cookie } : fuzzHeaders;
   const postContentType = (t: InjectableTarget): string =>
     t.contentType === "json" ? "application/json" : "application/x-www-form-urlencoded";
   const postBody = (t: InjectableTarget, param: string, value: string): string =>
@@ -216,7 +269,7 @@ export async function fuzzDiscoveredTargets(
       try {
         const res = await safeFetch(t.url, {
           method: "POST",
-          headers: { ...fuzzHeaders, "Content-Type": contentType },
+          headers: { ...sessionHeaders(), "Content-Type": contentType },
           body,
           signal: ctl.signal,
         });
@@ -251,13 +304,13 @@ export async function fuzzDiscoveredTargets(
       if (t.method === "POST") {
         const res = await safeFetch(t.url, {
           method: "POST",
-          headers: { ...fuzzHeaders, "Content-Type": postContentType(t) },
+          headers: { ...sessionHeaders(), "Content-Type": postContentType(t) },
           body: postBody(t, param, value),
           signal: ctl.signal,
         });
         await res.text().catch(() => "");
       } else {
-        const res = await safeFetch(buildUrl(t.url, param, value), { headers: fuzzHeaders, signal: ctl.signal });
+        const res = await safeFetch(buildUrl(t.url, param, value), { headers: sessionHeaders(), signal: ctl.signal });
         await res.text().catch(() => "");
       }
       return { elapsed: Date.now() - start, ok: true };
@@ -327,7 +380,7 @@ export async function fuzzDiscoveredTargets(
             description: `Injecting SQL metacharacters into the discovered ${sent.reqMethod} parameter "${param}" on ${endpointPath} provoked a database error, indicating an exploitable SQL injection.`,
             fix: "Use parameterized queries / prepared statements for this endpoint; never concatenate request input into SQL.",
             evidence: buildProbeEvidence({
-              method: "error-signature", attackUrl: sent.attackUrl, requestHeaders: fuzzHeaders, res: sent.res, body: sent.text,
+              method: "error-signature", attackUrl: sent.attackUrl, requestHeaders: sessionHeaders(), res: sent.res, body: sent.text,
               matchIndex: m.index, quote: m[0],
               reqMethod: sent.reqMethod, reqBody: sent.reqBody, reqContentType: sent.reqContentType,
               why: `This raw database error is emitted only when the injected payload breaks the SQL query's syntax, proving the "${param}" parameter reaches the database unescaped.`,
@@ -399,8 +452,8 @@ export async function fuzzDiscoveredTargets(
       const sleepUrl = t.method === "POST" ? t.url : buildUrl(t.url, param, probePayload);
       const reqOf = (value: string, u: string) =>
         t.method === "POST"
-          ? renderRawRequest("POST", u, { ...fuzzHeaders, "Content-Type": postContentType(t) }, postBody(t, param, value))
-          : renderRawRequest("GET", u, fuzzHeaders);
+          ? renderRawRequest("POST", u, { ...sessionHeaders(), "Content-Type": postContentType(t) }, postBody(t, param, value))
+          : renderRawRequest("GET", u, sessionHeaders());
       findings.push({
         testName: `SQL Injection — time-based blind (discovered parameter "${param}" on ${endpointPath})`,
         payload: `${param}=${probePayload}`,
@@ -481,8 +534,8 @@ export async function fuzzDiscoveredTargets(
       const falseUrl = t.method === "POST" ? t.url : buildUrl(t.url, param, d.f1);
       const reqOf = (value: string, u: string) =>
         t.method === "POST"
-          ? renderRawRequest("POST", u, { ...fuzzHeaders, "Content-Type": postContentType(t) }, postBody(t, param, value))
-          : renderRawRequest("GET", u, fuzzHeaders);
+          ? renderRawRequest("POST", u, { ...sessionHeaders(), "Content-Type": postContentType(t) }, postBody(t, param, value))
+          : renderRawRequest("GET", u, sessionHeaders());
       findings.push({
         testName: `SQL Injection — boolean-based blind (discovered parameter "${param}" on ${endpointPath})`,
         payload: `${param}=${d.f1}`,
@@ -544,7 +597,7 @@ export async function fuzzDiscoveredTargets(
             description: `The discovered ${sent.reqMethod} parameter "${param}" on ${endpointPath} reflects unencoded HTML/JavaScript into the response, confirming a reflected Cross-Site Scripting vulnerability.`,
             fix: "Apply context-aware output encoding for this parameter and deploy a restrictive Content-Security-Policy.",
             evidence: buildProbeEvidence({
-              method: "reflection", attackUrl: sent.attackUrl, requestHeaders: fuzzHeaders, res: sent.res, body: sent.text,
+              method: "reflection", attackUrl: sent.attackUrl, requestHeaders: sessionHeaders(), res: sent.res, body: sent.text,
               matchIndex: idx, quote: payload,
               reqMethod: sent.reqMethod, reqBody: sent.reqBody, reqContentType: sent.reqContentType,
               why: `The payload was reflected verbatim and unescaped in ${c === "attr" ? "an attribute" : c === "script" ? "a script" : "an HTML"} context, so a browser executes the injected "${param}" value as live markup.`,
@@ -583,7 +636,7 @@ export async function fuzzDiscoveredTargets(
             description: `The discovered ${sent.reqMethod} parameter "${param}" on ${endpointPath} is evaluated by a server-side template engine: injecting "${expr}" returned its computed result. SSTI frequently escalates to remote code execution.`,
             fix: "Never render user input as a template. Pass untrusted values only as data to a pre-compiled/sandboxed template for this parameter.",
             evidence: buildProbeEvidence({
-              method: "oracle", attackUrl: sent.attackUrl, requestHeaders: fuzzHeaders, res: sent.res, body: sent.text,
+              method: "oracle", attackUrl: sent.attackUrl, requestHeaders: sessionHeaders(), res: sent.res, body: sent.text,
               matchIndex: idx, quote: product,
               reqMethod: sent.reqMethod, reqBody: sent.reqBody, reqContentType: sent.reqContentType,
               why: `We injected the template expression "${expr}"; the response contained ${product}, the exact product of ${a}×${b}, which the literal payload never contains — so the "${param}" value was evaluated as a template.`,
@@ -626,7 +679,7 @@ export async function fuzzDiscoveredTargets(
             description: `The discovered ${sent.reqMethod} parameter "${param}" on ${endpointPath} reads an attacker-supplied filesystem path: a traversal payload returned the contents of /etc/passwd. An attacker can read arbitrary files the app can access.`,
             fix: "Resolve the path and confirm it stays within an allowed base directory (canonicalize then prefix-check), or map inputs to an allow-list; reject path separators/traversal for this parameter.",
             evidence: buildProbeEvidence({
-              method: "error-signature", attackUrl: sent.attackUrl, requestHeaders: fuzzHeaders, res: sent.res, body: sent.text,
+              method: "error-signature", attackUrl: sent.attackUrl, requestHeaders: sessionHeaders(), res: sent.res, body: sent.text,
               matchIndex: m.index, quote: m[0],
               reqMethod: sent.reqMethod, reqBody: sent.reqBody, reqContentType: sent.reqContentType,
               why: `This "root" line from /etc/passwd is outside the web root. A benign value for "${param}" returns a response WITHOUT it, so it only appears because our traversal payload reached the filesystem.`,
@@ -666,7 +719,7 @@ export async function fuzzDiscoveredTargets(
             description: `The discovered parameter "${param}" on ${endpointPath} is an unvalidated redirect target: the app issued an HTTP redirect to an attacker-controlled external host. Used for phishing and OAuth token theft.`,
             fix: "Redirect only to an allow-list of paths/hosts, or force a relative path; reject absolute/protocol-relative targets that aren't your origin.",
             evidence: buildHeaderEvidence({
-              method: "reflection", reqMethod: "GET", attackUrl, requestHeaders: fuzzHeaders, res,
+              method: "reflection", reqMethod: "GET", attackUrl, requestHeaders: sessionHeaders(), res,
               proofHeaders: [`Location: ${location}`], quote: REDIRECT_MARKER,
               why: `The server answered with an HTTP ${res.status} redirect whose Location points at "${REDIRECT_MARKER}", supplied via "${param}".`,
               demonstration: `We set "${param}" to "${payload}" on ${endpointPath} and the server redirected to ${location} — an external host we control.`,
@@ -708,7 +761,7 @@ export async function fuzzDiscoveredTargets(
             description: `The discovered parameter "${param}" on ${endpointPath} is written into a response header unsanitized: an injected CRLF added an attacker-defined header. Enables response splitting, cookie injection, and cache poisoning.`,
             fix: "Strip CR/LF from any input that reaches a response header for this endpoint; use framework APIs that encode header values.",
             evidence: buildHeaderEvidence({
-              method: "reflection", reqMethod: "GET", attackUrl, requestHeaders: fuzzHeaders, res,
+              method: "reflection", reqMethod: "GET", attackUrl, requestHeaders: sessionHeaders(), res,
               proofHeaders: [`${marker}: ${res.headers.get(marker)}`], quote: marker,
               why: `We injected an encoded newline plus "${marker}" into "${param}" and the server emitted "${marker}" as a real response header.`,
               demonstration: `A CRLF sequence in the "${param}" parameter on ${endpointPath} made the server add our own header "${marker}" to its response.`,
@@ -720,10 +773,43 @@ export async function fuzzDiscoveredTargets(
     }
   };
 
+  // Fetch a POST form's own page once (cached per page) to establish a session:
+  // the cookie it sets and the hidden anti-CSRF token it embeds, both needed for
+  // the fuzz POSTs to be accepted rather than 403'd. GET/query targets and forms
+  // with neither a cookie nor a token yield {}, so the request shape is unchanged.
+  const sessionCache = new Map<string, FormSession>();
+  const prepFormSession = async (t: InjectableTarget): Promise<FormSession> => {
+    if (t.method !== "POST" || t.source !== "form") return {};
+    const pageUrl = t.discoveredOnPage || t.url;
+    const cached = sessionCache.get(pageUrl);
+    if (cached) return cached;
+    let sess: FormSession = {};
+    if (canSpend()) {
+      budget--;
+      const ctl = new AbortController();
+      const id = setTimeout(() => ctl.abort(), 4000);
+      try {
+        const res = await safeFetch(pageUrl, { headers: fuzzHeaders, signal: ctl.signal });
+        const html = await res.text().catch(() => "");
+        const setCookie: string[] =
+          typeof (res.headers as any).getSetCookie === "function" ? (res.headers as any).getSetCookie() : [];
+        const cookie = setCookie.map((c) => c.split(";")[0].trim()).filter(Boolean).join("; ") || undefined;
+        const token = extractHiddenToken(html);
+        sess = { cookie, tokenName: token?.name, tokenValue: token?.value };
+      } catch { /* leave session empty — degrade to unauthenticated fuzzing */ }
+      finally { clearTimeout(id); }
+    }
+    sessionCache.set(pageUrl, sess);
+    return sess;
+  };
+
   for (const t of targets) {
     if (!canSpend()) break;
     let endpointPath = t.url;
     try { endpointPath = new URL(t.url).pathname; } catch {}
+    // Establish this target's session (carried cookie + CSRF token) before any
+    // probe runs, so every injection this iteration submits is in-session.
+    activeSession = await prepFormSession(t);
     // The slow time-based SQLi pass runs at most once per target (on its most
     // SQLi-leaning parameter), so it can't dominate the wall-clock budget.
     let timeTried = false;
