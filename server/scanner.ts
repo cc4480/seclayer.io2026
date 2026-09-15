@@ -20,6 +20,7 @@ import { probeI18nAuthBypass } from "./i18nProbe.js";
 import { extractUrlKeyPairs, probeCredentialUrlPairs } from "./credentialChainProbe.js";
 import { extractFirebaseDbUrls, probeFirebaseOpenDb } from "./firebaseProbe.js";
 import { extractBucketUrls, probeOpenBuckets } from "./bucketProbe.js";
+import { assessCsrf, redactCookieValue } from "./csrfProbe.js";
 import { probeExposedSourceMaps } from "./sourceMapProbe.js";
 import { probeLlmPromptInjection } from "./llmProbe.js";
 import { probeEdgeFunctionAuth } from "./edgeFunctionProbe.js";
@@ -314,6 +315,25 @@ export async function runDiagnostics(
             console.warn("Open-bucket probe encountered an error", e);
           }
         }
+      }
+
+      // CSRF posture: a SameSite=None session cookie (cross-site-sendable) plus a
+      // state-changing form with no anti-CSRF token. Read-only inference over
+      // data already gathered — the Set-Cookie attributes and the crawled forms —
+      // so it needs no extra request and no ownership gate (passive posture, not
+      // an exploit). Reported medium-confidence / needs-verification.
+      try {
+        const cookieLines = [
+          ...(result.setCookies || []),
+          ...crawl.captures.flatMap((c) => (c.setCookie || []).map(redactCookieValue)),
+        ];
+        const forms = crawl.targets
+          .filter((t) => t.source === "form" && t.method === "POST")
+          .map((t) => ({ url: t.url, method: t.method, params: t.params, discoveredOnPage: t.discoveredOnPage }));
+        const csrfFinding = assessCsrf(cookieLines, forms);
+        if (csrfFinding) result.apiSecFindings = [...(result.apiSecFindings || []), csrfFinding];
+      } catch (e) {
+        console.warn("CSRF posture check encountered an error", e);
       }
 
       // Edge Function auth-bypass: extract any Edge/serverless function URL the

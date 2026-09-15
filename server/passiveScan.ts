@@ -211,10 +211,15 @@ export async function runPassiveScan(
       result.cookieIssues.push(ci.message);
       result.cookieEvidence[ci.message] = ci.observed;
     }
+    // Root Set-Cookie lines, VALUE-REDACTED, for the CSRF posture check (which
+    // needs the SameSite attribute of any session cookie). Never the value.
+    result.setCookies = setCookieList.map(redactCookieValue);
 
     // 2. SAST secrets + 3. SCA libraries (over the served markup).
-    // (DAST CSRF inference from static markup is intentionally omitted — it is
-    // unreliable black-box and would violate the zero-false-positive goal.)
+    // NOTE: naive CSRF inference from static markup ("a form lacks a token")
+    // stays omitted — too false-positive-prone. The precise SameSite=None-gated
+    // CSRF posture check runs in server/csrfProbe.ts, wired in scanner.ts once
+    // the crawl has mapped the forms.
     result.sastFindings = analyzeSecrets(htmlText);
     result.scaLibraries = analyzeLibraries(htmlText);
 

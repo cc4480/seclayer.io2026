@@ -18,8 +18,10 @@ export function mapOwasp(category: string, title: string): string {
   if (/\bjwt\b|json web token|signature not verified|authentication bypass|auth bypass|session fixation|weak session/.test(t)) {
     return "A07:2021 – Identification and Authentication Failures";
   }
-  // A01 — Broken Access Control (IDOR/BOLA, directory listing, exposed admin/db panels)
-  if (/\b(idor|bola)\b|broken object level|broken access|directory listing|access control|phpmyadmin|adminer|admin panel|unauthorized/.test(t)) {
+  // A01 — Broken Access Control (IDOR/BOLA, CSRF, directory listing, exposed admin/db panels).
+  // CSRF folded into A01 in the 2021 taxonomy. Matched by "csrf" / "cross-site
+  // request forgery" — distinct from the A10 SSRF rule above ("server-side …").
+  if (/\b(idor|bola|csrf)\b|cross-site request forgery|broken object level|broken access|directory listing|access control|phpmyadmin|adminer|admin panel|unauthorized/.test(t)) {
     return "A01:2021 – Broken Access Control";
   }
   // A08 — Software and Data Integrity Failures (e.g. missing SRI). Checked

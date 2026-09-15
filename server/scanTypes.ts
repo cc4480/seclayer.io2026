@@ -48,6 +48,9 @@ export interface DiagnosticResult {
     meta?: { title: string; severity: Severity; description: string; fix: string };
   }>;
   cookieIssues: string[];
+  // Root Set-Cookie lines with values redacted — for the CSRF posture check
+  // (needs each session cookie's SameSite attribute). See server/csrfProbe.ts.
+  setCookies?: string[];
   // The literal Set-Cookie line each cookie issue was derived from, keyed by
   // the issue text, with the cookie VALUE redacted. Exists because these
   // findings are routinely disputed: a target can serve different cookie
