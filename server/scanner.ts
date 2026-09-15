@@ -19,6 +19,7 @@ import { probeJwtAuth, extractJwtSecretCandidates } from "./jwtProbe.js";
 import { probeI18nAuthBypass } from "./i18nProbe.js";
 import { extractUrlKeyPairs, probeCredentialUrlPairs } from "./credentialChainProbe.js";
 import { extractFirebaseDbUrls, probeFirebaseOpenDb } from "./firebaseProbe.js";
+import { extractBucketUrls, probeOpenBuckets } from "./bucketProbe.js";
 import { probeExposedSourceMaps } from "./sourceMapProbe.js";
 import { probeLlmPromptInjection } from "./llmProbe.js";
 import { probeEdgeFunctionAuth } from "./edgeFunctionProbe.js";
@@ -294,6 +295,23 @@ export async function runDiagnostics(
             if (fbFinding) result.apiSecFindings = [...(result.apiSecFindings || []), fbFinding];
           } catch (e) {
             console.warn("Firebase open-DB probe encountered an error", e);
+          }
+        }
+      }
+
+      // Open cloud-storage buckets: extract any S3/GCS/Azure bucket the scanned
+      // app's own content references and prove it permits an anonymous object
+      // LIST (a 200 listing document where a locked-down bucket returns 403).
+      // Read-only GETs, buckets named by the app not guessed — same cross-origin
+      // discipline + ownership gate as the Firebase/credential-chain probes above.
+      if (allowActiveProbes) {
+        const bucketRefs = extractBucketUrls(allScannedText.join("\n"));
+        if (bucketRefs.length) {
+          try {
+            const bucketFinding = await probeOpenBuckets(bucketRefs, headers);
+            if (bucketFinding) result.apiSecFindings = [...(result.apiSecFindings || []), bucketFinding];
+          } catch (e) {
+            console.warn("Open-bucket probe encountered an error", e);
           }
         }
       }
