@@ -2,6 +2,7 @@ import { Finding, Severity, ExecutiveBreakdown } from '../src/types.js';
 import { callDeepSeek, resolveApiKey } from './deepseekClient.js';
 import { buildReportPrompt } from './reportPrompt.js';
 import { compileLocalSummary, compileLocalBreakdown, sanitizeBreakdown } from './localReport.js';
+import { stripScoreClaims } from './scoreProse.js';
 
 // The "pro" tier handles the deep security report reasoning. It defaults to
 // "thinking" mode (chain-of-thought before the final answer) — see
@@ -191,13 +192,23 @@ export async function generateAiReport(
     // model now contributes only NARRATIVE prose — the executive summary, the
     // breakdown, and the per-finding fix prompt/impact merged by mergeModelProse
     // above; the findings panel and the score are fully reproducible.
+    // The prompt forbids the model from quoting a score or grade, but a prompt
+    // is a request, not a guarantee — and the score is recalculated on every
+    // read (suppressing a finding changes it), so a number frozen into prose
+    // would contradict the box on screen. Enforce it on the way out.
+    const localSummary = compileLocalSummary(url, staticCompiled);
+    const localBreakdown = compileLocalBreakdown(url, staticCompiled);
+    const breakdown = sanitizeBreakdown(data.executiveBreakdown, url, staticCompiled);
     return {
       score: staticCompiled.score,
       severity: staticCompiled.severity,
       findings: mergeModelProse(staticCompiled.findings, data.findings),
-      aiSummary: data.aiSummary || compileLocalSummary(url, staticCompiled),
+      aiSummary: stripScoreClaims(data.aiSummary || localSummary, localSummary),
       aiReasoning: truncateReasoning(reasoningContent),
-      executiveBreakdown: sanitizeBreakdown(data.executiveBreakdown, url, staticCompiled),
+      executiveBreakdown: {
+        ...breakdown,
+        overview: stripScoreClaims(breakdown.overview, localBreakdown.overview),
+      },
     };
 
   } catch (err: any) {

@@ -47,7 +47,10 @@ export function compileLocalBreakdown(url: string, sc: ScoredFindings): Executiv
     .map((f) => f.fix || f.title);
 
   return {
-    overview: `Automated black-box assessment of ${url}: ${active.length} active finding(s) across ${byCategory.size} area(s), posture score ${sc.score}/100 (${sc.severity}).`,
+    // Deliberately states no numeric score: the score is recalculated on every
+    // read (suppressing a finding changes it), so a number frozen here would
+    // drift out of step with the score box. See server/scoreProse.ts.
+    overview: `Automated black-box assessment of ${url}: ${active.length} active finding(s) across ${byCategory.size} area(s); overall posture ${sc.severity}.`,
     riskAreas: riskAreas.length > 0 ? riskAreas : [{ area: "General Hygiene", detail: "No active findings — baseline defensive posture looks clean." }],
     businessImpact: sc.severity === "critical" || sc.severity === "high"
       ? "Unaddressed, these issues create a realistic path to data exposure, account compromise, or service disruption — with attendant customer-trust and compliance fallout."

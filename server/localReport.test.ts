@@ -47,14 +47,23 @@ test("compileLocalSummary never states a numeric score in its prose", () => {
 
 // --- compileLocalBreakdown --------------------------------------------------
 
-test("compileLocalBreakdown summarises counts, areas and score in the overview", () => {
+test("compileLocalBreakdown summarises counts and areas in the overview", () => {
   const b = compileLocalBreakdown(URL, scored("high", [
     finding({ category: "SAST", severity: "critical", title: "Leaked AWS key" }),
     finding({ category: "IAST", severity: "medium" }),
   ], 20));
   assert.ok(b.overview.includes(URL));
   assert.ok(b.overview.includes("2 active finding(s)"));
-  assert.ok(b.overview.includes("20/100"));
+  assert.ok(b.overview.includes("2 area(s)"));
+  assert.ok(b.overview.includes("high"));
+});
+
+test("compileLocalBreakdown overview quotes no numeric score (it drifts on suppression)", () => {
+  // The score is recalculated on every read, so a number frozen into this prose
+  // would contradict the score box as soon as a finding is suppressed.
+  const b = compileLocalBreakdown(URL, scored("high", [finding({ severity: "critical" })], 20));
+  assert.ok(!/\b\d{1,3}\s*\/\s*100\b/.test(b.overview), "overview must not quote a score");
+  assert.ok(!b.overview.includes("20"), "overview must not quote the score value");
 });
 
 test("compileLocalBreakdown excludes suppressed false positives from every section", () => {
