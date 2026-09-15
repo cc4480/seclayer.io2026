@@ -1,7 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { fuzzDiscoveredTargets } from './paramFuzzer.js';
+import {
+  fuzzDiscoveredTargets,
+  normalizeForComparison,
+  responsesEquivalent,
+  responsesDistinct,
+  booleanBlindConfirmed,
+  type CmpResponse,
+} from './paramFuzzer.js';
 import { isProven } from './scoring.js';
 import type { InjectableTarget } from './crawler.js';
 
@@ -242,5 +249,118 @@ test('aggressive tier confirms SSTI in a POST form field (arithmetic oracle)', a
     assert.ok(ssti, 'expected an SSTI finding on the POST form field');
     assert.ok(ssti.evidence.attack.response.includes(ssti.evidence.signal.quote));
     assert.match(ssti.evidence.attack.request, /^POST \/greet/m);
+  });
+});
+
+// --- Boolean-based blind SQLi: the pure oracle (false-positive-critical) -----
+
+const R = (status: number, norm: string): CmpResponse => ({ status, norm });
+// A stable 400-char normalized page, and a clearly-different one (~200 chars).
+const FULL = "x".repeat(400);
+const EMPTY = "x".repeat(200);
+
+test('normalizeForComparison strips the volatile parts a boolean compare must ignore', () => {
+  const a = normalizeForComparison('<html> id 12345 <script>var t=1699999999</script> <b>Results</b> token=abcdef0123456789</html>');
+  const b = normalizeForComparison('<html> id 98765 <script>var t=1700000042</script> <b>Results</b> token=fedcba9876543210</html>');
+  // Different digits, script bodies and tokens — same structural text.
+  assert.equal(a, b);
+});
+
+test('responsesEquivalent / responsesDistinct honour the status and the dead zone', () => {
+  assert.equal(responsesEquivalent(R(200, FULL), R(200, FULL)), true);
+  assert.equal(responsesEquivalent(R(200, FULL), R(500, FULL)), false, 'status mismatch is never equivalent');
+  assert.equal(responsesDistinct(R(200, FULL), R(200, EMPTY)), true);
+  // An 18-char (~4.5%) difference sits in the dead zone: past the 2% equivalence
+  // tolerance (12 chars) but short of the 5% distinctness floor (24 chars).
+  const near = "x".repeat(418);
+  assert.equal(responsesEquivalent(R(200, FULL), R(200, near)), false);
+  assert.equal(responsesDistinct(R(200, FULL), R(200, near)), false);
+});
+
+test('booleanBlindConfirmed fires only on the true≈base / false≠base pattern, twice', () => {
+  const base = R(200, FULL);
+  // Real boolean-blind: both TRUE match baseline, both FALSE clearly differ and agree.
+  assert.equal(booleanBlindConfirmed(base, R(200, FULL), R(200, EMPTY), R(200, FULL), R(200, EMPTY)), true);
+});
+
+test('booleanBlindConfirmed rejects a page that never changes (no injection)', () => {
+  const base = R(200, FULL);
+  assert.equal(booleanBlindConfirmed(base, R(200, FULL), R(200, FULL), R(200, FULL), R(200, FULL)), false);
+});
+
+test('booleanBlindConfirmed rejects when only ONE pair separates (coincidence, not reproduced)', () => {
+  const base = R(200, FULL);
+  // First pair looks right, the confirmation pair does not reproduce it.
+  assert.equal(booleanBlindConfirmed(base, R(200, FULL), R(200, EMPTY), R(200, FULL), R(200, FULL)), false);
+});
+
+test('booleanBlindConfirmed rejects when the TRUE condition already differs from baseline', () => {
+  const base = R(200, FULL);
+  // e.g. a page that reflects the payload: TRUE no longer matches baseline.
+  assert.equal(booleanBlindConfirmed(base, R(200, EMPTY), R(200, EMPTY), R(200, EMPTY), R(200, EMPTY)), false);
+});
+
+// --- Boolean-based blind SQLi: end to end -----------------------------------
+
+// Simulate SELECT ... WHERE id='<id>': a benign value and any TRUE condition
+// match a row (full page); a FALSE condition (1=2 / 7=8) matches nothing (short
+// page). Nothing is reflected and no error is shown — pure boolean-blind.
+function conditionIsFalse(v: string): boolean {
+  return /and\s+1\s*=\s*2/i.test(v) || /and\s+7\s*=\s*8/i.test(v);
+}
+
+test('fuzzer confirms boolean-based blind SQLi (differential, two-pair confirmed)', async () => {
+  await withServer((req, res) => {
+    const u = new URL(req.url || '/', 'http://127.0.0.1');
+    const id = u.searchParams.get('id') || '';
+    const found = !conditionIsFalse(id);
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    // No reflection of `id`, no SQL error — only the row count moves the page.
+    res.end(found
+      ? `<!doctype html><html><body><h1>Order</h1>${'<li>item</li>'.repeat(30)}</body></html>`
+      : `<!doctype html><html><body><h1>Order</h1><p>No matching order.</p></body></html>`);
+  }, async (port) => {
+    const targets: InjectableTarget[] = [
+      { url: `http://127.0.0.1:${port}/orders`, method: 'GET', params: ['id'], source: 'query' },
+    ];
+    const { findings } = await fuzzDiscoveredTargets(targets, HEADERS, { aggressive: true });
+    const bool = findings.find((f) => /boolean-based blind/i.test(f.testName));
+    assert.ok(bool, 'expected a boolean-based blind SQLi finding');
+    assert.equal(bool.severity, 'critical');
+    assert.equal(bool.evidence.method, 'differential');
+    // The proof is timing/differential, not a reflected byte: no quote.
+    assert.equal(bool.evidence.signal.quote, '');
+    assert.ok(!isProven(bool.evidence), 'a differential is CONFIRMED, not PROVEN (no substring proof)');
+    assert.match(bool.evidence.attack.request, /^GET \/orders/m);
+  });
+});
+
+test('fuzzer does NOT false-positive boolean-blind on a stable page that ignores the param', async () => {
+  await withServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    // Identical every request, whatever the param — no injection to find.
+    res.end(`<!doctype html><html><body><h1>Static</h1>${'<li>x</li>'.repeat(30)}</body></html>`);
+  }, async (port) => {
+    const targets: InjectableTarget[] = [
+      { url: `http://127.0.0.1:${port}/page`, method: 'GET', params: ['id'], source: 'query' },
+    ];
+    const { findings } = await fuzzDiscoveredTargets(targets, HEADERS, { aggressive: true });
+    assert.ok(!findings.some((f) => /boolean-based blind/i.test(f.testName)), 'stable page must not yield a boolean-blind finding');
+  });
+});
+
+test('fuzzer does NOT false-positive boolean-blind on a volatile page (stability guard)', async () => {
+  await withServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    // Random amount of non-normalizable letter content each request — the
+    // two-baseline stability guard must reject this before any comparison.
+    const n = 100 + Math.floor(Math.random() * 400);
+    res.end(`<!doctype html><html><body>${'q'.repeat(n)}</body></html>`);
+  }, async (port) => {
+    const targets: InjectableTarget[] = [
+      { url: `http://127.0.0.1:${port}/vol`, method: 'GET', params: ['id'], source: 'query' },
+    ];
+    const { findings } = await fuzzDiscoveredTargets(targets, HEADERS, { aggressive: true });
+    assert.ok(!findings.some((f) => /boolean-based blind/i.test(f.testName)), 'volatile page must not yield a boolean-blind finding');
   });
 });

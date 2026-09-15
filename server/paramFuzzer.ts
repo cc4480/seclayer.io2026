@@ -24,6 +24,76 @@ export interface FuzzCapture {
   text: string;
 }
 
+// --- Boolean-based blind SQLi oracle (pure, unit-tested) ---------------------
+// Boolean-blind injection reflects nothing and doesn't sleep: the only signal is
+// that a TRUE condition (AND 1=1) leaves the page as it was while a FALSE
+// condition (AND 1=2) changes it. That is entirely a response-comparison
+// problem, and getting the comparison wrong is how boolean-blind checks produce
+// false positives — so the comparison lives here, separate and tested.
+
+export interface CmpResponse {
+  status: number;
+  norm: string; // normalized body (see normalizeForComparison)
+}
+
+// Strip the volatile parts of a body so two logically-identical responses
+// compare equal: scripts/styles/comments (often carry nonces/timestamps), long
+// hex/token runs (ids, CSRF tokens, cache-busters), all digits, and whitespace.
+// What remains is the stable structural text the boolean condition actually moves.
+export function normalizeForComparison(body: string): string {
+  return (body || "")
+    .toLowerCase()
+    .replace(/<script[\s\S]*?<\/script>/g, "")
+    .replace(/<style[\s\S]*?<\/style>/g, "")
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/[0-9a-f]{8,}/g, "")
+    .replace(/\d+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// "Same page" — same status and normalized length within 2% (min 12 chars).
+export function responsesEquivalent(a: CmpResponse, b: CmpResponse): boolean {
+  if (a.status !== b.status) return false;
+  const la = a.norm.length, lb = b.norm.length;
+  const tol = Math.max(12, Math.floor(Math.max(la, lb) * 0.02));
+  return Math.abs(la - lb) <= tol;
+}
+
+// "Clearly different page" — different status, or normalized length apart by 5%+
+// (min 24 chars). The gap between the 2% equivalence tolerance and this 5% floor
+// is a deliberate dead zone: a response that is neither clearly the same nor
+// clearly different proves nothing, and the oracle below refuses to fire on it.
+export function responsesDistinct(a: CmpResponse, b: CmpResponse): boolean {
+  if (a.status !== b.status) return true;
+  const la = a.norm.length, lb = b.norm.length;
+  const floor = Math.max(24, Math.floor(Math.max(la, lb) * 0.05));
+  return Math.abs(la - lb) >= floor;
+}
+
+// The full boolean-blind proof, over two independent TRUE/FALSE pairs measured
+// against a stable baseline. It fires ONLY when both TRUE conditions leave the
+// page equivalent to baseline, both FALSE conditions clearly change it, the two
+// FALSE responses agree with each other, and TRUE differs from FALSE. Because
+// every payload carries the SAME injection syntax and differs only in the
+// boolean value (1=1 vs 1=2), a page that moved purely because of the quote/
+// syntax cannot pass — only the truth value can be driving the change, which is
+// the definition of a boolean-blind SQL injection.
+export function booleanBlindConfirmed(
+  baseline: CmpResponse,
+  t1: CmpResponse, f1: CmpResponse,
+  t2: CmpResponse, f2: CmpResponse,
+): boolean {
+  return (
+    responsesEquivalent(baseline, t1) &&
+    responsesEquivalent(baseline, t2) &&
+    responsesDistinct(baseline, f1) &&
+    responsesDistinct(baseline, f2) &&
+    responsesEquivalent(f1, f2) &&
+    responsesDistinct(t1, f1)
+  );
+}
+
 export async function fuzzDiscoveredTargets(
   targets: InjectableTarget[],
   fuzzHeaders: Record<string, string>,
@@ -353,6 +423,88 @@ export async function fuzzDiscoveredTargets(
     }
   };
 
+  // Boolean-based BLIND SQLi. The complement to time-based: when an app
+  // suppresses errors, reflects nothing AND doesn't sleep, the only tell is that
+  // a TRUE condition leaves the page unchanged while a FALSE condition changes
+  // it. Every payload carries the SAME injection syntax and differs only in the
+  // boolean value (1=1 vs 1=2), confirmed over two independent pairs against a
+  // stability-checked baseline, so nothing but the truth value can move the page.
+  // No inline receipt: the proof is the differential, not a captured byte.
+  const BOOL_DIALECTS: Array<{ t1: string; f1: string; t2: string; f2: string }> = [
+    { t1: "1' AND 1=1-- -", f1: "1' AND 1=2-- -", t2: "1' AND 7=7-- -", f2: "1' AND 7=8-- -" },
+    { t1: "1') AND 1=1-- -", f1: "1') AND 1=2-- -", t2: "1') AND 7=7-- -", f2: "1') AND 7=8-- -" },
+    { t1: "1 AND 1=1", f1: "1 AND 1=2", t2: "1 AND 7=7", f2: "1 AND 7=8" },
+    { t1: '1" AND 1=1-- -', f1: '1" AND 1=2-- -', t2: '1" AND 7=7-- -', f2: '1" AND 7=8-- -' },
+  ];
+  const tryBooleanSqli = async (t: InjectableTarget, param: string, endpointPath: string): Promise<void> => {
+    const key = `boolsqli:${endpointPath}:${param}`;
+    // Skip if any other SQLi class already fired for this param, or no budget.
+    if (reported.has(key) || reported.has(`sqli:${endpointPath}:${param}`) ||
+        reported.has(`timesqli:${endpointPath}:${param}`) || !canSpend()) return;
+
+    const cmp = (sent: { res: Response; text: string }): CmpResponse => ({ status: sent.res.status, norm: normalizeForComparison(sent.text) });
+
+    // Stability guard: two identical baseline requests must agree, or the page is
+    // too volatile for a boolean comparison to mean anything (rules out FPs on
+    // pages with rotating content the normalizer doesn't catch).
+    budget--;
+    const b1 = await sendInjection(t, param, "1").catch(() => null);
+    if (!b1 || !canSpend()) return;
+    budget--;
+    const b2 = await sendInjection(t, param, "1").catch(() => null);
+    if (!b2) return;
+    const base = cmp(b1);
+    if (!responsesEquivalent(base, cmp(b2))) return;
+
+    for (const d of BOOL_DIALECTS) {
+      if (!canSpend()) return;
+      budget--;
+      const st1 = await sendInjection(t, param, d.t1).catch(() => null);
+      if (!st1 || !canSpend()) { if (!st1) continue; return; }
+      budget--;
+      const sf1 = await sendInjection(t, param, d.f1).catch(() => null);
+      if (!sf1) continue;
+      // Cheap pre-check before spending the confirmation pair.
+      if (!(responsesEquivalent(base, cmp(st1)) && responsesDistinct(base, cmp(sf1)))) continue;
+      if (!canSpend()) return;
+      budget--;
+      const st2 = await sendInjection(t, param, d.t2).catch(() => null);
+      if (!st2 || !canSpend()) { if (!st2) continue; return; }
+      budget--;
+      const sf2 = await sendInjection(t, param, d.f2).catch(() => null);
+      if (!sf2) continue;
+
+      if (!booleanBlindConfirmed(base, cmp(st1), cmp(sf1), cmp(st2), cmp(sf2))) continue;
+
+      reported.add(key);
+      const trueUrl = t.method === "POST" ? t.url : buildUrl(t.url, param, d.t1);
+      const falseUrl = t.method === "POST" ? t.url : buildUrl(t.url, param, d.f1);
+      const reqOf = (value: string, u: string) =>
+        t.method === "POST"
+          ? renderRawRequest("POST", u, { ...fuzzHeaders, "Content-Type": postContentType(t) }, postBody(t, param, value))
+          : renderRawRequest("GET", u, fuzzHeaders);
+      findings.push({
+        testName: `SQL Injection — boolean-based blind (discovered parameter "${param}" on ${endpointPath})`,
+        payload: `${param}=${d.f1}`,
+        severity: "critical",
+        description: `A boolean-based blind SQL injection was confirmed on the ${t.method} parameter "${param}" at ${endpointPath}. A TRUE condition ("${d.t1}") returned the same page as a benign value while a FALSE condition ("${d.f1}") returned a clearly different page — reproduced with a second independent condition pair. Both payloads carry identical syntax and differ only in the boolean value, so the page content is controlled by a SQL condition the parameter is concatenated into, even though nothing is reflected and no database error is shown.`,
+        fix: "Use parameterized queries / prepared statements for this endpoint; never concatenate request input into SQL. A boolean-based blind injection is fully exploitable to extract data one bit at a time.",
+        evidence: {
+          method: "differential",
+          baseline: { identity: "true-condition", request: reqOf(d.t1, trueUrl), response: `HTTP/1.1 ${cmp(st1).status} — page equivalent to the benign baseline (normalized length ~${cmp(st1).norm.length})` },
+          attack: { identity: "false-condition", request: reqOf(d.f1, falseUrl), response: `HTTP/1.1 ${cmp(sf1).status} — page clearly changed (normalized length ~${cmp(sf1).norm.length}); reproduced with ${d.t2} / ${d.f2}` },
+          signal: { quote: "", offsetInResponse: 0, why: `TRUE (${d.t1}) matched the baseline and FALSE (${d.f1}) diverged, over two independent condition pairs, while the injection syntax stayed identical — only the boolean truth value moved the page, which is boolean-blind SQLi. The proof is the differential, so there is no reflected string to quote.` },
+          demonstration: `A true SQL condition left "${param}" on ${endpointPath} rendering normally; a false one changed the page — proof the value is evaluated as SQL even though nothing is echoed back.`,
+          reproduction: t.method === "POST"
+            ? `curl -sk "${t.url}" --data '${postBody(t, param, d.t1)}'   # vs --data '${postBody(t, param, d.f1)}'`
+            : `curl -sk "${trueUrl}"   # vs   "${falseUrl}"`,
+          capturedAt: new Date().toISOString(),
+        },
+      });
+      return;
+    }
+  };
+
   const tryXss = async (t: InjectableTarget, param: string, endpointPath: string): Promise<void> => {
     const key = `xss:${endpointPath}:${param}`;
     if (reported.has(key) || !canSpend()) return;
@@ -600,12 +752,15 @@ export async function fuzzDiscoveredTargets(
         await tryLfi(t, param, endpointPath);
         await tryOpenRedirect(t, param, endpointPath);
         await tryCrlf(t, param, endpointPath);
-        // Time-based blind SQLi: only when error-based SQLi didn't already fire
-        // for this param, once per target, on a SQLi-leaning parameter — catches
-        // injection on apps that suppress errors and reflect nothing.
+        // Blind SQLi (time-based + boolean-based): only when error-based SQLi
+        // didn't already fire for this param, once per target, on a SQLi-leaning
+        // parameter — catches injection on apps that suppress errors and reflect
+        // nothing. Time-based catches apps that will sleep; boolean-based catches
+        // apps that won't but whose page content tracks a SQL condition.
         if (!timeTried && s.sqli >= s.xss) {
           timeTried = true;
           await tryTimeSqli(t, param, endpointPath);
+          await tryBooleanSqli(t, param, endpointPath);
         }
       }
       // Report any injections confirmed on this parameter to the live ticker.
