@@ -118,7 +118,7 @@ export async function runDiagnostics(
   // libraries, EASM perimeter, and sensitive paths. Returns the root HTML to
   // seed the crawler. Throws on an unreachable target. See server/passiveScan.ts.
   emit?.("system", "Target validated. Passive recon: headers, TLS, secrets, libraries, perimeter & sensitive paths…");
-  const rootHtml = await runPassiveScan(url, host, hostname, headers, result, emit);
+  const { rootHtml, rootCookies } = await runPassiveScan(url, host, hostname, headers, result, emit);
 
   // TLS/certificate posture (HTTPS only, read-only, SSRF-gated). A plain fetch
   // can't see an expired cert or a deprecated protocol — one handshake can.
@@ -187,6 +187,11 @@ export async function runDiagnostics(
         maxDepth: 2,
         budgetMs: 15000,
         seedHtml: rootHtml,
+        // Seed the crawl's session jar with the root response's cookies (the
+        // session cookie most apps set on first contact) so pages that only
+        // render in-session are mapped. Read-only GET crawl — never a
+        // state-changing request. See CookieJar in server/crawler.ts.
+        initialCookies: rootCookies,
       });
 
       // Extend secret-signature + cookie-flag analysis beyond the root

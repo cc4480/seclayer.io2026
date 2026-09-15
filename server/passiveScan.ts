@@ -107,8 +107,12 @@ export async function runPassiveScan(
   headers: Record<string, string>,
   result: DiagnosticResult,
   emit?: EmitFn,
-): Promise<string> {
+): Promise<{ rootHtml: string; rootCookies: string[] }> {
   let rootHtml = "";
+  // The root response's RAW Set-Cookie lines (with values) — returned in memory
+  // only, never stored on `result`, so the session-aware crawl can seed its
+  // cookie jar with the session cookie most apps set on the first response.
+  let rootCookies: string[] = [];
   try {
     // 1. Core Header Analysis — cold-start-aware so a sleeping target that wakes
     // slowly (Replit/Render/Fly free tiers) still gets scanned instead of failing
@@ -214,6 +218,8 @@ export async function runPassiveScan(
     // Root Set-Cookie lines, VALUE-REDACTED, for the CSRF posture check (which
     // needs the SameSite attribute of any session cookie). Never the value.
     result.setCookies = setCookieList.map(redactCookieValue);
+    // Raw (with values) for the crawl's in-memory cookie jar only.
+    rootCookies = setCookieList;
 
     // 2. SAST secrets + 3. SCA libraries (over the served markup).
     // NOTE: naive CSRF inference from static markup ("a form lacks a token")
@@ -239,5 +245,5 @@ export async function runPassiveScan(
     }
     throw new Error(`Unable to connect to ${url}: ${err?.message || "connection failed"}`);
   }
-  return rootHtml;
+  return { rootHtml, rootCookies };
 }

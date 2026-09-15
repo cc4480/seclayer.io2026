@@ -143,3 +143,57 @@ test('crawlSite captures every fetched response (HTML or not) for passive analys
   assert.ok(dashboard, 'the HTML page must ALSO be captured (captures is a superset of pages)');
   assert.deepEqual(dashboard!.setCookie, ['sessionId=abc']);
 });
+
+test('session-aware crawl: seeds the jar from initialCookies, carries a mid-crawl Set-Cookie forward, and returns the accumulated session', async () => {
+  // The crawl must map pages that only render in-session. It seeds its cookie
+  // jar with the root response's cookies (initialCookies), sends them on every
+  // request, ingests any Set-Cookie a page issues, and carries that forward.
+  // A depth chain (/a -> /b) makes the ingest->apply ordering deterministic:
+  // /a is fetched before /b, so /b's request must carry the cookie /a set.
+  const seedHtml = `<a href="/a">a</a>`;
+  const seen: Record<string, string | undefined> = {};
+  const fetchFn = async (url: string, init: RequestInit) => {
+    const cookie = (init.headers as Record<string, string> | undefined)?.Cookie;
+    const path = new URL(url).pathname;
+    seen[path] = cookie;
+    if (path === '/a') {
+      return new Response('<a href="/b">b</a>', {
+        status: 200,
+        headers: { 'content-type': 'text/html', 'set-cookie': 'sid=fromA' },
+      });
+    }
+    return new Response('<html>b</html>', { status: 200, headers: { 'content-type': 'text/html' } });
+  };
+
+  const result = await crawlSite(BASE, fetchFn as any, {
+    seedHtml,
+    initialCookies: ['seed=root; Path=/; HttpOnly'],
+    maxPages: 5,
+    maxDepth: 2,
+    budgetMs: 2000,
+  });
+
+  // The seeded root session rides on the very first crawled request.
+  assert.match(seen['/a'] || '', /(^|;\s*)seed=root(;|$)/, '/a request must carry the seeded root cookie');
+  // The cookie /a set is ingested and sent on the next request, alongside the seed.
+  assert.match(seen['/b'] || '', /(^|;\s*)seed=root(;|$)/, '/b request must still carry the seeded cookie');
+  assert.match(seen['/b'] || '', /(^|;\s*)sid=fromA(;|$)/, '/b request must carry the cookie /a set mid-crawl');
+  // The final session reflects everything the crawl accumulated.
+  assert.match(result.sessionCookie || '', /seed=root/);
+  assert.match(result.sessionCookie || '', /sid=fromA/);
+});
+
+test('session-aware crawl: no cookies means no Cookie header and an undefined sessionCookie (unchanged default behaviour)', async () => {
+  const seen: Array<string | undefined> = [];
+  const fetchFn = async (url: string, init: RequestInit) => {
+    seen.push((init.headers as Record<string, string> | undefined)?.Cookie);
+    return new Response('<html>ok</html>', { status: 200, headers: { 'content-type': 'text/html' } });
+  };
+  const result = await crawlSite(BASE, fetchFn as any, {
+    seedHtml: `<a href="/x">x</a>`,
+    maxPages: 3,
+    budgetMs: 2000,
+  });
+  assert.ok(seen.every((c) => c === undefined), 'no jar cookies => no Cookie header is attached');
+  assert.equal(result.sessionCookie, undefined, 'an empty session must be reported as undefined, not ""');
+});

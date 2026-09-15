@@ -41,6 +41,38 @@ export interface CrawlResult {
   pages: string[];
   targets: InjectableTarget[];
   captures: CrawlCapture[];
+  // The cookies the crawl accumulated in-session (as a "name=value; …" Cookie
+  // header), so the fuzzer and other post-crawl probes can stay in the same
+  // session the crawl established. Empty when the app set no cookies.
+  sessionCookie?: string;
+}
+
+// A minimal same-origin cookie jar for a session-aware crawl. The crawl is
+// single-origin, so cookie domain/path scoping is unnecessary; it just carries
+// name=value pairs forward and lets a later Set-Cookie overwrite an earlier one.
+// A cookie deleted via Max-Age=0 / an expired Expires is dropped so a logout
+// mid-crawl doesn't keep sending a dead session id.
+export class CookieJar {
+  private jar = new Map<string, string>();
+  ingest(setCookieLines: string[]): void {
+    for (const line of setCookieLines || []) {
+      const first = (line || "").split(";")[0];
+      const eq = first.indexOf("=");
+      if (eq <= 0) continue;
+      const name = first.slice(0, eq).trim();
+      const value = first.slice(eq + 1).trim();
+      if (!name) continue;
+      const deleted = /;\s*max-age\s*=\s*0\b/i.test(line) || /;\s*expires\s*=\s*thu, 01 jan 1970/i.test(line);
+      if (deleted) this.jar.delete(name);
+      else this.jar.set(name, value);
+    }
+  }
+  header(): string {
+    return [...this.jar.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
+  }
+  get size(): number {
+    return this.jar.size;
+  }
 }
 
 // Per-page cap on captured body text — the crawl is already bounded to a
@@ -55,6 +87,7 @@ export interface CrawlOptions {
   budgetMs?: number;
   concurrency?: number;
   seedHtml?: string; // root HTML already fetched by the scanner (avoids a re-fetch)
+  initialCookies?: string[]; // root Set-Cookie lines, to seed the session jar
 }
 
 const STATIC_ASSET_RE = /\.(png|jpe?g|gif|svg|webp|ico|css|js|mjs|cjs|map|woff2?|ttf|eot|otf|pdf|zip|gz|mp4|webm|mp3|wasm|avif)(?:$|\?)/i;
@@ -178,11 +211,18 @@ async function fetchWithTimeout(
   fetchFn: (url: string, init: RequestInit) => Promise<Response>,
   url: string,
   timeoutMs: number,
+  cookieHeader?: string,
 ): Promise<Response> {
   const ctl = new AbortController();
   const id = setTimeout(() => ctl.abort(), timeoutMs);
   try {
-    return await fetchFn(url, { method: "GET", signal: ctl.signal });
+    return await fetchFn(url, {
+      method: "GET",
+      signal: ctl.signal,
+      // Carry the crawl's accumulated session cookies. fetchFn (authedFetch in
+      // the scanner) merges init.headers over its base, so this rides along.
+      ...(cookieHeader ? { headers: { Cookie: cookieHeader } } : {}),
+    });
   } finally {
     clearTimeout(id);
   }
@@ -206,6 +246,12 @@ export async function crawlSite(
   const pages: string[] = [];
   const targets: InjectableTarget[] = [];
   const captures: CrawlCapture[] = [];
+  // Session-aware crawl: one cookie jar carried across every request, seeded with
+  // the root response's cookies (the session cookie most apps set on first
+  // contact), so pages that only render in-session are reached. Non-destructive —
+  // it only carries cookies on the GET crawl, never issues a state-changing request.
+  const jar = new CookieJar();
+  jar.ingest(opts.initialCookies || []);
   const queue: Array<{ url: string; depth: number }> = [{ url: stripFragment(rootUrl), depth: 0 }];
 
   const ingestHtml = (html: string, url: string, depth: number) => {
@@ -239,10 +285,16 @@ export async function crawlSite(
         try {
           const qp = paramsOf(url);
           if (qp.length) targets.push({ url, method: "GET", params: qp, source: "query" });
-          const res = await fetchWithTimeout(fetchFn, url, perRequestMs);
+          // Send the session accumulated so far. Reads the jar snapshot before
+          // the request; a batch runs concurrently, so mid-batch Set-Cookie
+          // updates land on the next batch — acceptable for a best-effort crawl,
+          // and the seeded root session (set before the loop) is the load-bearing one.
+          const res = await fetchWithTimeout(fetchFn, url, perRequestMs, jar.size ? jar.header() : undefined);
           const contentType = res.headers.get("content-type") || "";
           const setCookie: string[] =
             typeof (res.headers as any).getSetCookie === "function" ? (res.headers as any).getSetCookie() : [];
+          // Carry any session this page established forward to later requests.
+          if (setCookie.length) jar.ingest(setCookie);
           const text = await res.text().catch(() => "");
           // Captured regardless of content type — a JSON/plain-text endpoint
           // (e.g. /api/settings) never becomes an HTML "page" below, but its
@@ -257,5 +309,11 @@ export async function crawlSite(
     );
   }
 
-  return { pagesVisited: pages.length, pages, targets: dedupeTargets(targets), captures };
+  return {
+    pagesVisited: pages.length,
+    pages,
+    targets: dedupeTargets(targets),
+    captures,
+    sessionCookie: jar.size ? jar.header() : undefined,
+  };
 }
