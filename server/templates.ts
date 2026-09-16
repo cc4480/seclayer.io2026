@@ -735,13 +735,19 @@ const RAW_TEMPLATES: Template[] = [
         matchers: [
           { type: "status", status: [200] },
           // Bare "graphiql"/"GraphiQL" false-positived on multi-tenant
-          // catch-all hosts: github.com/graphiql is a real GitHub org/user by
-          // that name, a normal 200 whose page legitimately says "graphiql"
-          // dozens of times (nav, repo names, links). id="graphiql" is the
-          // actual GraphiQL app's DOM mount point (every real deployment ships
-          // it); "GraphQL Playground" and its CDN bundle name are specific to
-          // the sibling tool. None of these appear on an ordinary profile page.
-          { type: "word", words: ['id="graphiql"', "GraphQL Playground", "graphql-playground-react"], condition: "or" },
+          // catch-all hosts: github.com/graphiql and gitlab.com/graphiql are
+          // real user/group pages by that name. A plain substring check on
+          // id="graphiql" isn't enough either -- GitLab's own page template
+          // stamps the group slug into `data-page-type-id="graphiql"` and
+          // similar attributes, and "id=...graphiql..." is a substring of
+          // that too. The regex requires an actual `<div id="graphiql">`
+          // element (a negative lookbehind rules out `-id=` / `_id=` so a
+          // *-id="graphiql" data attribute on an unrelated tag can't match),
+          // which is genuinely only present in a real GraphiQL app shell.
+          {
+            type: "regex",
+            regex: "<div[^>]*(?<![\\w-])id=[\"']graphiql[\"']|GraphQL Playground|graphql-playground-react",
+          },
         ],
         matchersCondition: "and",
       },

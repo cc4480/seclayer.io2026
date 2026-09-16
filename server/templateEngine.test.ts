@@ -120,17 +120,28 @@ test('phpmyadmin template fires on a real login page, not on a multi-tenant catc
 });
 
 test('graphiql template fires on a real GraphiQL/Playground mount, not on a multi-tenant catch-all profile page', async () => {
-  // Regression for a live false positive: github.com/graphiql is a real
-  // GitHub org/user by that name -- "graphiql" appears dozens of times in
-  // ordinary profile-page content (nav, repo names, links), but the page
-  // never contains the app's actual DOM mount point or bundle reference.
+  // Regression for two live false positives:
+  //  - github.com/graphiql is a real GitHub org/user by that name --
+  //    "graphiql" appears dozens of times in ordinary profile-page content
+  //    (nav, repo names, links), but never the app's actual DOM mount point.
+  //  - gitlab.com/graphiql is likewise a real group page, and GitLab's own
+  //    template stamps the slug into `data-page-type-id="graphiql"` on the
+  //    <body> tag -- a naive substring check on `id="graphiql"` matches that
+  //    too, since it's a substring of `-type-id="graphiql"`. Only an actual
+  //    `<div id="graphiql">` element may fire this template.
   const tpl = TEMPLATES.find((t) => t.id === 'graphiql-exposed')!;
   const realGraphiql: any = async () =>
     new Response('<html><body><div id="graphiql">Loading...</div></body></html>', { status: 200, headers: { 'content-type': 'text/html' } });
+  const realGraphiqlOtherAttrsFirst: any = async () =>
+    new Response('<html><body><div class="app" id="graphiql">Loading...</div></body></html>', { status: 200, headers: { 'content-type': 'text/html' } });
   const githubOrgCatchAll: any = async () =>
     new Response('<title>graphiql · GitHub</title><body>graphiql graphiql/graphiql GraphiQL is here</body></html>', { status: 200, headers: { 'content-type': 'text/html' } });
+  const gitlabGroupCatchAll: any = async () =>
+    new Response('<body class="tab-width-8" data-group="graphiql" data-page-type-id="graphiql">graphiql</body>', { status: 200, headers: { 'content-type': 'text/html' } });
   assert.ok(await runTemplate(tpl, 'https://app.test', realGraphiql));
+  assert.ok(await runTemplate(tpl, 'https://app.test', realGraphiqlOtherAttrsFirst));
   assert.equal(await runTemplate(tpl, 'https://app.test', githubOrgCatchAll), null);
+  assert.equal(await runTemplate(tpl, 'https://app.test', gitlabGroupCatchAll), null);
 });
 
 test('shipped templates are well-formed', () => {
