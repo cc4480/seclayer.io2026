@@ -180,7 +180,12 @@ const RAW_TEMPLATES: Template[] = [
         path: "/phpmyadmin/",
         matchers: [
           { type: "status", status: [200] },
-          { type: "word", words: ["phpMyAdmin", "pma_username"], condition: "or" },
+          // "phpMyAdmin" alone false-positived on multi-tenant catch-all hosts:
+          // github.com/phpmyadmin/ is the real phpMyAdmin project's GitHub org
+          // page, a normal 200 whose body legitimately says "phpMyAdmin" a
+          // couple dozen times. pma_username is the login form's field name --
+          // a real login page has it, a profile/repo page never does.
+          { type: "word", words: ["pma_username"], condition: "or" },
         ],
         matchersCondition: "and",
       },
@@ -729,7 +734,14 @@ const RAW_TEMPLATES: Template[] = [
         path: "/graphiql",
         matchers: [
           { type: "status", status: [200] },
-          { type: "word", words: ["graphiql", "GraphQL Playground", "GraphiQL"], condition: "or" },
+          // Bare "graphiql"/"GraphiQL" false-positived on multi-tenant
+          // catch-all hosts: github.com/graphiql is a real GitHub org/user by
+          // that name, a normal 200 whose page legitimately says "graphiql"
+          // dozens of times (nav, repo names, links). id="graphiql" is the
+          // actual GraphiQL app's DOM mount point (every real deployment ships
+          // it); "GraphQL Playground" and its CDN bundle name are specific to
+          // the sibling tool. None of these appear on an ordinary profile page.
+          { type: "word", words: ['id="graphiql"', "GraphQL Playground", "graphql-playground-react"], condition: "or" },
         ],
         matchersCondition: "and",
       },

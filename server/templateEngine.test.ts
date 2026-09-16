@@ -105,6 +105,34 @@ test('netrc template regex matches machine login/password', async () => {
   assert.equal(await runTemplate(tpl, 'https://app.test', miss), null);
 });
 
+test('phpmyadmin template fires on a real login page, not on a multi-tenant catch-all profile page', async () => {
+  // Regression for a live false positive: github.com/phpmyadmin/ is the real
+  // phpMyAdmin project's GitHub org page -- a normal 200 whose body legitimately
+  // says "phpMyAdmin" two dozen times (org name, repo names, bio). Only the
+  // login form's actual field name (pma_username) may fire this template.
+  const tpl = TEMPLATES.find((t) => t.id === 'phpmyadmin-exposed')!;
+  const realLogin: any = async () =>
+    new Response('<form><input name="pma_username"><input name="pma_password"></form>', { status: 200, headers: { 'content-type': 'text/html' } });
+  const githubOrgCatchAll: any = async () =>
+    new Response('<title>phpMyAdmin · GitHub</title><body>phpMyAdmin phpMyAdmin/phpmyadmin phpMyAdmin Team</body>', { status: 200, headers: { 'content-type': 'text/html' } });
+  assert.ok(await runTemplate(tpl, 'https://app.test', realLogin));
+  assert.equal(await runTemplate(tpl, 'https://app.test', githubOrgCatchAll), null);
+});
+
+test('graphiql template fires on a real GraphiQL/Playground mount, not on a multi-tenant catch-all profile page', async () => {
+  // Regression for a live false positive: github.com/graphiql is a real
+  // GitHub org/user by that name -- "graphiql" appears dozens of times in
+  // ordinary profile-page content (nav, repo names, links), but the page
+  // never contains the app's actual DOM mount point or bundle reference.
+  const tpl = TEMPLATES.find((t) => t.id === 'graphiql-exposed')!;
+  const realGraphiql: any = async () =>
+    new Response('<html><body><div id="graphiql">Loading...</div></body></html>', { status: 200, headers: { 'content-type': 'text/html' } });
+  const githubOrgCatchAll: any = async () =>
+    new Response('<title>graphiql · GitHub</title><body>graphiql graphiql/graphiql GraphiQL is here</body></html>', { status: 200, headers: { 'content-type': 'text/html' } });
+  assert.ok(await runTemplate(tpl, 'https://app.test', realGraphiql));
+  assert.equal(await runTemplate(tpl, 'https://app.test', githubOrgCatchAll), null);
+});
+
 test('shipped templates are well-formed', () => {
   const cats = new Set(['DAST', 'SAST', 'IAST', 'SCA', 'EASM', 'RED_TEAM']);
   const ids = new Set<string>();
